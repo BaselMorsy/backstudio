@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logo Test - BackStudio</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            padding: 40px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section {
+            margin: 40px 0;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        h2 {
+            color: #c8a951;
+            margin-bottom: 20px;
+        }
+        .center {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            background: #0f2a1f;
+            border-radius: 8px;
+            position: relative;
+        }
+        .grid-bg {
+            background-image:
+                linear-gradient(rgba(200, 169, 81, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(200, 169, 81, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .centerline {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 2px;
+            background: rgba(255, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BackStudio Logo Symmetry Test</h1>
+
+        <div class="section">
+            <h2>Favicon (Static - {B/S})</h2>
+            <div class="center grid-bg">
+                <div class="centerline"></div>
+                <img src="/assets/favicon.svg" alt="Favicon" style="width: 200px; height: 200px;">
+            </div>
+            <p style="margin-top: 10px; text-align: center; color: #888;">
+                Red line shows center - check if logo is symmetric
+            </p>
+        </div>
+
+        <div class="section">
+            <h2>Animated Logo (Contracted State - {B/S})</h2>
+            <div class="center grid-bg" id="contracted-container">
+                <div class="centerline"></div>
+            </div>
+            <p style="margin-top: 10px; text-align: center; color: #888;">
+                Contracted state should be symmetric
+            </p>
+        </div>
+
+        <div class="section">
+            <h2>Animated Logo (Expanded State - BackStudio)</h2>
+            <div class="center grid-bg" id="expanded-container">
+                <div class="centerline"></div>
+            </div>
+            <p style="margin-top: 10px; text-align: center; color: #888;">
+                Expanded state with full text
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Create contracted state SVG
+        const contractedSVG = `
+<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <style>
+            .symbol { fill: none; stroke: #c8a951; stroke-width: 7; stroke-linecap: round; stroke-linejoin: miter; }
+            .bracket { fill: none; stroke: #c8a951; stroke-width: 7; stroke-linecap: round; }
+            .slash { fill: none; stroke: #f5f1e8; stroke-width: 7; stroke-linecap: round; }
+        </style>
+    </defs>
+    <g transform="translate(210, 60)">
+        <path d="M -45,-30 Q -50,-30 -50,-25 L -50,-10 Q -50,-5 -54,0 Q -50,5 -50,10 L -50,25 Q -50,30 -45,30" class="bracket" />
+        <g transform="translate(-24, 0)">
+            <line x1="0" y1="-30" x2="0" y2="30" class="symbol" />
+            <polyline points="10,-25 24,-15 10,-5" class="symbol" />
+            <polyline points="10,5 24,15 10,25" class="symbol" />
+        </g>
+        <line x1="-6" y1="30" x2="6" y2="-30" class="slash" />
+        <g transform="translate(24, 0)">
+            <polyline points="-10,-25 -24,-15 -10,-5" class="symbol" />
+            <polyline points="-24,5 -10,15 -24,25" class="symbol" />
+        </g>
+        <path d="M 45,-30 Q 50,-30 50,-25 L 50,-10 Q 50,-5 54,0 Q 50,5 50,10 L 50,25 Q 50,30 45,30" class="bracket" />
+    </g>
+</svg>`;
+
+        // Create expanded state SVG
+        const expandedSVG = `
+<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <style>
+            .symbol { fill: none; stroke: #c8a951; stroke-width: 7; stroke-linecap: round; stroke-linejoin: miter; }
+            .text { fill: #f5f1e8; font-family: "Didot", "Bodoni MT", "Playfair Display", "Libre Baskerville", serif; font-weight: 600; font-size: 60px; letter-spacing: -0.5px; }
+            .bracket { fill: none; stroke: #c8a951; stroke-width: 7; stroke-linecap: round; }
+        </style>
+    </defs>
+    <g transform="translate(210, 60)">
+        <path d="M -200,-30 Q -205,-30 -205,-25 L -205,-10 Q -205,-5 -209,0 Q -205,5 -205,10 L -205,25 Q -205,30 -200,30" class="bracket" />
+        <g transform="translate(-180, 0)">
+            <line x1="0" y1="-30" x2="0" y2="30" class="symbol" />
+            <polyline points="10,-25 24,-15 10,-5" class="symbol" />
+            <polyline points="10,5 24,15 10,25" class="symbol" />
+        </g>
+        <text x="-132" y="22" class="text">ack</text>
+        <g transform="translate(160, 0)">
+            <polyline points="-10,-25 -24,-15 -10,-5" class="symbol" />
+            <polyline points="-24,5 -10,15 -24,25" class="symbol" />
+            <text x="8" y="22" class="text">tudio</text>
+        </g>
+        <path d="M 200,-30 Q 205,-30 205,-25 L 205,-10 Q 205,-5 209,0 Q 205,5 205,10 L 205,25 Q 205,30 200,30" class="bracket" />
+    </g>
+</svg>`;
+
+        document.getElementById('contracted-container').innerHTML += contractedSVG;
+        document.getElementById('expanded-container').innerHTML += expandedSVG;
+    </script>
+</body>
+</html>

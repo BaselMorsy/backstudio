@@ -1,0 +1,66 @@
+"""{{ project.name }} - Database repository functions"""
+
+from typing import Optional, List
+from sqlalchemy.orm import Session
+
+from .models import {% for model in project.data_models %}{{ model.name|pascal_case }}{{ ", " if not loop.last else "" }}{% endfor %}
+
+{% for model in project.data_models %}
+
+# {{ model.name|pascal_case }} Repository Functions
+
+def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_data: dict) -> {{ model.name|pascal_case }}:
+    """Create a new {{ model.name }}"""
+    {{ model.name|snake_case }} = {{ model.name|pascal_case }}(**{{ model.name|snake_case }}_data)
+    db.add({{ model.name|snake_case }})
+    db.commit()
+    db.refresh({{ model.name|snake_case }})
+    return {{ model.name|snake_case }}
+
+
+def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
+    """Get {{ model.name }} by ID"""
+    {% set pk_field = model.fields|selectattr('primary_key')|first %}
+    {% if pk_field %}
+    return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id).first()
+    {%- else %}
+    return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id).first()
+    {%- endif %}
+
+
+{% for field in model.fields %}
+{% if field.unique and not field.primary_key %}
+def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: Session, {{ field.name }}: str) -> Optional[{{ model.name|pascal_case }}]:
+    """Get {{ model.name }} by {{ field.name }}"""
+    return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.{{ field.name }} == {{ field.name }}).first()
+
+
+{% endif %}
+{%- endfor %}
+
+def get_all_{{ model.name|snake_case }}s(db: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name|pascal_case }}]:
+    """Get all {{ model.name }}s with pagination"""
+    return db.query({{ model.name|pascal_case }}).offset(skip).limit(limit).all()
+
+
+def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:
+    """Update {{ model.name }}"""
+    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    if {{ model.name|snake_case }}:
+        for key, value in update_data.items():
+            setattr({{ model.name|snake_case }}, key, value)
+        db.commit()
+        db.refresh({{ model.name|snake_case }})
+    return {{ model.name|snake_case }}
+
+
+def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int) -> bool:
+    """Delete {{ model.name }}"""
+    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    if {{ model.name|snake_case }}:
+        db.delete({{ model.name|snake_case }})
+        db.commit()
+        return True
+    return False
+
+{% endfor %}

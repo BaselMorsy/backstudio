@@ -1,0 +1,90 @@
+"""{{ project.name }} - Dependency injection"""
+
+from fastapi import Depends, HTTPException, status, Header
+from sqlalchemy.orm import Session
+from typing import Optional
+from jose import jwt, JWTError
+from datetime import datetime, timedelta
+
+from database.base import get_db
+from config import settings
+{% if project.data_models %}
+from database.models import {% for model in project.data_models %}{{ model.name|pascal_case }}{{ ", " if not loop.last else "" }}{% endfor %}
+{% endif %}
+
+{% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
+# JWT Configuration
+SECRET_KEY = settings.JWT_SECRET_KEY
+ALGORITHM = settings.JWT_ALGORITHM
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Create JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str):
+    """Verify JWT token"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+
+{% endif %}
+
+{% if project.dependencies %}
+{% for dep in project.dependencies %}
+{% if dep.type == 'provider' and dep.name != 'get_db' %}
+
+{% if dep.is_async %}async {% endif %}def {{ dep.function_name }}(
+    {%- for param in dep.parameters|sort(attribute='required', reverse=true) %}
+    {{ param.name }}: {{ param.type }}{% if param.type == 'Session' %} = Depends(get_db){% elif param.default is defined and param.default is not none and param.default != '' %} = {{ param.default|python_value }}{% elif not param.required %} = None{% endif %}{{ "," if not loop.last else "" }}
+    {%- endfor %}
+) -> {{ dep.return_type or 'None' }}:
+    """
+    {{ dep.description or dep.name }}
+
+    Dependency provider for {{ dep.name }}.
+    """
+    # TODO: Implement {{ dep.function_name }}
+    raise NotImplementedError("{{ dep.function_name }} not yet implemented")
+
+{% elif dep.type == 'guard' %}
+
+{% if dep.is_async %}async {% endif %}def {{ dep.function_name }}(
+    {%- for param in dep.parameters|sort(attribute='required', reverse=true) %}
+    {{ param.name }}: {{ param.type }}{% if param.type == 'Session' %} = Depends(get_db){% elif param.default is defined and param.default is not none and param.default != '' %} = {{ param.default|python_value }}{% elif not param.required %} = None{% endif %}{{ "," if not loop.last else "" }}
+    {%- endfor %}
+) -> bool:
+    """
+    {{ dep.description or dep.name }}
+
+    Guard dependency for {{ dep.name }}.
+    Returns True if check passes, raises HTTPException otherwise.
+    """
+    # TODO: Implement {{ dep.function_name }}
+    raise NotImplementedError("{{ dep.function_name }} not yet implemented")
+
+{% endif %}
+{% endfor %}
+{% else %}
+
+# No custom dependencies defined
+# Add dependencies through the BackStudio API
+
+{% endif %}

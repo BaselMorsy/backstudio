@@ -1,0 +1,28 @@
+"""{{ service.name }} - Pydantic schemas"""
+
+from typing import Optional, List
+from pydantic import BaseModel, Field
+from datetime import datetime
+
+{% if service.schemas %}
+{% for schema in service.schemas %}
+
+class {{ schema.name }}({% if schema.base_schema %}{{ schema.base_schema }}{% else %}BaseModel{% endif %}):
+    """{{ schema.description or schema.name }}"""
+{% for field in schema.fields %}
+    {{ field.name }}: {% if not field.required %}Optional[{{ field.type }}]{% else %}{{ field.type }}{% endif %}{% if field.default is not none %} = {{ field.default|tojson }}{% elif not field.required %} = None{% endif %}{% if field.description %}  # {{ field.description }}{% endif %}
+
+{% endfor %}
+    class Config:
+        from_attributes = True
+{% endfor %}
+{% else %}
+# No schemas defined yet
+# Add schemas through the BackStudio API
+
+class BaseSchema(BaseModel):
+    """Base schema for {{ service.name }}"""
+
+    class Config:
+        from_attributes = True
+{% endif %}

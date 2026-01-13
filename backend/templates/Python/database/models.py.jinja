@@ -1,0 +1,144 @@
+"""{{ project.name }} - Database models"""
+
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, Text, JSON, ForeignKey, Table
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from .base import Base
+
+{% if project.relationships %}
+# Association tables for many-to-many relationships
+{% for rel in project.relationships %}
+{% if rel.cardinality == 'many-to-many' and rel.association_table %}
+{{ rel.association_table.table_name }} = Table(
+    '{{ rel.association_table.table_name }}',
+    Base.metadata,
+    Column('{{ rel.association_table.left_foreign_key.column }}', {{ get_sqlalchemy_type('integer') }}, ForeignKey('{{ rel.association_table.left_foreign_key.references }}'{% if rel.association_table.left_foreign_key.ondelete %}, ondelete='{{ rel.association_table.left_foreign_key.ondelete }}'{% endif %}), primary_key=True),
+    Column('{{ rel.association_table.right_foreign_key.column }}', {{ get_sqlalchemy_type('integer') }}, ForeignKey('{{ rel.association_table.right_foreign_key.references }}'{% if rel.association_table.right_foreign_key.ondelete %}, ondelete='{{ rel.association_table.right_foreign_key.ondelete }}'{% endif %}), primary_key=True)
+)
+
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% for model in project.data_models|sort(attribute='name') %}
+
+class {{ model.name|pascal_case }}(Base):
+    """{{ model.description or model.name + ' model' }}"""
+
+    __tablename__ = "{{ model.table_name }}"
+
+    # Fields
+{% for field in model.fields|sort(attribute='name') %}
+    {%- set is_fk = model.relationships and model.relationships|selectattr('foreign_key')|selectattr('foreign_key.column', 'equalto', field.name)|list|length > 0 -%}
+    {% if not is_fk %}
+    {% if field.primary_key %}
+    {{ field.name }} = Column({{ get_sqlalchemy_type(field.type) }}, primary_key=True, index=True{% if field.default %}, default={{ field.default|python_value }}{% endif %})
+    {% else %}
+    {{ field.name }} = Column(
+        {{ get_sqlalchemy_type(field.type) }}{% if field.max_length and field.type == 'string' %}({{ field.max_length }}){% endif %},
+{% if field.unique %}
+        unique=True,
+{% endif %}
+{% if not field.nullable %}
+        nullable=False,
+{% endif %}
+{% if field.default is not none %}
+        default={{ field.default|python_value }},
+{% endif %}
+    )
+    {% endif %}
+    {% endif %}
+{% endfor %}
+
+{% if model.relationships %}
+    # Foreign key columns (for relationships)
+{% for rel in model.relationships %}
+    {% if rel.cardinality == 'many-to-one' and rel.foreign_key and rel.source.model == model.name %}
+    {{ rel.foreign_key.column }} = Column(
+        {{ get_sqlalchemy_type('integer') }},
+        ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
+{% if not rel.foreign_key.nullable %}
+        nullable=False,
+{% endif %}
+{% if rel.foreign_key.unique %}
+        unique=True,
+{% endif %}
+    )
+    {% elif rel.cardinality == 'one-to-many' and rel.foreign_key and rel.target.model == model.name %}
+    {{ rel.foreign_key.column }} = Column(
+        {{ get_sqlalchemy_type('integer') }},
+        ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
+{% if not rel.foreign_key.nullable %}
+        nullable=False,
+{% endif %}
+{% if rel.foreign_key.unique %}
+        unique=True,
+{% endif %}
+    )
+    {% elif rel.cardinality == 'one-to-one' and rel.foreign_key and rel.foreign_key.model == model.name %}
+    {{ rel.foreign_key.column }} = Column(
+        {{ get_sqlalchemy_type('integer') }},
+        ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
+{% if not rel.foreign_key.nullable %}
+        nullable=False,
+{% endif %}
+        unique=True,
+    )
+    {% endif %}
+{% endfor %}
+
+    # Relationships
+{% for rel in model.relationships %}
+    {%- set is_source = rel.source.model == model.name -%}
+    {%- set this_side = rel.source if is_source else rel.target -%}
+    {%- set other_side = rel.target if is_source else rel.source -%}
+    {% if rel.cardinality == 'one-to-many' %}
+    {{ this_side.attribute }} = relationship(
+        "{{ other_side.model|pascal_case }}",
+        back_populates="{{ other_side.attribute }}",
+{% if this_side.lazy %}
+        lazy="{{ this_side.lazy }}",
+{% endif %}
+{% if is_source and rel.behavior and rel.behavior.cascade %}
+        cascade="{{ rel.behavior.cascade }}",
+{% endif %}
+{% if is_source and rel.behavior and rel.behavior.passive_deletes %}
+        passive_deletes=True,
+{% endif %}
+    )
+    {% elif rel.cardinality == 'many-to-one' %}
+    {{ this_side.attribute }} = relationship(
+        "{{ other_side.model|pascal_case }}",
+        back_populates="{{ other_side.attribute }}",
+{% if this_side.lazy %}
+        lazy="{{ this_side.lazy }}",
+{% endif %}
+    )
+    {% elif rel.cardinality == 'one-to-one' %}
+    {{ this_side.attribute }} = relationship(
+        "{{ other_side.model|pascal_case }}",
+        back_populates="{{ other_side.attribute }}",
+        uselist=False,
+{% if this_side.lazy %}
+        lazy="{{ this_side.lazy }}",
+{% endif %}
+    )
+    {% elif rel.cardinality == 'many-to-many' %}
+    {{ this_side.attribute }} = relationship(
+        "{{ other_side.model|pascal_case }}",
+        secondary={{ rel.association_table.table_name }},
+        back_populates="{{ other_side.attribute }}",
+{% if this_side.lazy %}
+        lazy="{{ this_side.lazy }}",
+{% endif %}
+    )
+    {% endif %}
+{% endfor %}
+{% endif %}
+
+    def __repr__(self):
+        {% set display_field = model.fields[0].name if model.fields else 'id' %}
+        return f"<{{ model.name|pascal_case }}({{ display_field }}={self.{{ display_field }}})>"
+
+{% endfor %}

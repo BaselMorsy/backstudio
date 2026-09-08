@@ -273,6 +273,18 @@ class CodeGenerator:
                 self._render_template("Python/rbac/dependency.py.jinja", context)
             )
 
+        # Alembic scaffolding (unconditional - every generated project gets migrations)
+        alembic_dir = output_dir / "alembic"
+        ensure_directory(alembic_dir / "versions")
+        self._write_file(
+            output_dir / "alembic.ini",
+            self._render_template("Python/alembic/alembic.ini.jinja", context)
+        )
+        self._write_file(
+            alembic_dir / "env.py",
+            self._render_template("Python/alembic/env.py.jinja", context)
+        )
+
         # Generate main application files
         self._write_file(
             output_dir / "config.py",

@@ -1,6 +1,7 @@
 """BackStudio CLI entry point."""
 
 import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -12,6 +13,21 @@ from backend.erd.visualize import render_html
 from backend.services.code_generator import CodeGenerator
 
 app = typer.Typer(name="backstudio", help="Generate FastAPI backends from a YAML ERD.")
+
+_MAX_SUBPROCESS_OUTPUT = 4000
+
+
+def _decode_and_truncate(output: object) -> str:
+    """Decode subprocess stdout/stderr (bytes or str) and cap it to a sane length."""
+    if not output:
+        return ""
+    text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
+    text = text.strip()
+    if not text:
+        return ""
+    if len(text) > _MAX_SUBPROCESS_OUTPUT:
+        text = text[:_MAX_SUBPROCESS_OUTPUT] + "\n... (truncated)"
+    return text + "\n"
 
 
 @app.callback(invoke_without_command=True)
@@ -87,11 +103,19 @@ def generate(
     if (codebase_dir / "alembic.ini").exists():
         try:
             subprocess.run(
-                ["alembic", "revision", "--autogenerate", "-m", "initial"],
+                [sys.executable, "-m", "alembic", "revision", "--autogenerate", "-m", "initial"],
                 cwd=codebase_dir,
                 check=True,
                 capture_output=True,
                 timeout=30,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = _decode_and_truncate(exc.stdout) + _decode_and_truncate(exc.stderr)
+            typer.secho(
+                f"Warning: could not auto-generate the initial Alembic migration "
+                f"(exit code {exc.returncode}). You can run it yourself once the "
+                f"database is reachable.\n{detail}",
+                fg=typer.colors.YELLOW,
             )
         except Exception as exc:  # best-effort: never fails `generate`
             typer.secho(

@@ -4,7 +4,6 @@ import re
 from typing import Any, Dict, List
 
 from backend.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
-from backend.schemas.data import ModelField
 
 AUTH_USER_FIELDS: List[Dict[str, Any]] = [
     {"name": "id", "type": "integer", "primary_key": True, "nullable": False},

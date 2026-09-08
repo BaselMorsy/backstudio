@@ -172,22 +172,26 @@ Diagram written to: examples/blog-diagram.html
 
 (Pass `-o path.html` to control the output path, `--no-open` to skip auto-opening the browser.)
 
-**3. Generate it.** Whenever `auth.enabled: true`, the JWT secret env var named in your ERD
-(`BLOG_JWT_SECRET` here) must be set first — set it *before* running `generate`, otherwise the
-codebase is still generated correctly, but the best-effort "create an initial migration for me"
-step fails with a `RuntimeError` (see [Troubleshooting](#troubleshooting)):
+**3. Generate it:**
 
 ```bash
-export BLOG_JWT_SECRET="dev-secret-change-me"          # macOS/Linux/Git Bash
-set BLOG_JWT_SECRET=dev-secret-change-me                # Windows cmd.exe
-$env:BLOG_JWT_SECRET = "dev-secret-change-me"             # Windows PowerShell
-
-backstudio generate examples/blog.yml --output workspace
-```
-```
+$ backstudio generate examples/blog.yml --output workspace
+Generated a random BLOG_JWT_SECRET for local development and wrote it to
+workspace/BlogAPI/codebase/.env. Replace it with a securely-managed secret before deploying.
 Generated at: workspace/BlogAPI/codebase
 Copy this directory into your project.
 ```
+
+You don't need to set anything by hand for a local first run: whenever `auth.enabled: true` and
+the JWT secret env var named in your ERD (`BLOG_JWT_SECRET` here) isn't already set,
+`generate` writes a fresh, cryptographically random one straight into
+`<codebase>/.env` — the generated `config.py` loads that file automatically, so the app, Alembic,
+and everything else just works. **Replace that value with your own securely-managed secret before
+deploying anywhere real** — treat it exactly like any other `.env`-committed credential (it's
+already covered by the generated project's `.gitignore`). If you'd rather supply your own value
+from the start, set the env var yourself *before* running `generate` and it's used as-is (a `.env`
+that already exists in a target directory is never overwritten, including across `--force`
+regenerations — see [Auth & RBAC in depth](#auth--rbac-in-depth)).
 
 That's it — `workspace/BlogAPI/codebase` is a complete, runnable FastAPI project. Jump to
 [Running the generated project](#running-the-generated-project) to start it, or keep reading for
@@ -353,13 +357,13 @@ and generation still succeeds. Prints `Generated at: <path>` on success.
 
 ## Full worked example (with real output)
 
-This is an actual transcript — every command below was run against `examples/blog.yml`. First,
-`backstudio generate` (with the JWT secret already exported, so the Alembic autogenerate step
-succeeds too):
+This is an actual transcript — every command below was run against `examples/blog.yml`, with no
+env vars set beforehand:
 
 ```
-$ export BLOG_JWT_SECRET="dev-secret-change-me"
 $ backstudio generate examples/blog.yml --output workspace
+Generated a random BLOG_JWT_SECRET for local development and wrote it to
+workspace/BlogAPI/codebase/.env. Replace it with a securely-managed secret before deploying.
 Generated at: workspace/BlogAPI/codebase
 Copy this directory into your project.
 ```
@@ -368,6 +372,8 @@ The generated tree:
 
 ```
 workspace/BlogAPI/codebase/
+├── .env                                # auto-generated random secret — see above
+├── .gitignore                          # ignores .env, __pycache__, *.db, venv/, ...
 ├── alembic.ini
 ├── alembic/
 │   ├── env.py
@@ -445,13 +451,17 @@ cd workspace/BlogAPI/codebase
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# whatever env vars your ERD's auth.jwt.secret_env_var / database config need, e.g.
+uvicorn server:app --reload
+```
+
+That's it if auth is enabled — the `.env` `generate` wrote already has a working (random, dev-only)
+JWT secret, and `config.py` loads it automatically. Override anything by editing `.env` directly,
+or by exporting a real env var (which always wins over `.env`):
+
+```bash
 # (macOS/Linux/Git Bash: export VAR=value | Windows cmd.exe: set VAR=value |
 #  Windows PowerShell: $env:VAR = "value"):
-export BLOG_JWT_SECRET="use-a-long-random-value-in-production"
-export DATABASE_URL="sqlite:///./blog.db"          # or a postgres/mysql URL
-
-uvicorn server:app --reload
+export DATABASE_URL="postgresql://user:pass@host:5432/blog_production"
 ```
 
 Then visit `http://localhost:8000/docs` for interactive Swagger docs covering every generated
@@ -473,8 +483,12 @@ alembic upgrade head
   subsequent registration gets no roles by default; assign roles to later users directly in your
   database (or add your own role-management endpoint on top of the generated code).
 - **JWT secret is required, not defaulted**: `config.py`'s `Settings` reads the env var you named
-  in `auth.jwt.secret_env_var` and **raises at startup** if it's unset — there is no insecure
-  built-in fallback secret. Set it before starting the server or running Alembic.
+  in `auth.jwt.secret_env_var` (via a `.env` file, or the real process environment — an exported
+  env var always takes priority over `.env`) and **raises at startup** if neither provides it —
+  there is no insecure built-in fallback secret. `backstudio generate` writes a random one to
+  `.env` for you on a project's first generation (see [Quick Start](#quick-start)); it's never
+  regenerated or overwritten on later `--force` regenerations, so treat that `.env` as the
+  project's real local secret from that point on — rotate it yourself if you want a new one.
 - **RBAC enforcement**: each generated CRUD route conditionally carries a
   `Depends(require_roles(...))` per action, resolved from (in order) the entity's own
   `endpoints.rbac` override, then `rbac.default_permissions`, then "any authenticated user" if
@@ -506,17 +520,18 @@ at runtime, never written into generated source.
   console script was installed into `.venv`, not onto your shell's PATH. Use `uv run backstudio
   ...`, or activate the venv first (`.venv\Scripts\activate.bat` on Windows,
   `source .venv/bin/activate` on macOS/Linux) — see [Installation](#installation).
-- **`RuntimeError: Required environment variable '...' is not set`** — set the env var named in
-  your ERD's `auth.jwt.secret_env_var` *before* running `backstudio generate` (so the best-effort
-  Alembic step can succeed too), and again before running the generated app or Alembic yourself
-  later (each new shell needs it set fresh — it isn't persisted anywhere). `export VAR=value` on
-  macOS/Linux/Git Bash, `set VAR=value` on Windows `cmd.exe`, `$env:VAR = "value"` on PowerShell.
+- **`RuntimeError: Required environment variable '...' is not set`** — this should be rare on a
+  fresh `backstudio generate` (it auto-writes a `.env` with a random secret for you), but it can
+  still happen if: you deleted `.env` from the generated project, you're running against a
+  *different* copy of the codebase than the one `.env` was written into, or you're setting a
+  different env var name than the one in `auth.jwt.secret_env_var`. Set it (in `.env`, or
+  `export VAR=value` / `set VAR=value` / `$env:VAR = "value"`) and re-run.
 - **`Warning: could not auto-generate the initial Alembic migration`** during `backstudio
-  generate`** — this is the best-effort autogenerate step failing (commonly: the JWT secret env
-  var wasn't set yet at generate-time, since `alembic/env.py` imports the same `config.py`). The
-  warning includes the underlying error. Generation itself still succeeded; export the right env
-  vars and run `alembic revision --autogenerate -m "initial"` yourself inside the generated
-  project once they're set.
+  generate`** — the best-effort autogenerate step failed for some other reason (commonly: no
+  reachable database for a non-sqlite `database.type`, or `alembic` unavailable in your
+  environment). The warning includes the underlying error. Generation itself still succeeded; fix
+  whatever the error names and run `alembic revision --autogenerate -m "initial"` yourself inside
+  the generated project.
 - **`ERD schema validation failed` / a specific "Entity '...' ..." error** from `validate` or
   `generate`** — the error names the offending entity, field, or role and the rule that was
   violated; fix the YAML and re-run `validate`.

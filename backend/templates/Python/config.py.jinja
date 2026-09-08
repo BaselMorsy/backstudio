@@ -1,7 +1,15 @@
 """{{ project.name }} - Configuration settings"""
 
 import os
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+# Load .env into the real process environment before anything below reads os.getenv() —
+# pydantic-settings' own env_file support (further down) only applies to fields resolved
+# through BaseSettings.__init__, not to values read eagerly via os.getenv() at import time
+# (like the JWT secret check below), so this explicit load is required for a .env file to
+# actually work for those.
+load_dotenv()
 
 {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
 
@@ -48,7 +56,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "{{ project.version }}"
 
     class Config:
-        env_file = ".env"
+        # No env_file here: load_dotenv() above already loads .env into the real
+        # process environment, which every field above reads via os.getenv()/
+        # _require_env(). Pydantic-settings' own env_file support re-parses .env
+        # independently and validates every key in it against a declared field name
+        # (rejecting anything else as "extra_forbidden" by default) — since the JWT
+        # secret's *field* is named JWT_SECRET_KEY but the ERD-configured .env *key*
+        # can be any name (e.g. BLOG_JWT_SECRET), that mismatch would break startup.
         case_sensitive = True
 
 

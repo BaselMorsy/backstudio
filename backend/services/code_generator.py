@@ -315,6 +315,10 @@ class CodeGenerator:
             output_dir / "README.md",
             self._render_template("Python/README.md.jinja", context)
         )
+        self._write_file(
+            output_dir / ".gitignore",
+            self._render_template("Python/gitignore.jinja", context)
+        )
 
 
     def _to_snake_case(self, text: str) -> str:

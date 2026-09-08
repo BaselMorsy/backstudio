@@ -24,6 +24,12 @@ dependencies = [
     "python-jose[cryptography]==3.3.0",
     "alembic==1.13.0",
     "sqlalchemy==2.0.23",
+    # Pinned explicitly (also in generated projects' requirements.txt): generated
+    # config.py calls load_dotenv() directly so a project's own .env file actually
+    # takes effect (see backend/templates/Python/config.py.jinja); needed here too
+    # since backend/tests/test_generated_project_runtime.py imports and runs
+    # generated code against this repo's own venv rather than a fresh install.
+    "python-dotenv==1.2.1",
 ]
 
 [project.scripts]

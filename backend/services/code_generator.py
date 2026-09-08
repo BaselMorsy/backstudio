@@ -257,6 +257,15 @@ class CodeGenerator:
                 self._render_template("Python/service/crud_routes.py.jinja", entity_context)
             )
 
+        # Auth service (JWT register/login/refresh/me)
+        if state.get('auth_enabled'):
+            auth_dir = output_dir / "auth"
+            ensure_directory(auth_dir)
+            (auth_dir / "__init__.py").touch()
+            self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))
+            self._write_file(auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context))
+            self._write_file(auth_dir / "routes.py", self._render_template("Python/auth/routes.py.jinja", context))
+
         # RBAC dependency (only meaningful once auth exists, enforced at the ERD validation layer)
         if state.get('rbac_enabled'):
             self._write_file(

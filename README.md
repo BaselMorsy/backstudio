@@ -3,476 +3,544 @@
 
   # BackStudio
 
-  **Visual Backend Code Generator - Build FastAPI backends through an intuitive UI**
+  **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
 
   [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
-  [![React](https://img.shields.io/badge/React-18.2+-blue.svg)](https://reactjs.org/)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
 
 ## Overview
 
-BackStudio is a powerful visual backend code generator that lets you design and build production-ready FastAPI backends through an intuitive web interface. Define your data models, services, endpoints, and dependencies visually, then generate clean, deterministic Python code ready for deployment.
+BackStudio's `backstudio` CLI reads a single YAML file describing your entities (an "ERD" —
+entity-relationship definition) and generates a complete, runnable FastAPI backend: SQLAlchemy
+models, generic repository functions, a full CRUD REST API per entity, an optional JWT auth
+service, role-based access control (RBAC), and Alembic migration scaffolding. No server to run,
+no UI to click through — write a YAML file, run one command, get a codebase.
 
-### Key Features
+This README is a full tutorial: installation, the ERD file format, every CLI command, a worked
+example with real output, and how to run what gets generated.
 
-- **Visual Design Interface** - Build your backend architecture through an intuitive React-based UI
-- **Model-First Approach** - Define database models with relationships, validations, and constraints
-- **Service Architecture** - Create modular services with custom business logic
-- **Endpoint Designer** - Configure REST API endpoints with proper HTTP methods, parameters, and schemas
-- **Dependency Injection** - Set up guards (auth/validation) and providers (data injection) visually
-- **Deterministic Code Generation** - Same specs = same code, guaranteed by SHA256 checksums
-- **Complete Specification Model**: Define data models, relationships, services, endpoints, middlewares, and dependencies
-- **Service-Oriented Architecture**: Generated code provides complete boilerplate - you only write service function bodies
-- **State Management**: Project state stored as JSON with checksum validation
-- **Template-Based**: Uses Jinja2 templates for flexible, customizable code generation
+> This repo also ships an older, UI-driven way to build backends (a React app talking to a REST
+> API) — see [Legacy: Visual UI](#legacy-visual-ui-unmaintained) at the bottom. The CLI documented
+> below is the actively maintained, tested path.
 
-- **Code Generation** - Generate clean, production-ready FastAPI code with proper structure
-- **Multiple Databases** - Support for PostgreSQL, MySQL, SQLite, and MongoDB
-- **JWT Authentication** - Built-in JWT auth with customizable token configuration
-- **API Documentation** - Auto-generated OpenAPI/Swagger docs
-- **MCP Server Support** - Extend functionality through Model Context Protocol
+### What you get from one YAML file
 
-## `backstudio` CLI
+- **SQLAlchemy models** — tables, columns, foreign keys, relationships (one-to-many, many-to-one,
+  one-to-one, many-to-many), all with correct types and constraints.
+- **A full CRUD REST API per entity** — `POST`/`GET`/`PUT`/`DELETE` routes wired to generic
+  repository functions, not stubs — the generated code works without you writing anything.
+- **JWT authentication** (optional) — `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/me`,
+  bcrypt password hashing, access/refresh token separation.
+- **RBAC** (optional) — declare roles once, restrict any CRUD action on any entity to specific
+  roles, globally or per-entity.
+- **Alembic migrations** — scaffolded and (best-effort) an initial migration generated for you.
+- **An HTML ER diagram** — visualize your entities and relationships before you generate anything.
 
-Alongside the visual web UI, this repo ships a `backstudio` CLI that generates a FastAPI backend
-directly from a single YAML file describing your entities (an "ERD" - entity-relationship
-definition) - no server, no clicking through a UI.
+## Prerequisites
 
-### Install
+- **Python 3.11** (this repo pins `>=3.11,<3.12`)
+- A package manager: [uv](https://docs.astral.sh/uv/) (recommended) or `pip`
+
+## Installation
 
 ```bash
-# uv (recommended)
+git clone <this-repo-url>
+cd backstudio
+
+# with uv (recommended)
 uv sync
 
-# pip
+# or with pip
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e .
 ```
 
-Either way, this installs a `backstudio` console script (see `[project.scripts]` in
-`pyproject.toml`).
+Either way this installs a `backstudio` console script (see `[project.scripts]` in
+`pyproject.toml`). Confirm it's working:
 
-### Commands
+```bash
+$ backstudio --help
+# (with uv, if you haven't activated the venv: `uv run backstudio --help`)
 
-| Command | What it does | Example |
-|---|---|---|
-| `validate` | Checks an ERD YAML file for schema and semantic errors (unknown relationship targets, RBAC roles, etc.) without generating anything. | `backstudio validate erd.yml` |
-| `visualize` | Renders an HTML entity-relationship diagram (Mermaid) for an ERD file and opens it in a browser. | `backstudio visualize erd.yml -o diagram.html` |
-| `generate` | Generates a complete, runnable FastAPI project (models, CRUD routes, auth, RBAC, Alembic migrations) from an ERD file. | `backstudio generate erd.yml --output workspace` |
+Usage: backstudio [OPTIONS] COMMAND [ARGS]...
 
-Run `backstudio --help` or `backstudio <command> --help` for full option lists.
+  Generate FastAPI backends from a YAML ERD.
 
-### Example ERD
+Commands:
+  generate   Generate a FastAPI backend from an ERD file.
+  validate   Validate an ERD file without generating anything.
+  visualize  Render an HTML ER diagram for the given ERD file.
+```
+
+Every command below assumes `backstudio` is on your PATH; prefix with `uv run` if you're using uv
+without activating its venv.
+
+## Quick Start
+
+Save this as `blog.yml` — a small blog API with two entities, a relationship, JWT auth, and RBAC
+(this exact file is also checked into the repo at [`examples/blog.yml`](examples/blog.yml)):
 
 ```yaml
 project:
   name: BlogAPI
   version: "1.0.0"
+  description: A small blog API demonstrating auth, RBAC, and relationships
 
 database:
   type: sqlite
   database_name: blog.db
 
 auth:
-  enabled: true          # adds /auth/register, /auth/login, /auth/refresh, /auth/me
+  enabled: true
+  jwt:
+    secret_env_var: BLOG_JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 60
+
+rbac:
+  enabled: true
+  roles: [admin, author, reader]
+  default_permissions:
+    read: [admin, author, reader]
+    list: [admin, author, reader]
+    create: [admin, author]
+    update: [admin, author]
+    delete: [admin]
 
 entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true, max_length: 100}
+
   - name: Post
     fields:
       - {name: id, type: integer, primary_key: true}
       - {name: title, type: string, max_length: 200}
       - {name: body, type: text}
+      - {name: published, type: boolean, default: false}
+    relationships:
+      - name: category
+        cardinality: many-to-one
+        target: Category
+        ondelete: SET NULL
+        nullable: true
+    endpoints:
+      rbac:
+        delete: [admin]     # only admins can delete a Post; create/update inherit
+                            # the global default_permissions above
 ```
 
-Running `backstudio generate blog.yml` produces a ready-to-run FastAPI project (SQLAlchemy
-models, Pydantic schemas, CRUD routes for `Post`, JWT auth routes, and an Alembic migration
-setup) under `workspace/BlogAPI/codebase`. When `auth.enabled: true`, the generated `config.py`
-requires the JWT secret env var (`JWT_SECRET` above, or whatever `auth.jwt.secret_env_var` names)
-to be set - export it (or put it in a `.env` file inside the generated project) before running
-the project or its Alembic migrations.
-
-## Architecture
-
-```
-BackStudio/
-├── backend/           # FastAPI code generation engine
-│   ├── api/          # REST API endpoints
-│   ├── schemas/      # Pydantic models
-│   ├── services/     # Business logic
-│   └── templates/    # Jinja2 code templates
-├── frontend/         # React UI for visual design
-│   ├── src/
-│   │   ├── components/  # React components
-│   │   ├── services/    # API clients
-│   │   └── utils/       # Helper functions
-├── mcp_server/       # Model Context Protocol server
-├── examples/         # Example projects
-└── workspace/        # Generated projects output
-```
-
-## Prerequisites
-
-Before you begin, ensure you have the following installed:
-
-- **Python 3.11 or higher** - [Download Python](https://www.python.org/downloads/)
-- **Node.js 16 or higher** - [Download Node.js](https://nodejs.org/)
-- **Package Manager** - Choose one:
-  - [uv](https://docs.astral.sh/uv/) (recommended for speed)
-  - pip (comes with Python)
-  - [Conda/Miniconda](https://docs.conda.io/en/latest/miniconda.html)
-
-### Optional
-- **Git** - For version control of generated projects
-- **Docker** - For containerizing generated backends
-
-## Quick Start
-
-### Option 1: Automated Setup (Recommended)
-
-#### Linux/macOS
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/BackStudio.git
-cd BackStudio
-
-# Run setup script (installs dependencies)
-chmod +x setup.sh
-./setup.sh
-
-# Start BackStudio
-./start.sh
-```
-
-#### Windows
-```cmd
-REM Clone the repository
-git clone https://github.com/yourusername/BackStudio.git
-cd BackStudio
-
-REM Run setup script
-setup.bat
-
-REM Start BackStudio
-start.bat
-```
-
-### Option 2: Manual Setup
-
-#### 1. Install Backend Dependencies
-
-**Using uv (fastest)**
-```bash
-cd BackStudio
-uv sync
-```
-
-**Using pip**
-```bash
-cd BackStudio
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r backend/requirements.txt
-```
-
-**Using conda**
-```bash
-cd BackStudio
-conda create -n backstudio python=3.11
-conda activate backstudio
-pip install -r backend/requirements.txt
-```
-
-#### 2. Install Frontend Dependencies
-```bash
-cd frontend
-npm install
-```
-
-#### 3. Start the Services
-
-**Terminal 1 - Backend**
-```bash
-# From project root
-uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-# Or with pip/conda: python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Terminal 2 - Frontend**
-```bash
-cd frontend
-npm run dev
-```
-
-### Access the Application
-
-- **Frontend UI**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **Alternative Docs**: http://localhost:8000/redoc
-
-## Usage Example
-
-### 1. Create a Project
+**1. Validate it** — catches schema and semantic errors (unknown relationship targets, bad role
+references, RBAC without auth, etc.) without generating anything:
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "MyBlogAPI",
-    "description": "A blog API with posts and comments",
-    "version": "1.0.0",
-    "framework": "fastapi"
-  }'
+$ backstudio validate examples/blog.yml
+OK: 2 entities, 1 relationships, auth=on, rbac=on
 ```
 
-Response includes project ID and initial checksum.
-
-### 2. Define Data Models
+**2. Visualize it** — renders a Mermaid ER diagram as a standalone HTML file and opens it in your
+browser:
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/{project_id}/models/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Post",
-    "table_name": "posts",
-    "fields": [
-      {"name": "id", "type": "integer", "primary_key": true},
-      {"name": "title", "type": "string", "max_length": 200},
-      {"name": "content", "type": "text"},
-      {"name": "created_at", "type": "datetime"}
-    ]
-  }'
+$ backstudio visualize examples/blog.yml
+Diagram written to: examples/blog-diagram.html
 ```
 
-### 3. Define Services
+(Pass `-o path.html` to control the output path, `--no-open` to skip auto-opening the browser.)
+
+**3. Generate it:**
 
 ```bash
-curl -X POST http://localhost:8000/api/projects/{project_id}/services/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "PostService",
-    "description": "Service for managing blog posts"
-  }'
+$ export BLOG_JWT_SECRET="dev-secret-change-me"   # required whenever auth.enabled: true — see below
+$ backstudio generate examples/blog.yml --output workspace
+Generated at: workspace/BlogAPI/codebase
+Copy this directory into your project.
 ```
 
-### 4. Configure Database
+That's it — `workspace/BlogAPI/codebase` is a complete, runnable FastAPI project. Jump to
+[Running the generated project](#running-the-generated-project) to start it, or keep reading for
+the full YAML reference and CLI options.
 
-```bash
-curl -X POST http://localhost:8000/api/projects/{project_id}/config/database/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "postgresql",
-    "host": "localhost",
-    "database_name": "myblog",
-    "pool_size": 10
-  }'
+## The ERD YAML format
+
+An ERD file has five top-level sections. Only `project` and `database` are required.
+
+### `project`
+
+```yaml
+project:
+  name: BlogAPI          # required — also the generated project's directory/package name
+  version: "1.0.0"        # optional, default "1.0.0"
+  description: "..."       # optional
 ```
 
-### 5. Generate Code
+### `database`
 
-```bash
-curl -X POST http://localhost:8000/api/projects/{project_id}/generate
+```yaml
+database:
+  type: sqlite            # required: postgresql | mysql | sqlite (mongodb/redis are rejected —
+                           # the generator only produces SQLAlchemy relational models)
+  database_name: blog.db  # required
+  host: localhost          # optional, default "localhost"
+  port: 5432                # optional
+  username: myuser            # optional
+  use_env_vars: true           # optional, default true
+  pool_size: 10                  # optional, default 10
+  echo: false                     # optional, default false — echo SQL to stdout
 ```
 
-### 6. Download Generated Code
+### `auth` (optional, default disabled)
 
-```bash
-curl -X GET http://localhost:8000/api/projects/{project_id}/download \
-  --output myblog.zip
+```yaml
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: BLOG_JWT_SECRET   # name of the env var holding your JWT signing secret
+    algorithm: HS256                    # default HS256
+    expiration_minutes: 30                # access-token lifetime; default 30
 ```
 
-## API Endpoints
+When enabled, a `User` entity is automatically added to your model (`id`, `email`,
+`password_hash`, `roles`, `is_active`, `created_at`, `updated_at`) and a full auth service is
+generated (`/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/me`) — see
+[Auth & RBAC in depth](#auth--rbac-in-depth) below. You can add your own extra fields to `User`
+by declaring an entity literally named `User` in `entities:` (see below); you cannot redeclare the
+reserved fields listed above.
 
-### Project Management
+### `rbac` (optional, default disabled — **requires `auth.enabled: true`**)
 
-- `GET /api/projects/` - List all projects
-- `POST /api/projects/` - Create new project
-- `GET /api/projects/{project_id}/` - Get project details
-- `PUT /api/projects/{project_id}/` - Update project
-- `DELETE /api/projects/{project_id}/` - Delete project
+```yaml
+rbac:
+  enabled: true
+  roles: [admin, author, reader]
+  default_permissions:            # optional — applied to every entity unless overridden
+    read: [admin, author, reader]
+    list: [admin, author, reader]
+    create: [admin, author]
+    update: [admin, author]
+    delete: [admin]
+```
 
-### Code Generation
+If you don't set `default_permissions` for an action, and an entity doesn't override it either,
+that action defaults to "any authenticated user" (all declared roles) when RBAC is on. Setting
+`rbac.enabled: true` without `auth.enabled: true` is rejected at validation time — RBAC needs a
+way to identify the current user.
 
-- `POST /api/projects/{project_id}/generate` - Generate codebase
-- `POST /api/projects/{project_id}/sync` - Sync with updated specs
-- `GET /api/projects/{project_id}/download` - Download as ZIP
-- `GET /api/projects/{project_id}/state` - Get JSON state
+### `entities`
 
-### Data Models
+```yaml
+entities:
+  - name: Post                      # required, PascalCase by convention
+    table_name: blog_posts           # optional, defaults to a pluralized snake_case of name
+    fields: [...]                      # see below
+    relationships: [...]                 # see below
+    endpoints: {...}                       # see below
+```
 
-- `GET /api/projects/{project_id}/models/` - List models
-- `POST /api/projects/{project_id}/models/` - Create model
-- `GET /api/projects/{project_id}/models/{model_id}/` - Get model
-- `PUT /api/projects/{project_id}/models/{model_id}/` - Update model
-- `DELETE /api/projects/{project_id}/models/{model_id}/` - Delete model
+#### `fields`
 
-### Relationships
+```yaml
+fields:
+  - name: id
+    type: integer          # string | integer | float | boolean | datetime | date | text | json | uuid
+    primary_key: true       # optional, default false
+    nullable: false           # optional, default true
+    unique: true                # optional, default false
+    index: true                   # optional, default false
+    max_length: 200                 # optional — only meaningful for type: string
+    default: 0                        # optional — a literal default value
+```
 
-- `GET /api/projects/{project_id}/models/{model_id}/relations/` - List relationships
-- `POST /api/projects/{project_id}/models/{model_id}/relations/` - Create relationship
-- `GET /api/projects/{project_id}/models/{model_id}/relations/{relation_id}/` - Get relationship
-- `PUT /api/projects/{project_id}/models/{model_id}/relations/{relation_id}/` - Update relationship
-- `DELETE /api/projects/{project_id}/models/{model_id}/relations/{relation_id}/` - Delete relationship
+#### `relationships`
 
-### Services
+One side declares the relationship; the other side is filled in automatically.
 
-- `GET /api/projects/{project_id}/services/` - List services
-- `POST /api/projects/{project_id}/services/` - Create service
-- `GET /api/projects/{project_id}/services/{service_id}/` - Get service
-- `PUT /api/projects/{project_id}/services/{service_id}/` - Update service
-- `DELETE /api/projects/{project_id}/services/{service_id}/` - Delete service
+```yaml
+relationships:
+  - name: category               # relationship name — also used to derive attribute/column
+                                    # names when two relationships target the same entity
+    cardinality: many-to-one       # one-to-many | many-to-one | one-to-one | many-to-many
+    target: Category                 # the other entity
+    attribute: my_category              # optional override for this side's attribute name
+    target_attribute: posts               # optional override for the other side's attribute name
+    foreign_key_column: category_id         # optional override for the FK column name
+    nullable: true                            # optional, default true
+    unique: false                               # optional, default false
+    ondelete: SET NULL                            # optional: CASCADE | SET NULL | RESTRICT | ...
+    lazy: selectin                                  # optional SQLAlchemy lazy-loading strategy
+    cascade: "all, delete-orphan"                     # optional SQLAlchemy cascade string
+    association_table: post_tags                        # optional table name, many-to-many only
+```
 
-### Middlewares
+An entity with two relationships to the same target (e.g. a `Message` with a `sender` and a
+`recipient`, both pointing at `Person`) is fully supported — attribute and column names are
+derived from each relationship's own `name`, and the loader raises a clear error if two
+relationships on the same entity would still collide.
 
-- `GET /api/projects/{project_id}/middlewares/` - List middlewares
-- `POST /api/projects/{project_id}/middlewares/` - Create middleware
+#### `endpoints`
 
-### Dependencies
+```yaml
+endpoints:
+  enabled: [create, list, read, update, delete]   # optional — subset of CRUD actions to generate;
+                                                     # default is all five
+  base_path: /posts                                 # optional override, default /{pluralized-name}
+  tags: [posts]                                        # optional OpenAPI tags, default [pluralized-name]
+  rbac:                                                  # optional, only meaningful when rbac.enabled
+    create: [admin]                                        # overrides rbac.default_permissions
+    delete: [admin]                                           # per action, per entity
+```
 
-- `GET /api/projects/{project_id}/dependencies/` - List dependencies
-- `POST /api/projects/{project_id}/dependencies/` - Create dependency
+## CLI commands reference
 
-### Configuration
+### `backstudio validate ERD_FILE`
 
-- `GET/POST/PUT /api/projects/{project_id}/config/database/` - Database config
-- `GET/POST/PUT /api/projects/{project_id}/config/framework/` - Framework config
-- `GET/POST/PUT /api/projects/{project_id}/config/security/` - Security config
+Parses and semantically validates the file (duplicate names, dangling relationship targets,
+unknown RBAC role references, `rbac.enabled` without `auth.enabled`, reserved `User` field
+collisions, disallowed database types, and more). Exits `0` and prints a one-line summary on
+success; exits `1` and prints the error on failure.
 
-## Project Structure
+### `backstudio visualize ERD_FILE [OPTIONS]`
+
+| Option | Description |
+|---|---|
+| `-o, --output PATH` | Output HTML path (default: `<erd-file-stem>-diagram.html` next to the source file) |
+| `--open` / `--no-open` | Open the diagram in a browser (default: `--open`) |
+
+### `backstudio generate ERD_FILE [OPTIONS]`
+
+| Option | Description |
+|---|---|
+| `--output PATH` | Workspace directory (default: `workspace`) |
+| `--force` | Overwrite an existing generated codebase at that path |
+
+Runs validation, translates the ERD, generates the full codebase under
+`<output>/<project.name>/codebase`, then makes a **best-effort** attempt to run
+`alembic revision --autogenerate -m "initial"` inside the generated project — if that fails (no
+reachable database, `alembic` not resolvable, etc.) a warning is printed with the underlying error
+and generation still succeeds. Prints `Generated at: <path>` on success.
+
+## Full worked example (with real output)
+
+This is an actual transcript — every command below was run against `examples/blog.yml`. First,
+`backstudio generate` (with the JWT secret already exported, so the Alembic autogenerate step
+succeeds too):
 
 ```
-BackStudio/
-├── backend/
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── routes.py           # All API endpoints
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── project.py          # Project schemas
-│   │   ├── data.py             # Data model schemas
-│   │   ├── service.py          # Service schemas
-│   │   ├── middleware.py       # Middleware schemas
-│   │   ├── dependency.py       # Dependency injection schemas
-│   │   └── configuration.py    # Configuration schemas
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── project_service.py  # Project state management
-│   │   └── code_generator.py   # Code generation logic
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── checksum.py         # Checksum computation
-│   │   ├── file_ops.py         # File operations
-│   │   └── id_generator.py     # ID generation
-│   ├── config/
-│   │   ├── __init__.py
-│   │   └── config.py           # Application configuration
-│   └── main.py                 # FastAPI application entry
-├── templates/                  # Jinja2 templates (future)
-├── workspace/                  # Generated projects
+$ export BLOG_JWT_SECRET="dev-secret-change-me"
+$ backstudio generate examples/blog.yml --output workspace
+Generated at: workspace/BlogAPI/codebase
+Copy this directory into your project.
+```
+
+The generated tree:
+
+```
+workspace/BlogAPI/codebase/
+├── alembic.ini
+├── alembic/
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/
+│       └── 8287127062cf_initial.py     # auto-generated by the best-effort step above
+├── auth/
+│   ├── routes.py                       # /auth/register /auth/login /auth/refresh /auth/me
+│   ├── schemas.py
+│   └── service.py
+├── categories/
+│   ├── routes.py                       # full CRUD for Category
+│   └── schemas.py
+├── posts/
+│   ├── routes.py                       # full CRUD for Post, RBAC-restricted delete
+│   └── schemas.py
+├── database/
+│   ├── base.py                         # engine, session, Base, get_db()
+│   ├── models.py                       # Category, Post, User (auto-injected — auth is on)
+│   └── repo.py                         # generic create/get/list/update/delete per entity
+├── rbac.py                             # require_roles() dependency factory
+├── config.py                           # Settings — reads DATABASE_URL, BLOG_JWT_SECRET, ...
+├── server.py                           # FastAPI app, mounts every router above
+├── dependencies.py
+├── middleware.py
 ├── requirements.txt
 └── README.md
 ```
 
-## Supported Frameworks
+Now drive the running application (this uses FastAPI's `TestClient`, but it's the same API you'd
+hit with `curl` against a real running server — see the next section):
 
-### FastAPI (Python)
-- Complete REST API structure
-- SQLAlchemy models with relationships
-- Pydantic schemas for validation
-- Service layer with async functions
-- Configuration via environment variables
+```
+>>> POST /auth/register -> 201
+{
+  "id": 1, "email": "alice@example.com",
+  "roles": ["admin", "author", "reader"],   # <- the FIRST registered user gets every declared
+  "is_active": true                          #    role automatically; see Auth & RBAC below
+}
 
-### Express.js (Node/JavaScript)
-- Express router setup
-- Mongoose/Sequelize models
-- Middleware configuration
-- Service modules
+>>> POST /auth/register (same email again) -> 400
+{"detail": "Email already registered"}
 
-### NestJS (Node/TypeScript)
-- Module-based architecture
-- TypeORM entities
-- DTOs and validation
-- Dependency injection
-- Guards and interceptors
+>>> POST /auth/login -> 200
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer"
+}
 
-### Next.js (React/TypeScript)
-- API routes
-- Server-side rendering setup
-- Type definitions
-- API client utilities
+>>> GET /auth/me  (Authorization: Bearer <access_token>) -> 200
+{"id": 1, "email": "alice@example.com", "roles": ["admin","author","reader"], "is_active": true}
 
-## Checksum System
+>>> POST /categories {"name": "Engineering"}  -> 201
+{"id": 1, "name": "Engineering"}
 
-Every project has a SHA256 checksum computed from its complete specification. This ensures:
+>>> POST /posts {"title": "Hello, BackStudio", "body": "Generated from an ERD.",
+                 "published": true, "category_id": 1}  -> 201
+{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true}
 
-1. **Determinism**: Same specs always produce same code
-2. **Verification**: Detect if specs have changed
-3. **Reproducibility**: Regenerate exact same codebase anytime
+>>> GET /posts  (with token) -> 200
+[{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true}]
 
-The checksum is computed from the normalized JSON state (excluding the checksum field itself), ensuring consistent results.
+>>> GET /posts  (no token) -> 401
+{"detail": "Not authenticated"}
 
-## Development Workflow
+>>> POST /auth/login (wrong password) -> 401
+{"detail": "Invalid email or password"}
+```
 
-1. **Define**: Use the API to define your project specifications
-2. **Generate**: Run code generation to create boilerplate
-3. **Implement**: Write service function bodies (the only code you write!)
-4. **Iterate**: Update specs and regenerate as needed
-5. **Download**: Get complete, runnable codebase
+## Running the generated project
 
-## Key Concepts
+```bash
+cd workspace/BlogAPI/codebase
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 
-### Data Models
-Define database schemas with fields, types, constraints, and relationships (one-to-many, many-to-many, etc.).
+# whatever env vars your ERD's auth.jwt.secret_env_var / database config need, e.g.:
+export BLOG_JWT_SECRET="use-a-long-random-value-in-production"
+export DATABASE_URL="sqlite:///./blog.db"          # or a postgres/mysql URL
 
-### Services
-Logical groupings of business logic. Each service contains:
-- **Schemas**: DTOs for request/response validation
-- **Functions**: Business logic with parameters and return types
-- **Endpoints**: HTTP routes that map to service functions
+uvicorn server:app --reload
+```
 
-### Middlewares
-Cross-cutting concerns like authentication, logging, rate limiting, etc.
+Then visit `http://localhost:8000/docs` for interactive Swagger docs covering every generated
+route. To apply migrations instead of relying on the app's own `init_db()` table-creation on
+startup:
 
-### Dependencies
-Dependency injection specifications for:
-- **Guards**: Decorator-level dependencies (e.g., auth guards)
-- **Providers**: Function argument dependencies (e.g., database session)
+```bash
+alembic upgrade head
+```
 
-### Configuration
-- **Database**: Connection settings, pool size, etc.
-- **Framework**: Language, framework version, async settings
-- **Security**: JWT settings, CORS origins, rate limiting
+## Auth & RBAC in depth
 
-## Future Enhancements
+- **Password hashing**: bcrypt via `passlib`. Plaintext passwords are never stored or compared.
+- **Tokens**: access tokens (short-lived, per `auth.jwt.expiration_minutes`) and refresh tokens
+  (7 days) are distinct — each carries a `type` claim (`"access"` / `"refresh"`) and each endpoint
+  rejects the wrong type, so a leaked access token can't be used to mint fresh refresh tokens.
+- **First-user bootstrap**: when RBAC is enabled, the very first user to register is granted every
+  declared role — otherwise nobody could ever pass an RBAC check on a fresh database. Every
+  subsequent registration gets no roles by default; assign roles to later users directly in your
+  database (or add your own role-management endpoint on top of the generated code).
+- **JWT secret is required, not defaulted**: `config.py`'s `Settings` reads the env var you named
+  in `auth.jwt.secret_env_var` and **raises at startup** if it's unset — there is no insecure
+  built-in fallback secret. Set it before starting the server or running Alembic.
+- **RBAC enforcement**: each generated CRUD route conditionally carries a
+  `Depends(require_roles(...))` per action, resolved from (in order) the entity's own
+  `endpoints.rbac` override, then `rbac.default_permissions`, then "any authenticated user" if
+  RBAC is on and neither is set.
 
-- [ ] More comprehensive Jinja2 templates for each framework
-- [ ] Database migration generation
-- [ ] API documentation generation (OpenAPI/Swagger)
-- [ ] Test generation
-- [ ] Docker configuration generation
-- [ ] CI/CD pipeline templates
-- [ ] Frontend integration templates
-- [ ] GraphQL support
-- [ ] WebSocket endpoint generation
+## Database configuration
+
+For local development, `type: sqlite` (as in the example above) needs nothing else — the
+generated project defaults `DATABASE_URL` to a local `.db` file if you don't set one. For
+PostgreSQL or MySQL:
+
+```yaml
+database:
+  type: postgresql
+  host: db.example.com
+  port: 5432
+  database_name: blog_production
+  username: blog_app
+```
+
+Then set `DATABASE_URL` yourself in the generated project's environment, e.g.
+`postgresql://blog_app:PASSWORD@db.example.com:5432/blog_production` — the ERD's `database:`
+block documents the connection *shape*, credentials are always supplied via environment variables
+at runtime, never written into generated source.
+
+## Troubleshooting
+
+- **`RuntimeError: Required environment variable '...' is not set`** — set the env var named in
+  your ERD's `auth.jwt.secret_env_var` before running the generated app or Alembic.
+- **`Warning: could not auto-generate the initial Alembic migration`** during `backstudio
+  generate`** — this is the best-effort autogenerate step failing (commonly: the JWT secret env
+  var wasn't set yet at generate-time, since `alembic/env.py` imports the same `config.py`). The
+  warning includes the underlying error. Generation itself still succeeded; export the right env
+  vars and run `alembic revision --autogenerate -m "initial"` yourself inside the generated
+  project once they're set.
+- **`ERD schema validation failed` / a specific "Entity '...' ..." error** from `validate` or
+  `generate`** — the error names the offending entity, field, or role and the rule that was
+  violated; fix the YAML and re-run `validate`.
+- **`rbac.enabled requires auth.enabled`** — RBAC has no way to identify the current user without
+  auth; set `auth.enabled: true` too.
+
+## Repository layout
+
+```
+backstudio/
+├── backend/
+│   ├── erd/              # YAML parsing (schema.py), validation (loader.py),
+│   │                        translation to the generation engine (translate.py),
+│   │                        HTML/Mermaid visualization (visualize.py)
+│   ├── cli/               # backstudio's Typer commands (main.py)
+│   ├── services/            # code_generator.py — the Jinja2-based generation engine
+│   ├── templates/Python/      # every Jinja2 template that produces generated-project files
+│   ├── schemas/                 # Pydantic models shared by the CLI and the legacy REST API
+│   └── api/                       # the legacy REST API (see Legacy: Visual UI below)
+├── examples/                # example ERD files, incl. blog.yml used throughout this README
+├── workspace/                 # `backstudio generate`'s default output directory
+├── frontend/                    # the legacy React UI (see below)
+└── mcp_server/                    # Model Context Protocol server for the legacy REST API
+```
+
+## Legacy: Visual UI (unmaintained)
+
+Before the `backstudio` CLI existed, this repo's only interface was a FastAPI backend
+(`backend/api/routes.py`, `backend/services/project_service.py`) paired with a React frontend
+(`frontend/`) where you built up a project's models/services/endpoints one REST call at a time
+(see `examples/example_project_generator.py` for what that looked like — roughly 1,100 lines of
+Python to describe a 6-model e-commerce API). It still runs, and shares the same underlying
+Jinja2 templates and `CodeGenerator` the CLI uses for the parts of the pipeline that predate the
+ERD/YAML approach (`database/models.py`, `database/repo.py`), but it is **not** part of this
+repo's test suite and receives no further development. If you want to try it anyway:
+
+```bash
+# Terminal 1
+uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2
+cd frontend && npm install && npm run dev
+```
+
+- Frontend UI: http://localhost:5173
+- Backend API + docs: http://localhost:8000/docs
+
+New projects should use the CLI documented above.
+
+## Checksum system
+
+Both the CLI and legacy paths use the same underlying `CodeGenerator`, which is deterministic —
+the same specification always produces the same generated code.
 
 ## Contributing
 
-Contributions are welcome! Areas for contribution:
-- Additional framework templates
-- Enhanced code generation logic
-- More sophisticated relationship handling
-- Template improvements
-- Documentation
+Contributions are welcome — templates, additional field/relationship coverage, documentation, and
+tests are all useful. See `docs/superpowers/specs/` and `docs/superpowers/plans/` for the design
+spec and implementation plan behind the `backstudio` CLI if you want the full rationale for how
+it's put together.
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues, questions, or suggestions, please open an issue on the project repository.
-
----
-
-**BackStudio** - Generate once, deploy anywhere. Same specs, same code, guaranteed.
+MIT License — see [LICENSE](LICENSE) for details.

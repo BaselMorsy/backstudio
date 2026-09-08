@@ -1,0 +1,47 @@
+project:
+  name: BlogAPI
+  version: "1.0.0"
+  description: A small blog API demonstrating auth, RBAC, and relationships
+
+database:
+  type: sqlite
+  database_name: blog.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: BLOG_JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 60
+
+rbac:
+  enabled: true
+  roles: [admin, author, reader]
+  default_permissions:
+    read: [admin, author, reader]
+    list: [admin, author, reader]
+    create: [admin, author]
+    update: [admin, author]
+    delete: [admin]
+
+entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true, max_length: 100}
+
+  - name: Post
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string, max_length: 200}
+      - {name: body, type: text}
+      - {name: published, type: boolean, default: false}
+    relationships:
+      - name: category
+        cardinality: many-to-one
+        target: Category
+        ondelete: SET NULL
+        nullable: true
+    endpoints:
+      rbac:
+        delete: [admin]

@@ -172,11 +172,19 @@ Diagram written to: examples/blog-diagram.html
 
 (Pass `-o path.html` to control the output path, `--no-open` to skip auto-opening the browser.)
 
-**3. Generate it:**
+**3. Generate it.** Whenever `auth.enabled: true`, the JWT secret env var named in your ERD
+(`BLOG_JWT_SECRET` here) must be set first — set it *before* running `generate`, otherwise the
+codebase is still generated correctly, but the best-effort "create an initial migration for me"
+step fails with a `RuntimeError` (see [Troubleshooting](#troubleshooting)):
 
 ```bash
-$ export BLOG_JWT_SECRET="dev-secret-change-me"   # required whenever auth.enabled: true — see below
-$ backstudio generate examples/blog.yml --output workspace
+export BLOG_JWT_SECRET="dev-secret-change-me"          # macOS/Linux/Git Bash
+set BLOG_JWT_SECRET=dev-secret-change-me                # Windows cmd.exe
+$env:BLOG_JWT_SECRET = "dev-secret-change-me"             # Windows PowerShell
+
+backstudio generate examples/blog.yml --output workspace
+```
+```
 Generated at: workspace/BlogAPI/codebase
 Copy this directory into your project.
 ```
@@ -437,7 +445,9 @@ cd workspace/BlogAPI/codebase
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# whatever env vars your ERD's auth.jwt.secret_env_var / database config need, e.g.:
+# whatever env vars your ERD's auth.jwt.secret_env_var / database config need, e.g.
+# (macOS/Linux/Git Bash: export VAR=value | Windows cmd.exe: set VAR=value |
+#  Windows PowerShell: $env:VAR = "value"):
 export BLOG_JWT_SECRET="use-a-long-random-value-in-production"
 export DATABASE_URL="sqlite:///./blog.db"          # or a postgres/mysql URL
 
@@ -497,7 +507,10 @@ at runtime, never written into generated source.
   ...`, or activate the venv first (`.venv\Scripts\activate.bat` on Windows,
   `source .venv/bin/activate` on macOS/Linux) — see [Installation](#installation).
 - **`RuntimeError: Required environment variable '...' is not set`** — set the env var named in
-  your ERD's `auth.jwt.secret_env_var` before running the generated app or Alembic.
+  your ERD's `auth.jwt.secret_env_var` *before* running `backstudio generate` (so the best-effort
+  Alembic step can succeed too), and again before running the generated app or Alembic yourself
+  later (each new shell needs it set fresh — it isn't persisted anywhere). `export VAR=value` on
+  macOS/Linux/Git Bash, `set VAR=value` on Windows `cmd.exe`, `$env:VAR = "value"` on PowerShell.
 - **`Warning: could not auto-generate the initial Alembic migration`** during `backstudio
   generate`** — this is the best-effort autogenerate step failing (commonly: the JWT secret env
   var wasn't set yet at generate-time, since `alembic/env.py` imports the same `config.py`). The

@@ -6,13 +6,13 @@ from typing import Any, Dict, List
 from backend.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
 
 AUTH_USER_FIELDS: List[Dict[str, Any]] = [
-    {"name": "id", "type": "integer", "primary_key": True, "nullable": False},
-    {"name": "email", "type": "string", "unique": True, "nullable": False, "max_length": 255},
-    {"name": "password_hash", "type": "string", "nullable": False, "max_length": 255},
+    {"name": "id", "type": "integer", "primary_key": True, "nullable": False, "default": None},
+    {"name": "email", "type": "string", "unique": True, "nullable": False, "max_length": 255, "default": None},
+    {"name": "password_hash", "type": "string", "nullable": False, "max_length": 255, "default": None},
     {"name": "roles", "type": "json", "nullable": False, "default": []},
     {"name": "is_active", "type": "boolean", "nullable": False, "default": True},
-    {"name": "created_at", "type": "datetime", "nullable": False},
-    {"name": "updated_at", "type": "datetime", "nullable": False},
+    {"name": "created_at", "type": "datetime", "nullable": False, "default": None},
+    {"name": "updated_at", "type": "datetime", "nullable": False, "default": None},
 ]
 
 
@@ -57,8 +57,8 @@ def _build_relationship(erd: ERDConfig, entity: EntitySpec, rel: RelationshipDec
     rel_dict: Dict[str, Any] = {
         "id": rel.name,
         "name": rel.name,
-        "cardinality": rel.cardinality,
-        "source": {"model": entity.name, "attribute": source_attribute, "lazy": rel.lazy},
+        "cardinality": rel.cardinality.value,
+        "source": {"model": entity.name, "attribute": source_attribute, "lazy": rel.lazy.value if rel.lazy else None},
         "target": {"model": rel.target, "attribute": target_attribute},
     }
 

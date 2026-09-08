@@ -275,3 +275,110 @@ def test_translate_field_types_are_strings_not_enums():
         assert isinstance(field["type"], str), (
             f"CRUD entity field {field['name']} type should be string, got {type(field['type']).__name__}"
         )
+
+
+def test_translate_relationship_enums_to_strings():
+    """Regression test: ensure Cardinality and LazyStrategy enums are serialized to strings.
+
+    This prevents a bug where rel.cardinality and rel.lazy enum instances would be embedded
+    in the relationship dict, causing Jinja templates to call str() on them (producing
+    "Cardinality.MANY_TO_ONE" instead of "many-to-one", or "LazyStrategy.SELECTIN" instead
+    of "selectin"), breaking SQLAlchemy relationship() call generation.
+    The fix is to use .value to extract the string representation.
+    """
+    from backend.schemas.data import LazyStrategy
+
+    # Create an ERDConfig with a relationship that has lazy set
+    erd = ERDConfig(
+        project=ProjectMeta(name="TestLazy", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="test.db"),
+        entities=[
+            EntitySpec(
+                name="Author",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(
+                        name="author_books",
+                        cardinality="one-to-many",
+                        target="Book",
+                        lazy="selectin"  # This will be parsed as LazyStrategy.SELECTIN
+                    )
+                ]
+            ),
+            EntitySpec(
+                name="Book",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]
+            ),
+        ]
+    )
+
+    state = translate(erd)
+
+    # Get the relationship from the state
+    rels = state["relationships"]
+    assert len(rels) > 0, "Should have at least one relationship"
+
+    rel = rels[0]
+
+    # Verify cardinality is a string, not an enum instance
+    assert isinstance(rel["cardinality"], str), (
+        f"cardinality should be string, got {type(rel['cardinality']).__name__}: {repr(rel['cardinality'])}"
+    )
+    assert rel["cardinality"] == "one-to-many", (
+        f"cardinality should be 'one-to-many', got {repr(rel['cardinality'])}"
+    )
+    assert not rel["cardinality"].startswith("Cardinality."), (
+        f"cardinality should not be enum repr: {repr(rel['cardinality'])}"
+    )
+
+    # Verify lazy is a string (or None if not set)
+    source = rel["source"]
+    assert isinstance(source["lazy"], (str, type(None))), (
+        f"lazy should be string or None, got {type(source['lazy']).__name__}: {repr(source['lazy'])}"
+    )
+    assert source["lazy"] == "selectin", (
+        f"lazy should be 'selectin', got {repr(source['lazy'])}"
+    )
+    assert not str(source["lazy"]).startswith("LazyStrategy."), (
+        f"lazy should not be enum repr: {repr(source['lazy'])}"
+    )
+
+
+def test_translate_auth_user_fields_have_defaults():
+    """Regression test: ensure all auth User fields have a 'default' key to prevent Jinja syntax errors.
+
+    When generating database/models.py, Jinja checks {% if field.default is not none %} before
+    emitting a default= kwarg. If the key is missing entirely, Jinja's Undefined sentinel is
+    not the literal None, so the check passes and Jinja tries to emit "default=<undefined>",
+    which becomes a syntax error. All AUTH_USER_FIELDS must have explicit 'default' keys.
+    """
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    # Find User model
+    user_model = next((m for m in state["data_models"] if m["name"] == "User"), None)
+    assert user_model is not None, "User model should be present when auth is enabled"
+
+    # Verify every field has a 'default' key
+    for field in user_model["fields"]:
+        assert "default" in field, (
+            f"User field '{field['name']}' must have 'default' key (even if None) to prevent Jinja syntax errors"
+        )
+
+    # Render models.py and verify syntax is valid
+    from backend.services.code_generator import CodeGenerator
+    import tempfile, ast
+
+    with tempfile.TemporaryDirectory() as tmp:
+        gen = CodeGenerator(output_dir=tmp)
+        codebase = gen.generate_project(state, force=True)
+        models_src = (codebase / 'database' / 'models.py').read_text(encoding='utf-8')
+
+        # Check for the problematic "default=," pattern
+        assert 'default=,' not in models_src, "Generated models.py should not contain 'default=,' syntax errors"
+
+        # Parse the file to verify syntax
+        try:
+            ast.parse(models_src)
+        except SyntaxError as e:
+            raise AssertionError(f"Generated models.py has syntax error: {e}")

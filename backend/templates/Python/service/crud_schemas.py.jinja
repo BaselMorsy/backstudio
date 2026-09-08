@@ -1,0 +1,39 @@
+"""{{ project.name }} - {{ entity.name }} schemas (auto-generated CRUD)"""
+
+from typing import Any, Optional
+from datetime import date, datetime
+from pydantic import BaseModel
+
+
+class {{ entity.name }}Create(BaseModel):
+    """Fields required to create a {{ entity.name }}."""
+{% for field in entity.fields %}
+{% if not field.primary_key %}
+    {{ field.name }}: {% if field.nullable %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %}{% if field.default is not none %} = {{ field.default|python_value }}{% elif field.nullable %} = None{% endif +%}
+{% endif %}
+{% endfor %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 %}
+    pass
+{% endif %}
+
+
+class {{ entity.name }}Update(BaseModel):
+    """Fields that may be updated on a {{ entity.name }} (all optional)."""
+{% for field in entity.fields %}
+{% if not field.primary_key %}
+    {{ field.name }}: Optional[{{ get_python_type(field.type) }}] = None
+{% endif %}
+{% endfor %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 %}
+    pass
+{% endif %}
+
+
+class {{ entity.name }}Response(BaseModel):
+    """{{ entity.name }} as returned by the API."""
+{% for field in entity.fields %}
+    {{ field.name }}: {% if field.nullable and not field.primary_key %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %} = None
+{% endfor %}
+
+    class Config:
+        from_attributes = True

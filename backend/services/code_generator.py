@@ -90,6 +90,7 @@ class CodeGenerator:
 
         # Register global functions for templates
         self.jinja_env.globals['get_sqlalchemy_type'] = self._get_sqlalchemy_type
+        self.jinja_env.globals['get_python_type'] = self._get_python_type
 
     def _get_sqlalchemy_type(self, field_type: str) -> str:
         """
@@ -113,6 +114,17 @@ class CodeGenerator:
             'uuid': 'String'  # UUID type would require additional import
         }
         return type_map.get(str(field_type).lower(), 'String')
+
+    def _get_python_type(self, field_type: str) -> str:
+        """Map FieldType enum values to Python/Pydantic type annotations."""
+        type_map = {
+            'string': 'str', 'integer': 'int', 'float': 'float', 'boolean': 'bool',
+            'datetime': 'datetime', 'date': 'date', 'text': 'str', 'json': 'Any', 'uuid': 'str',
+        }
+        # field_type may be a FieldType enum member (whose str() is "FieldType.X", not
+        # its value) or a plain string, depending on how the caller built the context.
+        value = field_type.value if hasattr(field_type, 'value') else field_type
+        return type_map.get(str(value).lower(), 'str')
 
     def _render_template(self, template_path: str, context: Dict[str, Any]) -> str:
         """
@@ -227,6 +239,22 @@ class CodeGenerator:
             self._write_file(
                 service_dir / "routes.py",
                 self._render_template("Python/service/routes.py.jinja", service_context)
+            )
+
+        # Generate auto-CRUD entity directories from an ERD (services list is separate/legacy)
+        for entity in state.get('crud_entities', []):
+            entity_dir = output_dir / entity['plural_snake']
+            ensure_directory(entity_dir)
+            (entity_dir / "__init__.py").touch()
+
+            entity_context = {'project': state, 'entity': entity}
+            self._write_file(
+                entity_dir / "schemas.py",
+                self._render_template("Python/service/crud_schemas.py.jinja", entity_context)
+            )
+            self._write_file(
+                entity_dir / "routes.py",
+                self._render_template("Python/service/crud_routes.py.jinja", entity_context)
             )
 
         # Generate main application files

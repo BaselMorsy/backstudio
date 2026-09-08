@@ -3,6 +3,23 @@
 import os
 from pydantic_settings import BaseSettings
 
+{% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
+
+def _require_env(var_name: str) -> str:
+    """Read a required env var, failing fast with a clear message if it's unset.
+
+    Used for secrets (e.g. the JWT signing key) that must never silently fall
+    back to a hardcoded, repo-visible default.
+    """
+    value = os.getenv(var_name)
+    if not value:
+        raise RuntimeError(
+            f"Required environment variable '{var_name}' is not set. "
+            "Set it (e.g. in a .env file) before starting the application."
+        )
+    return value
+{% endif %}
+
 
 class Settings(BaseSettings):
     """Application settings"""
@@ -15,10 +32,12 @@ class Settings(BaseSettings):
 
     {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
     # Security - JWT
-    JWT_SECRET_KEY: str = os.getenv(
-        "JWT_SECRET_KEY",
-        "change-this-secret-key-in-production-use-a-long-random-string"
-    )
+    #
+    # The secret is read from the env var named by the ERD's auth.jwt.secret_env_var
+    # ("{{ project.security_config.jwt_secret_env_var }}"). There is no hardcoded
+    # fallback secret: an unset env var fails fast at import time instead of silently
+    # signing tokens with a well-known, repo-visible default.
+    JWT_SECRET_KEY: str = _require_env("{{ project.security_config.jwt_secret_env_var }}")
     JWT_ALGORITHM: str = "{{ project.security_config.jwt_algorithm }}"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_expiration_minutes }}
     {% endif %}

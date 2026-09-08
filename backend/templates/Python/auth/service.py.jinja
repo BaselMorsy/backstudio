@@ -24,28 +24,47 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
     return pwd_context.verify(plain_password, password_hash)
 
 
-def _create_token(subject: str, expires_delta: timedelta) -> str:
+def _create_token(subject: str, expires_delta: timedelta, token_type: str) -> str:
     expire = datetime.utcnow() + expires_delta
     return jwt.encode(
-        {"sub": subject, "exp": expire},
+        {"sub": subject, "exp": expire, "type": token_type},
         settings.JWT_SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
 
 
 def create_access_token(user_id: int) -> str:
-    return _create_token(str(user_id), timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    return _create_token(str(user_id), timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), "access")
 
 
 def create_refresh_token(user_id: int) -> str:
-    return _create_token(str(user_id), timedelta(days=7))
+    return _create_token(str(user_id), timedelta(days=7), "refresh")
 
 
 def register_user(db: Session, email: str, password: str) -> User:
     existing = db.query(User).filter(User.email == email).first()
     if existing:
         raise ValueError("Email already registered")
-    user = User(email=email, password_hash=hash_password(password), roles=[], is_active=True)
+
+    {% if project.rbac_roles %}
+    # Bootstrap convention: RBAC locks every action behind declared roles, so with
+    # roles=[] nobody could ever access anything. The very first user registered
+    # is granted every declared role; every subsequent registration gets roles=[]
+    # (an admin/existing user must grant roles afterwards).
+    is_first_user = db.query(User).count() == 0
+    roles = {{ project.rbac_roles|tojson }} if is_first_user else []
+    {% else %}
+    roles = []
+    {% endif %}
+
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        roles=roles,
+        is_active=True,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -61,7 +80,7 @@ def authenticate_user(db: Session, email: str, password: str) -> User:
     return user
 
 
-def decode_token(token: str) -> int:
+def decode_token(token: str, expected_type: str = "access") -> int:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError:
@@ -69,11 +88,16 @@ def decode_token(token: str) -> int:
     subject = payload.get("sub")
     if subject is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+    if payload.get("type") != expected_type:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Expected a {expected_type} token",
+        )
     return int(subject)
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    user_id = decode_token(token)
+    user_id = decode_token(token, expected_type="access")
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")

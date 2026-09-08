@@ -119,3 +119,127 @@ database: {type: sqlite, database_name: d.db}
     )
     with pytest.raises(ERDValidationError, match="at least one entity"):
         load_erd(bad)
+
+
+def test_unassigned_entity_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services: []
+"""
+    )
+    with pytest.raises(ERDValidationError, match="not assigned to any service"):
+        load_erd(bad)
+
+
+def test_entity_assigned_to_two_services_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: a, entities: [Widget]}
+  - {name: b, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="assigned to multiple services"):
+        load_erd(bad)
+
+
+def test_service_referencing_unknown_entity_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget, Gadget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="references unknown entity 'Gadget'"):
+        load_erd(bad)
+
+
+def test_duplicate_service_names_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+  - {name: Gadget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: dup, entities: [Widget]}
+  - {name: dup, entities: [Gadget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="Duplicate service name"):
+        load_erd(bad)
+
+
+def test_user_service_with_extra_entities_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+  - {name: identity, entities: [User, Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="must be the only entity"):
+        load_erd(bad)
+
+
+def test_user_service_without_auth_enabled_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+  - {name: identity, entities: [User]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="auth.enabled is false"):
+        load_erd(bad)
+
+
+def test_user_service_renames_auth_module_without_error():
+    # valid_full.yml (updated in this task) does not rename auth; this constructs
+    # an inline-equivalent valid case directly to confirm the User-only exception works.
+    import tempfile
+    from pathlib import Path
+
+    content = """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+  - {name: identity, entities: [User]}
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "ok.yml"
+        path.write_text(content)
+        erd = load_erd(path)  # must not raise
+        assert erd.services[1].name == "identity"

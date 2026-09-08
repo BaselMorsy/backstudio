@@ -10,3 +10,7 @@ entities:
     fields:
       - {name: id, type: integer, primary_key: true}
       - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

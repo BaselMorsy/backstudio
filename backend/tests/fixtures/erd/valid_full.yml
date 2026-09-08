@@ -44,3 +44,7 @@ entities:
       rbac:
         create: [admin]
         delete: [admin]
+
+services:
+  - name: catalog
+    entities: [Category, Product]

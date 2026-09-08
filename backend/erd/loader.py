@@ -1,7 +1,7 @@
 """Load and validate a YAML ERD file into an ERDConfig."""
 
 from pathlib import Path
-from typing import Union
+from typing import Dict, List, Union
 
 import yaml
 from pydantic import ValidationError
@@ -87,6 +87,8 @@ def _validate_semantics(erd: ERDConfig) -> None:
                         f"unknown role(s): {', '.join(unknown)}"
                     )
 
+    _validate_services(erd)
+
     if erd.rbac.enabled:
         for action, roles in erd.rbac.default_permissions.items():
             unknown = sorted(set(roles) - set(erd.rbac.roles))
@@ -94,3 +96,58 @@ def _validate_semantics(erd: ERDConfig) -> None:
                 raise ERDValidationError(
                     f"rbac.default_permissions.{action} references unknown role(s): {', '.join(unknown)}"
                 )
+
+
+def _validate_services(erd: ERDConfig) -> None:
+    service_names = [s.name for s in erd.services]
+    dup_service_names = sorted({n for n in service_names if service_names.count(n) > 1})
+    if dup_service_names:
+        raise ERDValidationError(f"Duplicate service name(s): {', '.join(dup_service_names)}")
+
+    entity_names = {e.name for e in erd.entities if e.name != "User"}
+    assigned: Dict[str, List[str]] = {}
+    auth_services: List[str] = []
+
+    for svc in erd.services:
+        if "User" in svc.entities:
+            if not erd.auth.enabled:
+                raise ERDValidationError(
+                    f"Service '{svc.name}': references entity 'User', but auth.enabled is false "
+                    "(there is no auto-injected User entity to reference)"
+                )
+            if svc.entities != ["User"]:
+                raise ERDValidationError(
+                    f"Service '{svc.name}': the auth entity 'User' must be the only entity in its "
+                    f"service (found: {', '.join(svc.entities)})"
+                )
+            auth_services.append(svc.name)
+            continue
+
+        for ent_name in svc.entities:
+            if ent_name not in entity_names:
+                raise ERDValidationError(
+                    f"Service '{svc.name}': references unknown entity '{ent_name}'"
+                )
+            assigned.setdefault(ent_name, []).append(svc.name)
+
+    if len(auth_services) > 1:
+        raise ERDValidationError(
+            f"Entity 'User' is assigned to multiple services: {', '.join(sorted(auth_services))}"
+        )
+
+    unassigned = sorted(entity_names - set(assigned.keys()))
+    if unassigned:
+        raise ERDValidationError(
+            f"Entity(ies) not assigned to any service: {', '.join(unassigned)} — every entity "
+            "must belong to exactly one service"
+        )
+
+    multiply_assigned = {name: svcs for name, svcs in assigned.items() if len(svcs) > 1}
+    if multiply_assigned:
+        details = "; ".join(
+            f"'{name}' in ({', '.join(svcs)})" for name, svcs in sorted(multiply_assigned.items())
+        )
+        raise ERDValidationError(
+            f"Entity(ies) assigned to multiple services: {details} — each entity must belong to "
+            "exactly one service"
+        )

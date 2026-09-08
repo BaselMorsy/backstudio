@@ -59,3 +59,9 @@ entities:
       - name: product
         cardinality: many-to-one
         target: Product
+
+services:
+  - name: catalog
+    entities: [Category, Product]
+  - name: ordering
+    entities: [Order]

@@ -1,0 +1,12 @@
+project:
+  name: Demo
+
+database:
+  type: sqlite
+  database_name: demo.db
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}

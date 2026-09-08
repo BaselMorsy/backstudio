@@ -105,7 +105,7 @@ def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
     declared = next((e for e in erd.entities if e.name == "User"), None)
     fields = [dict(f) for f in AUTH_USER_FIELDS]
     if declared:
-        fields.extend(f.model_dump() for f in declared.fields)
+        fields.extend(f.model_dump(mode='json') for f in declared.fields)
     return {"name": "User", "table_name": "users", "fields": fields, "relationships": []}
 
 
@@ -131,7 +131,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         entity.name: {
             "name": entity.name,
             "table_name": _table_name(erd, entity.name),
-            "fields": [f.model_dump() for f in entity.fields],
+            "fields": [f.model_dump(mode='json') for f in entity.fields],
             "relationships": [],
         }
         for entity in entities
@@ -161,7 +161,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "tags": entity.endpoints.tags or [plural_snake],
             "enabled_actions": entity.endpoints.enabled,
             "rbac": _resolve_rbac(erd, entity),
-            "fields": [f.model_dump() for f in entity.fields],
+            "fields": [f.model_dump(mode='json') for f in entity.fields],
         })
 
     security_config = None
@@ -184,7 +184,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "services": [],
         "middlewares": [],
         "dependencies": [],
-        "database_config": erd.database.model_dump(),
+        "database_config": erd.database.model_dump(mode='json'),
         "security_config": security_config,
         "crud_entities": crud_entities,
         "auth_enabled": erd.auth.enabled,

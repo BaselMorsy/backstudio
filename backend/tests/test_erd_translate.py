@@ -233,3 +233,45 @@ def test_translate_many_to_many_cardinality():
 
     # Relationship should appear on both sides
     assert rel in tag_rels, "Relationship should appear on both Author and Tag"
+
+
+def test_translate_field_types_are_strings_not_enums():
+    """Regression test: ensure FieldType enums are serialized to strings, not enum instances.
+
+    This prevents a critical bug where Pydantic v2's default mode='python' would produce
+    FieldType enum instances (e.g. FieldType.FLOAT), which then serialize as "fieldtype.float"
+    when str() is called, breaking SQLAlchemy type mapping in _get_sqlalchemy_type().
+    The fix is to use model_dump(mode='json') to serialize enums to their string values.
+    """
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    # Check Product model fields
+    product_model = next(m for m in state["data_models"] if m["name"] == "Product")
+    for field in product_model["fields"]:
+        assert isinstance(field["type"], str), (
+            f"Field {field['name']} type should be a string, not {type(field['type']).__name__}: {repr(field['type'])}"
+        )
+        # Verify no enum repr in the string
+        assert not str(field["type"]).lower().startswith("fieldtype."), (
+            f"Field {field['name']} type should not be enum repr: {field['type']}"
+        )
+
+    # Verify a specific non-string type is correct
+    id_field = next(f for f in product_model["fields"] if f["name"] == "id")
+    assert id_field["type"] == "integer", f"id should be 'integer', got {repr(id_field['type'])}"
+
+    # Verify database type is also a string, not an enum
+    assert isinstance(state["database_config"]["type"], str), (
+        f"database type should be string, got {type(state['database_config']['type']).__name__}"
+    )
+    assert state["database_config"]["type"] == "postgresql", (
+        f"database type should be 'postgresql', got {repr(state['database_config']['type'])}"
+    )
+
+    # Check crud_entities fields as well
+    product_entity = next(e for e in state["crud_entities"] if e["name"] == "Product")
+    for field in product_entity["fields"]:
+        assert isinstance(field["type"], str), (
+            f"CRUD entity field {field['name']} type should be string, got {type(field['type']).__name__}"
+        )

@@ -1,8 +1,10 @@
 """Translate a validated ERDConfig into the state dict CodeGenerator.generate_project expects."""
 
 import re
+from collections import Counter
 from typing import Any, Dict, List
 
+from backend.erd.loader import ERDValidationError
 from backend.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
 
 AUTH_USER_FIELDS: List[Dict[str, Any]] = [
@@ -37,22 +39,41 @@ def _table_name(erd: ERDConfig, entity_name: str) -> str:
     return _pluralize(entity_name)
 
 
-def _build_relationship(erd: ERDConfig, entity: EntitySpec, rel: RelationshipDecl) -> Dict[str, Any]:
+def _build_relationship(
+    erd: ERDConfig, entity: EntitySpec, rel: RelationshipDecl, use_name_basis: bool
+) -> Dict[str, Any]:
+    """Build the relationship dict for one declared relationship.
+
+    `use_name_basis` is True when `entity` declares more than one relationship
+    targeting `rel.target` (e.g. Message.sender and Message.recipient both
+    targeting Person). In that case the generic target-derived attribute/FK
+    names (which don't incorporate `rel.name` at all) would collide across the
+    two relationships, silently overwriting one in the generated SQLAlchemy
+    class. When ambiguous, `rel.name` becomes the basis for every derived name
+    instead, keeping both relationships distinct.
+    """
     entity_table = _table_name(erd, entity.name)
     target_table = _table_name(erd, rel.target)
+    name_basis = _snake_case(rel.name)
 
     if rel.cardinality == "one-to-many":
-        source_attribute = rel.attribute or _pluralize(rel.target)
-        target_attribute = rel.target_attribute or _snake_case(entity.name)
+        source_attribute = rel.attribute or (name_basis if use_name_basis else _pluralize(rel.target))
+        target_attribute = rel.target_attribute or (name_basis if use_name_basis else _snake_case(entity.name))
     elif rel.cardinality == "many-to-one":
-        source_attribute = rel.attribute or _snake_case(rel.target)
-        target_attribute = rel.target_attribute or _pluralize(entity.name)
+        source_attribute = rel.attribute or (name_basis if use_name_basis else _snake_case(rel.target))
+        target_attribute = rel.target_attribute or (
+            f"{name_basis}_{_pluralize(entity.name)}" if use_name_basis else _pluralize(entity.name)
+        )
     elif rel.cardinality == "one-to-one":
-        source_attribute = rel.attribute or _snake_case(rel.target)
-        target_attribute = rel.target_attribute or _snake_case(entity.name)
+        source_attribute = rel.attribute or (name_basis if use_name_basis else _snake_case(rel.target))
+        target_attribute = rel.target_attribute or (
+            f"{name_basis}_{_snake_case(entity.name)}" if use_name_basis else _snake_case(entity.name)
+        )
     else:  # many-to-many
-        source_attribute = rel.attribute or _pluralize(rel.target)
-        target_attribute = rel.target_attribute or _pluralize(entity.name)
+        source_attribute = rel.attribute or (name_basis if use_name_basis else _pluralize(rel.target))
+        target_attribute = rel.target_attribute or (
+            f"{name_basis}_{_pluralize(entity.name)}" if use_name_basis else _pluralize(entity.name)
+        )
 
     rel_dict: Dict[str, Any] = {
         "id": rel.name,
@@ -63,7 +84,11 @@ def _build_relationship(erd: ERDConfig, entity: EntitySpec, rel: RelationshipDec
     }
 
     if rel.cardinality == "many-to-many":
-        table_name = rel.association_table or f"{_snake_case(entity.name)}_{_snake_case(rel.target)}"
+        default_table_name = (
+            f"{_snake_case(entity.name)}_{name_basis}" if use_name_basis
+            else f"{_snake_case(entity.name)}_{_snake_case(rel.target)}"
+        )
+        table_name = rel.association_table or default_table_name
         rel_dict["association_table"] = {
             "table_name": table_name,
             "left_foreign_key": {
@@ -81,11 +106,11 @@ def _build_relationship(erd: ERDConfig, entity: EntitySpec, rel: RelationshipDec
 
     if rel.cardinality == "one-to-many":
         fk_model = rel.target
-        fk_column = rel.foreign_key_column or f"{_snake_case(entity.name)}_id"
+        fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(entity.name)}_id")
         fk_references = f"{entity_table}.id"
     else:  # many-to-one or one-to-one: this entity owns the FK column
         fk_model = entity.name
-        fk_column = rel.foreign_key_column or f"{_snake_case(rel.target)}_id"
+        fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(rel.target)}_id")
         fk_references = f"{target_table}.id"
 
     rel_dict["foreign_key"] = {
@@ -99,6 +124,41 @@ def _build_relationship(erd: ERDConfig, entity: EntitySpec, rel: RelationshipDec
     if rel.cascade:
         rel_dict["behavior"] = {"cascade": rel.cascade}
     return rel_dict
+
+
+def _validate_relationship_uniqueness(entity_name: str, rels: List[Dict[str, Any]]) -> None:
+    """Raise if two relationships attached to `entity_name` would derive the same
+    attribute name or the same FK column name on that entity - better to fail
+    loudly at translation time than silently drop/overwrite one in the generated
+    SQLAlchemy class.
+    """
+    seen_attrs: Dict[str, str] = {}
+    seen_fks: Dict[str, str] = {}
+    for rel_dict in rels:
+        attribute = (
+            rel_dict["source"]["attribute"] if rel_dict["source"]["model"] == entity_name
+            else rel_dict["target"]["attribute"]
+        )
+        prior = seen_attrs.get(attribute)
+        if prior is not None and prior != rel_dict["name"]:
+            raise ERDValidationError(
+                f"Entity '{entity_name}': relationships '{prior}' and '{rel_dict['name']}' both derive the "
+                f"attribute name '{attribute}'. Set an explicit 'attribute'/'target_attribute' on one of them "
+                "to disambiguate."
+            )
+        seen_attrs[attribute] = rel_dict["name"]
+
+        fk = rel_dict.get("foreign_key")
+        if fk and fk["model"] == entity_name:
+            column = fk["column"]
+            prior_fk = seen_fks.get(column)
+            if prior_fk is not None and prior_fk != rel_dict["name"]:
+                raise ERDValidationError(
+                    f"Entity '{entity_name}': relationships '{prior_fk}' and '{rel_dict['name']}' both derive "
+                    f"the foreign key column '{column}'. Set an explicit 'foreign_key_column' on one of them "
+                    "to disambiguate."
+                )
+            seen_fks[column] = rel_dict["name"]
 
 
 def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
@@ -142,13 +202,18 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
 
     relationships: List[Dict[str, Any]] = []
     for entity in entities:
+        target_counts = Counter(rel.target for rel in entity.relationships)
         for rel in entity.relationships:
-            rel_dict = _build_relationship(erd, entity, rel)
+            use_name_basis = target_counts[rel.target] > 1
+            rel_dict = _build_relationship(erd, entity, rel, use_name_basis)
             relationships.append(rel_dict)
             if entity.name in data_models:
                 data_models[entity.name]["relationships"].append(rel_dict)
             if rel.target in data_models:
                 data_models[rel.target]["relationships"].append(rel_dict)
+
+    for model_name, model in data_models.items():
+        _validate_relationship_uniqueness(model_name, model["relationships"])
 
     crud_entities: List[Dict[str, Any]] = []
     for entity in entities:

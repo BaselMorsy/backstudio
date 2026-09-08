@@ -94,3 +94,28 @@ def test_invalid_yaml_raises(tmp_path):
     bad.write_text("project: [unterminated")
     with pytest.raises(ERDValidationError, match="Invalid YAML"):
         load_erd(bad)
+
+
+def test_empty_entities_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities: []
+"""
+    )
+    with pytest.raises(ERDValidationError, match="at least one entity"):
+        load_erd(bad)
+
+
+def test_missing_entities_key_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="at least one entity"):
+        load_erd(bad)

@@ -1,3 +1,5 @@
+import pytest
+
 from backend.erd.loader import load_erd
 from backend.erd.translate import translate
 from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, EndpointSpec
@@ -233,6 +235,106 @@ def test_translate_many_to_many_cardinality():
 
     # Relationship should appear on both sides
     assert rel in tag_rels, "Relationship should appear on both Author and Tag"
+
+
+def test_translate_two_relationships_to_same_target_stay_distinct():
+    """Regression test: Message has both a 'sender' and a 'recipient' many-to-one
+    relationship, both targeting Person. Before the fix, both derived their
+    attribute name and FK column purely from the target ('person'/'person_id'),
+    so the second silently overwrote the first in the generated SQLAlchemy class.
+    Both relationships must now survive translation with distinct names.
+    """
+    erd = ERDConfig(
+        project=ProjectMeta(name="Messenger", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="messenger.db"),
+        entities=[
+            EntitySpec(
+                name="Person",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+            EntitySpec(
+                name="Message",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="sender", cardinality="many-to-one", target="Person"),
+                    RelationshipDecl(name="recipient", cardinality="many-to-one", target="Person"),
+                ],
+            ),
+        ],
+    )
+
+    state = translate(erd)
+
+    message_rels = next(m for m in state["data_models"] if m["name"] == "Message")["relationships"]
+    assert len(message_rels) == 2
+
+    sender_rel = next(r for r in message_rels if r["name"] == "sender")
+    recipient_rel = next(r for r in message_rels if r["name"] == "recipient")
+
+    # Distinct attribute names on Message.
+    assert sender_rel["source"]["attribute"] != recipient_rel["source"]["attribute"]
+    assert sender_rel["source"]["attribute"] == "sender"
+    assert recipient_rel["source"]["attribute"] == "recipient"
+
+    # Distinct FK columns on Message.
+    assert sender_rel["foreign_key"]["column"] != recipient_rel["foreign_key"]["column"]
+    assert sender_rel["foreign_key"]["column"] == "sender_id"
+    assert recipient_rel["foreign_key"]["column"] == "recipient_id"
+    assert sender_rel["foreign_key"]["model"] == "Message"
+    assert recipient_rel["foreign_key"]["model"] == "Message"
+
+    # Distinct back-reference attribute names on Person.
+    person_rels = next(m for m in state["data_models"] if m["name"] == "Person")["relationships"]
+    assert len(person_rels) == 2
+    person_attrs = {r["target"]["attribute"] for r in person_rels}
+    assert len(person_attrs) == 2
+
+    # Rendering must not raise (both relationships coexist on the SQLAlchemy class).
+    import tempfile
+    import ast as ast_module
+
+    from backend.services.code_generator import CodeGenerator
+
+    with tempfile.TemporaryDirectory() as tmp:
+        gen = CodeGenerator(output_dir=tmp)
+        codebase = gen.generate_project(state, force=True)
+        models_src = (codebase / "database" / "models.py").read_text(encoding="utf-8")
+        ast_module.parse(models_src)
+        assert "sender" in models_src
+        assert "recipient" in models_src
+
+
+def test_translate_ambiguous_relationship_names_raise_clear_error():
+    """If both relationships were given the SAME explicit attribute name, translation
+    must fail loudly instead of silently letting one clobber the other.
+    """
+    from backend.erd.loader import ERDValidationError
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="Messenger", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="messenger.db"),
+        entities=[
+            EntitySpec(
+                name="Person",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+            EntitySpec(
+                name="Message",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(
+                        name="sender", cardinality="many-to-one", target="Person", attribute="contact"
+                    ),
+                    RelationshipDecl(
+                        name="recipient", cardinality="many-to-one", target="Person", attribute="contact"
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    with pytest.raises(ERDValidationError, match="both derive the attribute name"):
+        translate(erd)
 
 
 def test_translate_field_types_are_strings_not_enums():

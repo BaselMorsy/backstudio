@@ -40,6 +40,9 @@ def load_erd(path: Union[str, Path]) -> ERDConfig:
 
 
 def _validate_semantics(erd: ERDConfig) -> None:
+    if not erd.entities:
+        raise ERDValidationError("ERD must declare at least one entity")
+
     if erd.rbac.enabled and not erd.auth.enabled:
         raise ERDValidationError(
             "rbac.enabled requires auth.enabled: true (RBAC needs a way to identify the current user)"

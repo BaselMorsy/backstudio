@@ -34,6 +34,64 @@ BackStudio is a powerful visual backend code generator that lets you design and 
 - **API Documentation** - Auto-generated OpenAPI/Swagger docs
 - **MCP Server Support** - Extend functionality through Model Context Protocol
 
+## `backstudio` CLI
+
+Alongside the visual web UI, this repo ships a `backstudio` CLI that generates a FastAPI backend
+directly from a single YAML file describing your entities (an "ERD" - entity-relationship
+definition) - no server, no clicking through a UI.
+
+### Install
+
+```bash
+# uv (recommended)
+uv sync
+
+# pip
+pip install -e .
+```
+
+Either way, this installs a `backstudio` console script (see `[project.scripts]` in
+`pyproject.toml`).
+
+### Commands
+
+| Command | What it does | Example |
+|---|---|---|
+| `validate` | Checks an ERD YAML file for schema and semantic errors (unknown relationship targets, RBAC roles, etc.) without generating anything. | `backstudio validate erd.yml` |
+| `visualize` | Renders an HTML entity-relationship diagram (Mermaid) for an ERD file and opens it in a browser. | `backstudio visualize erd.yml -o diagram.html` |
+| `generate` | Generates a complete, runnable FastAPI project (models, CRUD routes, auth, RBAC, Alembic migrations) from an ERD file. | `backstudio generate erd.yml --output workspace` |
+
+Run `backstudio --help` or `backstudio <command> --help` for full option lists.
+
+### Example ERD
+
+```yaml
+project:
+  name: BlogAPI
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: blog.db
+
+auth:
+  enabled: true          # adds /auth/register, /auth/login, /auth/refresh, /auth/me
+
+entities:
+  - name: Post
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string, max_length: 200}
+      - {name: body, type: text}
+```
+
+Running `backstudio generate blog.yml` produces a ready-to-run FastAPI project (SQLAlchemy
+models, Pydantic schemas, CRUD routes for `Post`, JWT auth routes, and an Alembic migration
+setup) under `workspace/BlogAPI/codebase`. When `auth.enabled: true`, the generated `config.py`
+requires the JWT secret env var (`JWT_SECRET` above, or whatever `auth.jwt.secret_env_var` names)
+to be set - export it (or put it in a `.env` file inside the generated project) before running
+the project or its Alembic migrations.
+
 ## Architecture
 
 ```

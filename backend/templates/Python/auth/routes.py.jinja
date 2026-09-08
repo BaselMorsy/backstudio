@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from database.base import get_db
 from database.models import User
-from .schemas import TokenResponse, UserLogin, UserRegister, UserResponse
+from .schemas import RefreshRequest, TokenResponse, UserLogin, UserRegister, UserResponse
 from .service import authenticate_user, create_access_token, create_refresh_token, decode_token, get_current_user, register_user
 
 router = APIRouter()
@@ -30,8 +30,8 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(refresh_token: str, db: Session = Depends(get_db)) -> TokenResponse:
-    user_id = decode_token(refresh_token)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    user_id = decode_token(payload.refresh_token)
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")

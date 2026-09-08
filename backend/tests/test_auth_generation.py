@@ -30,6 +30,22 @@ def test_generates_auth_service_when_enabled(tmp_path):
     assert '"/login"' in routes_src
     assert '"/me"' in routes_src
 
+    # /refresh must take the token in the request body, not a bare query param,
+    # so a bearer credential never ends up in a URL / access log.
+    assert "payload: RefreshRequest" in routes_src
+    assert "def refresh(refresh_token: str" not in routes_src
+
+    schemas_src = (auth_dir / "schemas.py").read_text(encoding="utf-8")
+    assert "class RefreshRequest(BaseModel):" in schemas_src
+
+    # requirements.txt must declare every package the generated auth module
+    # actually imports at runtime, so a fresh install doesn't crash on
+    # hash_password() (passlib/bcrypt version mismatch) or import auth.schemas
+    # (EmailStr needs the separate email-validator package).
+    requirements_src = (codebase_dir / "requirements.txt").read_text(encoding="utf-8")
+    assert "bcrypt==4.0.1" in requirements_src
+    assert "email-validator" in requirements_src
+
 
 def test_no_auth_directory_when_disabled(tmp_path):
     erd = load_erd(f"{FIXTURES}/valid_minimal.yml")

@@ -80,6 +80,12 @@ class RelationshipDecl(BaseModel):
     association_table: Optional[str] = None
 
 
+class ServiceDecl(BaseModel):
+    """Assigns a set of entities to a named service/module."""
+    name: str = Field(..., min_length=1)
+    entities: List[str] = Field(..., min_length=1)
+
+
 class EndpointRBAC(BaseModel):
     create: Optional[List[str]] = None
     list: Optional[List[str]] = None
@@ -117,3 +123,4 @@ class ERDConfig(BaseModel):
     auth: AuthSpec = Field(default_factory=AuthSpec)
     rbac: RBACSpec = Field(default_factory=RBACSpec)
     entities: List[EntitySpec] = Field(default_factory=list)
+    services: List[ServiceDecl] = Field(default_factory=list)

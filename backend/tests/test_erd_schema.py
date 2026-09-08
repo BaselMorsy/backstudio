@@ -45,3 +45,16 @@ def test_unknown_default_permission_action_rejected():
     bad["rbac"] = {"enabled": True, "roles": ["admin"], "default_permissions": {"fly": ["admin"]}}
     with pytest.raises(ValidationError):
         ERDConfig(**bad)
+
+
+def test_services_block_parses():
+    with_services = dict(MINIMAL)
+    with_services["services"] = [{"name": "widgets", "entities": ["Widget"]}]
+    erd = ERDConfig(**with_services)
+    assert erd.services[0].name == "widgets"
+    assert erd.services[0].entities == ["Widget"]
+
+
+def test_services_defaults_to_empty_list():
+    erd = ERDConfig(**MINIMAL)
+    assert erd.services == []

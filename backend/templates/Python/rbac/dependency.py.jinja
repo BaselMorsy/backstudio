@@ -1,0 +1,23 @@
+"""{{ project.name }} - Role-based access control"""
+
+from typing import Callable, List
+
+from fastapi import Depends, HTTPException, status
+
+from auth.service import get_current_user
+from database.models import User
+
+
+def require_roles(*roles: str) -> Callable:
+    """Build a FastAPI dependency requiring the current user to have at least one of `roles`."""
+
+    async def dependency(current_user: User = Depends(get_current_user)) -> User:
+        user_roles: List[str] = current_user.roles or []
+        if not set(user_roles) & set(roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Requires one of roles: {', '.join(roles)}",
+            )
+        return current_user
+
+    return dependency

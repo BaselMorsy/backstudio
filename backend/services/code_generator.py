@@ -257,6 +257,13 @@ class CodeGenerator:
                 self._render_template("Python/service/crud_routes.py.jinja", entity_context)
             )
 
+        # RBAC dependency (only meaningful once auth exists, enforced at the ERD validation layer)
+        if state.get('rbac_enabled'):
+            self._write_file(
+                output_dir / "rbac.py",
+                self._render_template("Python/rbac/dependency.py.jinja", context)
+            )
+
         # Generate main application files
         self._write_file(
             output_dir / "config.py",

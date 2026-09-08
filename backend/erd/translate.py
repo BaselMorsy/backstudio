@@ -184,6 +184,27 @@ def _resolve_rbac(erd: ERDConfig, entity: EntitySpec) -> Dict[str, List[str]]:
     return resolved
 
 
+def _resolve_auth_module_name(erd: ERDConfig) -> str:
+    for svc in erd.services:
+        if svc.entities == ["User"]:
+            return svc.name
+    return "auth"
+
+
+def _resolve_modules(erd: ERDConfig, crud_entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_name = {e["name"]: e for e in crud_entities}
+    modules: List[Dict[str, Any]] = []
+    for svc in erd.services:
+        if svc.entities == ["User"]:
+            continue  # the auth service is resolved separately via auth_module_name
+        modules.append({
+            "name": svc.name,
+            "snake_name": _snake_case(svc.name),
+            "entities": [by_name[name] for name in svc.entities],
+        })
+    return modules
+
+
 def translate(erd: ERDConfig) -> Dict[str, Any]:
     entities = [e for e in erd.entities if e.name != "User"]
 
@@ -229,6 +250,9 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "fields": [f.model_dump(mode='json') for f in entity.fields],
         })
 
+    modules = _resolve_modules(erd, crud_entities)
+    auth_module_name = _resolve_auth_module_name(erd)
+
     security_config = None
     if erd.auth.enabled:
         security_config = {
@@ -252,6 +276,8 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "database_config": erd.database.model_dump(mode='json'),
         "security_config": security_config,
         "crud_entities": crud_entities,
+        "modules": modules,
+        "auth_module_name": auth_module_name,
         "auth_enabled": erd.auth.enabled,
         "rbac_enabled": erd.rbac.enabled,
         "rbac_roles": erd.rbac.roles,

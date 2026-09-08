@@ -2,7 +2,16 @@ import pytest
 
 from backend.erd.loader import load_erd
 from backend.erd.translate import translate
-from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, EndpointSpec
+from backend.erd.schema import (
+    ERDConfig,
+    ProjectMeta,
+    DatabaseSpec,
+    EntitySpec,
+    RelationshipDecl,
+    EndpointSpec,
+    AuthSpec,
+    ServiceDecl,
+)
 from backend.schemas.data import ModelField, FieldType
 
 FIXTURES = "backend/tests/fixtures/erd"
@@ -444,6 +453,61 @@ def test_translate_relationship_enums_to_strings():
     assert not str(source["lazy"]).startswith("LazyStrategy."), (
         f"lazy should not be enum repr: {repr(source['lazy'])}"
     )
+
+
+def test_translate_groups_entities_into_modules():
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    assert len(state["modules"]) == 1
+    module = state["modules"][0]
+    assert module["name"] == "catalog"
+    assert module["snake_name"] == "catalog"
+    entity_names = {e["name"] for e in module["entities"]}
+    assert entity_names == {"Category", "Product"}
+
+    # Each module entity is the exact same shape as a crud_entities entry.
+    product = next(e for e in module["entities"] if e["name"] == "Product")
+    assert product["base_path"] == "/products"
+    assert product["rbac"]["create"] == ["admin"]
+
+
+def test_translate_resolves_default_auth_module_name():
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # auth enabled, no services: entry for User
+    state = translate(erd)
+    assert state["auth_module_name"] == "auth"
+
+
+def test_translate_resolves_renamed_auth_module_name():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Demo", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="demo.db"),
+        auth=AuthSpec(enabled=True),
+        entities=[
+            EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
+        services=[
+            ServiceDecl(name="widgets", entities=["Widget"]),
+            ServiceDecl(name="identity", entities=["User"]),
+        ],
+    )
+    state = translate(erd)
+    assert state["auth_module_name"] == "identity"
+    # The renamed auth service must not also appear in `modules` (it's handled separately).
+    assert all(m["name"] != "identity" for m in state["modules"])
+
+
+def test_translate_multiple_modules_stay_distinct():
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # catalog: [Category, Product], ordering: [Order]
+    state = translate(erd)
+
+    module_names = {m["name"] for m in state["modules"]}
+    assert module_names == {"catalog", "ordering"}
+
+    catalog = next(m for m in state["modules"] if m["name"] == "catalog")
+    ordering = next(m for m in state["modules"] if m["name"] == "ordering")
+    assert {e["name"] for e in catalog["entities"]} == {"Category", "Product"}
+    assert {e["name"] for e in ordering["entities"]} == {"Order"}
 
 
 def test_translate_auth_user_fields_have_defaults():

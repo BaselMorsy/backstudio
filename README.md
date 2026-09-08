@@ -59,11 +59,31 @@ pip install -e .
 ```
 
 Either way this installs a `backstudio` console script (see `[project.scripts]` in
-`pyproject.toml`). Confirm it's working:
+`pyproject.toml`) *inside that virtual environment* — `uv sync` does **not** put it on your
+shell's PATH. Running `backstudio --help` straight after `uv sync`, in a fresh terminal, will
+fail with `'backstudio' is not recognized...` (Windows) or `command not found` (macOS/Linux). Use
+one of:
 
 ```bash
-$ backstudio --help
-# (with uv, if you haven't activated the venv: `uv run backstudio --help`)
+# 1. prefix every command with `uv run` (simplest, no activation needed)
+uv run backstudio --help
+
+# 2. or activate the venv once per session, then call it directly
+.venv\Scripts\activate.bat      # Windows cmd.exe
+.venv\Scripts\Activate.ps1      # Windows PowerShell
+source .venv/bin/activate       # macOS/Linux
+backstudio --help
+
+# 3. or call the executable inside .venv directly, no activation
+.venv\Scripts\backstudio.exe --help   # Windows
+.venv/bin/backstudio --help           # macOS/Linux
+```
+
+If you installed with plain `pip install -e .` into a venv you already activated, `backstudio` is
+already on PATH for that session — no prefix needed. Confirm it's working:
+
+```bash
+$ backstudio --help          # or `uv run backstudio --help`
 
 Usage: backstudio [OPTIONS] COMMAND [ARGS]...
 
@@ -75,8 +95,8 @@ Commands:
   visualize  Render an HTML ER diagram for the given ERD file.
 ```
 
-Every command below assumes `backstudio` is on your PATH; prefix with `uv run` if you're using uv
-without activating its venv.
+Every command in the rest of this README assumes one of the three approaches above is in effect —
+prefix with `uv run` (or activate the venv) as needed.
 
 ## Quick Start
 
@@ -472,6 +492,10 @@ at runtime, never written into generated source.
 
 ## Troubleshooting
 
+- **`'backstudio' is not recognized...` / `command not found`** right after `uv sync`** — the
+  console script was installed into `.venv`, not onto your shell's PATH. Use `uv run backstudio
+  ...`, or activate the venv first (`.venv\Scripts\activate.bat` on Windows,
+  `source .venv/bin/activate` on macOS/Linux) — see [Installation](#installation).
 - **`RuntimeError: Required environment variable '...' is not set`** — set the env var named in
   your ERD's `auth.jwt.secret_env_var` before running the generated app or Alembic.
 - **`Warning: could not auto-generate the initial Alembic migration`** during `backstudio

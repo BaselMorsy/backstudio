@@ -28,7 +28,7 @@ _AUTH_USER_DISPLAY_FIELDS: List[ModelField] = [
 def _entity_block(name: str, fields: List[ModelField]) -> str:
     lines = [f"    {name} {{"]
     for field in fields:
-        mtype = _MERMAID_TYPE_MAP.get(str(field.type).lower(), "string")
+        mtype = _MERMAID_TYPE_MAP.get(field.type.value, "string")
         markers = []
         if field.primary_key:
             markers.append("PK")

@@ -1,0 +1,46 @@
+project:
+  name: ShopHub
+  version: "1.0.0"
+  description: A small e-commerce sample
+
+database:
+  type: postgresql
+  database_name: shophub_db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 30
+
+rbac:
+  enabled: true
+  roles: [admin, editor, viewer]
+  default_permissions:
+    read: [admin, editor, viewer]
+    list: [admin, editor, viewer]
+    create: [admin, editor]
+    update: [admin, editor]
+    delete: [admin]
+
+entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true}
+
+  - name: Product
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, max_length: 200}
+      - {name: price, type: float}
+    relationships:
+      - name: category
+        cardinality: many-to-one
+        target: Category
+    endpoints:
+      enabled: [create, list, read, update, delete]
+      rbac:
+        create: [admin]
+        delete: [admin]

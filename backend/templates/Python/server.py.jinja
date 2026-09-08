@@ -13,6 +13,14 @@ from middleware import {% for mw in project.middlewares %}{{ mw.name|snake_case 
 from {{ service.name|snake_case }}.routes import router as {{ service.name|snake_case }}_router
 {% endfor %}
 {% endif %}
+{% if project.crud_entities %}
+{% for entity in project.crud_entities %}
+from {{ entity.plural_snake }}.routes import router as {{ entity.plural_snake }}_router
+{% endfor %}
+{% endif %}
+{% if project.auth_enabled %}
+from auth.routes import router as auth_router
+{% endif %}
 
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
@@ -67,6 +75,14 @@ app.include_router(
     prefix="/api/{{ service.name|kebab_case }}"
 )
 {% endfor %}
+{% endif %}
+{% if project.crud_entities %}
+{% for entity in project.crud_entities %}
+app.include_router({{ entity.plural_snake }}_router, prefix="{{ entity.base_path }}", tags={{ entity.tags|tojson }})
+{% endfor %}
+{% endif %}
+{% if project.auth_enabled %}
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 {% endif %}
 
 @app.get("/")

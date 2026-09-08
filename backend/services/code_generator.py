@@ -284,6 +284,11 @@ class CodeGenerator:
             alembic_dir / "env.py",
             self._render_template("Python/alembic/env.py.jinja", context)
         )
+        # script.py.mako is Alembic's OWN Mako template (used by `alembic revision` to
+        # generate new migration files) - it is copied verbatim, never rendered through
+        # Jinja2, since its ${...} syntax is Mako's, not ours.
+        mako_source = self.templates_dir / "Python" / "alembic" / "script.py.mako.jinja"
+        self._write_file(alembic_dir / "script.py.mako", mako_source.read_text(encoding='utf-8'))
 
         # Generate main application files
         self._write_file(

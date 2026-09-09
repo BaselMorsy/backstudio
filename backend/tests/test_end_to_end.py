@@ -57,6 +57,29 @@ def test_shophub_mini_generates_a_complete_working_tree(tmp_path):
     assert 'require_roles("admin")' in catalog_routes_src
 
 
+def test_shophub_mini_relationship_crosses_service_boundary(tmp_path):
+    """Order lives in the 'ordering' service, Product lives in 'catalog' — the
+    FK/relationship between them must still be wired correctly in the shared,
+    global database/models.py regardless of which service either entity belongs to.
+    """
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    ast.parse(models_src)
+
+    order_class_start = models_src.index("class Order(Base):")
+    next_class_start = models_src.index("\nclass ", order_class_start + 1)
+    order_class_src = models_src[order_class_start:next_class_start]
+
+    assert "product_id" in order_class_src
+    assert 'ForeignKey(\'products.id\')' in order_class_src or 'ForeignKey("products.id")' in order_class_src
+    assert "product = relationship(" in order_class_src
+
+
 def test_shophub_mini_byte_compiles(tmp_path):
     """A stronger check than ast.parse: byte-compile every generated module."""
     erd = load_erd(f"{FIXTURES}/shophub_mini.yml")

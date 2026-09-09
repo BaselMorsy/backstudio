@@ -16,7 +16,9 @@ class {{ entity.name }}Create(BaseModel):
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
+{% if rel.fk_column not in entity.fields|map(attribute='name')|list %}
     {{ rel.fk_column }}: {% if rel.fk_nullable %}Optional[int] = None{% else %}int{% endif +%}
+{% endif %}
 {% endfor %}
 {% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
     pass
@@ -31,7 +33,9 @@ class {{ entity.name }}Update(BaseModel):
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
+{% if rel.fk_column not in entity.fields|map(attribute='name')|list %}
     {{ rel.fk_column }}: Optional[int] = None
+{% endif %}
 {% endfor %}
 {% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
     pass
@@ -50,7 +54,9 @@ class {{ entity.name }}Response(BaseModel):
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
+{% if rel.fk_column not in entity.fields|map(attribute='name')|list %}
     {{ rel.fk_column }}: {% if rel.fk_nullable %}Optional[int] = None{% else %}int{% endif +%}
+{% endif %}
 {% endfor %}
 {% for rel in entity.many_to_many_relationships %}
     {{ rel.target_model|snake_case }}_ids: List[int] = []

@@ -242,6 +242,46 @@ def test_repo_selectinload_used_for_many_to_many(tmp_path):
     assert "selectinload(Post.tags)" in repo_src[get_by_id_start:get_by_id_end]
 
 
+def test_owned_and_many_to_many_relationships_compose_on_the_same_entity(tmp_path):
+    """combined_relationships.yml's Post declares BOTH an owned many-to-one to
+    Author and a many-to-many to Tag. Every other fixture has one kind or the
+    other; two task-level reviewers flagged this combination as verified only by
+    inspection. Assert both render side by side (and byte-compile, not just
+    ast.parse - py_compile catches things ast.parse doesn't, e.g. a duplicate
+    function argument).
+    """
+    import py_compile
+
+    erd = load_erd(f"{FIXTURES}/combined_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_file = codebase_dir / "modules" / "content" / "schemas.py"
+    repo_file = codebase_dir / "database" / "repo.py"
+
+    schemas_src = schemas_file.read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+    py_compile.compile(str(schemas_file), doraise=True)
+
+    response_src = schemas_src[schemas_src.index("class PostResponse(BaseModel):"):]
+    assert "author_id: Optional[int] = None" in response_src  # owned FK
+    assert "tag_ids: List[int] = []" in response_src  # many-to-many id list
+    assert 'data.tag_ids = [item.id for item in getattr(data, "tags", [])]' in response_src
+
+    repo_src = repo_file.read_text(encoding="utf-8")
+    ast.parse(repo_src)
+    py_compile.compile(str(repo_file), doraise=True)
+
+    get_all_start = repo_src.index("def get_all_posts(")
+    get_all_end = repo_src.index("\ndef ", get_all_start + 1)
+    get_all_src = repo_src[get_all_start:get_all_end]
+    assert "author_id: Optional[int] = None" in get_all_src  # FK filter param
+    assert "Post.author_id == author_id" in get_all_src
+    assert "selectinload(Post.tags)" in get_all_src  # m2m eager load, same function
+
+
 def test_repo_filter_and_selectinload_work_against_a_real_db(tmp_path):
     """Actually run the rendered repo functions against a real SQLite DB - the
     strongest signal, matching the lesson learned earlier this session that

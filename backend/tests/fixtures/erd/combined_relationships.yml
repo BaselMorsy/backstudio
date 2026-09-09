@@ -1,0 +1,37 @@
+# One entity (Post) carrying BOTH kinds of relationship at once: an owned
+# many-to-one FK to Author and a many-to-many to Tag. Every other fixture has
+# one kind or the other, never both on the same entity.
+project:
+  name: CombinedRels
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: combined.db
+
+entities:
+  - name: Author
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Tag
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Post
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string, max_length: 200}
+    relationships:
+      - name: author
+        cardinality: many-to-one
+        target: Author
+      - name: tags
+        cardinality: many-to-many
+        target: Tag
+
+services:
+  - name: content
+    entities: [Author, Tag, Post]

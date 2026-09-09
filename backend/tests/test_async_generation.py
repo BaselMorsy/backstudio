@@ -413,3 +413,100 @@ def test_sync_routes_still_unchanged_when_async_mode_omitted(tmp_path):
     assert "from sqlalchemy.orm import Session" in routes_src
     assert "async def" not in routes_src
     assert "await " not in routes_src
+
+
+def test_async_auth_service_and_routes_are_async(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "auth" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+    assert "from sqlalchemy.ext.asyncio import AsyncSession" in service_src
+    assert "from sqlalchemy import select, func" in service_src
+
+    register_start = service_src.index("async def register_user(")
+    register_end = service_src.index("\n    async def authenticate_user(")
+    register_src = service_src[register_start:register_end]
+    assert "select(User).where(User.email == email)" in register_src
+    assert "await db.execute(" in register_src
+    assert "await db.scalar(select(func.count()).select_from(User))" in register_src
+    assert "await db.commit()" in register_src
+
+    get_current_user_start = service_src.index("async def get_current_user(")
+    get_current_user_src = service_src[get_current_user_start:]
+    assert "select(User).where(User.id == user_id)" in get_current_user_src
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert "async def register(" in routes_src
+    assert "async def login(" in routes_src
+    assert "async def refresh(" in routes_src
+    assert "async def me(" in routes_src
+    assert "await service.register_user(" in routes_src
+    assert "await service.authenticate_user(" in routes_src
+    assert "select(User).where(User.id == user_id)" in routes_src  # refresh's own raw query
+
+
+def test_sync_auth_still_unchanged_when_async_mode_omitted(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "auth" / "service.py").read_text(encoding="utf-8")
+    assert "from sqlalchemy.orm import Session" in service_src
+    assert "async def register_user" not in service_src
+    assert "db.query(User)" in service_src
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    assert "async def register(" not in routes_src
+    assert "async def me(" not in routes_src
+
+
+def test_async_auth_register_and_login_actually_work(tmp_path):
+    import asyncio
+
+    erd = load_erd(f"{FIXTURES}/async_shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "auth_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        auth_service = importlib.import_module("modules.auth.service")
+
+        async def run():
+            await database_base.init_db()
+            service = auth_service.get_auth_service()
+            async with database_base.AsyncSessionLocal() as db:
+                user = await service.register_user(db, "alice@example.com", "supersecret123")
+                assert set(user.roles) == {"admin", "customer"}  # bootstrap: first user gets every role
+
+                authed = await service.authenticate_user(db, "alice@example.com", "supersecret123")
+                assert authed.id == user.id
+            await database_base.engine.dispose()
+
+        asyncio.run(run())
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)

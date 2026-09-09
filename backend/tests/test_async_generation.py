@@ -161,3 +161,128 @@ def test_async_minimal_engine_actually_runs_and_disposes_cleanly(tmp_path):
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_async_repo_uses_select_execute_not_query(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    assert "from sqlalchemy import select" in repo_src
+    assert "from sqlalchemy.ext.asyncio import AsyncSession" in repo_src
+    assert ".query(" not in repo_src
+    assert "db.query" not in repo_src
+
+    create_start = repo_src.index("async def create_post(")
+    create_end = repo_src.index("\nasync def get_post_by_id(")
+    create_src = repo_src[create_start:create_end]
+    assert "db.add(post)" in create_src
+    assert "await db.commit()" in create_src
+    assert "await db.refresh(post)" in create_src
+
+    get_by_id_start = repo_src.index("async def get_post_by_id(")
+    get_by_id_end = repo_src.index("\nasync def get_all_posts(")
+    get_by_id_src = repo_src[get_by_id_start:get_by_id_end]
+    assert "select(Post)" in get_by_id_src
+    assert "selectinload(Post.tags)" in get_by_id_src
+    assert "await db.execute(stmt)" in get_by_id_src
+    assert "result.scalar_one_or_none()" in get_by_id_src
+
+    get_all_start = repo_src.index("async def get_all_posts(")
+    get_all_end = repo_src.index("\nasync def update_post(")
+    get_all_src = repo_src[get_all_start:get_all_end]
+    assert "author_id: Optional[int] = None" in get_all_src
+    assert "selectinload(Post.tags)" in get_all_src
+    assert "Post.author_id == author_id" in get_all_src
+    assert "result.scalars().all()" in get_all_src
+
+    delete_start = repo_src.index("async def delete_post(")
+    delete_src = repo_src[delete_start:]
+    assert "await db.delete(post)" in delete_src
+
+
+def test_sync_repo_still_unchanged_when_async_mode_omitted(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    assert "from sqlalchemy.orm import Session" in repo_src
+    assert "AsyncSession" not in repo_src
+    assert "db.query(" in repo_src
+    assert "select(" not in repo_src
+
+
+def test_async_repo_functions_actually_run_against_a_real_db(tmp_path):
+    """Live proof, matching the sync-path equivalent tests in this repo: create via
+    the generated async repo, link a many-to-many tag, filter by the owned FK, then
+    delete and confirm the row is actually gone - the exact case that would silently
+    no-op if AsyncSession.delete() were called without await.
+    """
+    import asyncio
+
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "repo_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        database_models = importlib.import_module("database.models")
+        repo = importlib.import_module("database.repo")
+
+        async def run():
+            await database_base.init_db()
+            async with database_base.AsyncSessionLocal() as db:
+                author1 = await repo.create_author(db, {"name": "Ada"})
+                author2 = await repo.create_author(db, {"name": "Grace"})
+                tag = await repo.create_tag(db, {"name": "python"})
+
+                post = await repo.create_post(db, {"title": "Hello", "author_id": author1.id})
+                await repo.create_post(db, {"title": "Other", "author_id": author2.id})
+
+                fetched = await repo.get_post_by_id(db, post.id)
+                assert fetched.title == "Hello"
+
+                filtered = await repo.get_all_posts(db, author_id=author1.id)
+                assert [p.title for p in filtered] == ["Hello"]
+
+                # link the tag directly via the ORM relationship (no repo function
+                # for many-to-many writes - matches the sync-path design)
+                post_obj = await repo.get_post_by_id(db, post.id)
+                post_obj.tags.append(tag)
+                await db.commit()
+                refetched = await repo.get_post_by_id(db, post.id)
+                assert [t.name for t in refetched.tags] == ["python"]
+
+                deleted = await repo.delete_post(db, post.id)
+                assert deleted is True
+                gone = await repo.get_post_by_id(db, post.id)
+                assert gone is None
+            await database_base.engine.dispose()
+
+        asyncio.run(run())
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)

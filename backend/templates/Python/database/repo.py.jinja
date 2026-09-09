@@ -2,7 +2,13 @@
 
 {% set has_any_m2m = (project.data_models|map(attribute='many_to_many_relationships')|map('length')|sum) > 0 %}
 from typing import Optional, List
+{% if project.database_config.async_mode %}
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession{% if has_any_m2m +%}
+from sqlalchemy.orm import selectinload{% endif +%}
+{% else %}
 from sqlalchemy.orm import Session{% if has_any_m2m %}, selectinload{% endif +%}
+{% endif %}
 
 from .models import {% for model in project.data_models %}{{ model.name|pascal_case }}{{ ", " if not loop.last else "" }}{% endfor %}
 
@@ -10,6 +16,15 @@ from .models import {% for model in project.data_models %}{{ model.name|pascal_c
 
 # {{ model.name|pascal_case }} Repository Functions
 
+{% if project.database_config.async_mode %}
+async def create_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_data: dict) -> {{ model.name|pascal_case }}:
+    """Create a new {{ model.name }}"""
+    {{ model.name|snake_case }} = {{ model.name|pascal_case }}(**{{ model.name|snake_case }}_data)
+    db.add({{ model.name|snake_case }})
+    await db.commit()
+    await db.refresh({{ model.name|snake_case }})
+    return {{ model.name|snake_case }}
+{% else %}
 def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_data: dict) -> {{ model.name|pascal_case }}:
     """Create a new {{ model.name }}"""
     {{ model.name|snake_case }} = {{ model.name|pascal_case }}(**{{ model.name|snake_case }}_data)
@@ -17,8 +32,25 @@ def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
     db.commit()
     db.refresh({{ model.name|snake_case }})
     return {{ model.name|snake_case }}
+{% endif %}
 
 
+{% if project.database_config.async_mode %}
+async def get_{{ model.name|snake_case }}_by_id(db: AsyncSession, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
+    """Get {{ model.name }} by ID"""
+    stmt = select({{ model.name|pascal_case }})
+{% for rel in model.many_to_many_relationships %}
+    stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
+{% endfor %}
+    {% set pk_field = model.fields|selectattr('primary_key')|first %}
+    {% if pk_field %}
+    stmt = stmt.where({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id)
+    {%- else %}
+    stmt = stmt.where({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id)
+    {%- endif +%}
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+{% else %}
 def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
     """Get {{ model.name }} by ID"""
     query = db.query({{ model.name|pascal_case }})
@@ -31,18 +63,49 @@ def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case 
     {%- else %}
     return query.filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id).first()
     {%- endif %}
+{% endif %}
 
 
 {% for field in model.fields %}
 {% if field.unique and not field.primary_key %}
+{% if project.database_config.async_mode %}
+async def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: AsyncSession, {{ field.name }}: str) -> Optional[{{ model.name|pascal_case }}]:
+    """Get {{ model.name }} by {{ field.name }}"""
+    stmt = select({{ model.name|pascal_case }}).where({{ model.name|pascal_case }}.{{ field.name }} == {{ field.name }})
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+{% else %}
 def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: Session, {{ field.name }}: str) -> Optional[{{ model.name|pascal_case }}]:
     """Get {{ model.name }} by {{ field.name }}"""
     return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.{{ field.name }} == {{ field.name }}).first()
+{% endif %}
 
 
 {% endif %}
 {%- endfor %}
 
+{% if project.database_config.async_mode %}
+async def get_all_{{ model.plural_snake }}(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+{% for rel in model.owned_relationships %}
+    {{ rel.fk_column }}: Optional[int] = None,
+{% endfor %}
+) -> List[{{ model.name|pascal_case }}]:
+    """Get all {{ model.name }}s with pagination"""
+    stmt = select({{ model.name|pascal_case }})
+{% for rel in model.many_to_many_relationships %}
+    stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
+{% endfor %}
+{% for rel in model.owned_relationships %}
+    if {{ rel.fk_column }} is not None:
+        stmt = stmt.where({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
+{% endfor %}
+    stmt = stmt.offset(skip).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+{% else %}
 def get_all_{{ model.plural_snake }}(
     db: Session,
     skip: int = 0,
@@ -61,8 +124,20 @@ def get_all_{{ model.plural_snake }}(
         query = query.filter({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
 {% endfor %}
     return query.offset(skip).limit(limit).all()
+{% endif %}
 
 
+{% if project.database_config.async_mode %}
+async def update_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:
+    """Update {{ model.name }}"""
+    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    if {{ model.name|snake_case }}:
+        for key, value in update_data.items():
+            setattr({{ model.name|snake_case }}, key, value)
+        await db.commit()
+        await db.refresh({{ model.name|snake_case }})
+    return {{ model.name|snake_case }}
+{% else %}
 def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:
     """Update {{ model.name }}"""
     {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
@@ -72,8 +147,19 @@ def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
         db.commit()
         db.refresh({{ model.name|snake_case }})
     return {{ model.name|snake_case }}
+{% endif %}
 
 
+{% if project.database_config.async_mode %}
+async def delete_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int) -> bool:
+    """Delete {{ model.name }}"""
+    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    if {{ model.name|snake_case }}:
+        await db.delete({{ model.name|snake_case }})
+        await db.commit()
+        return True
+    return False
+{% else %}
 def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int) -> bool:
     """Delete {{ model.name }}"""
     {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
@@ -82,5 +168,6 @@ def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
         db.commit()
         return True
     return False
+{% endif %}
 
 {% endfor %}

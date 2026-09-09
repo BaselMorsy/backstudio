@@ -163,6 +163,93 @@ def test_async_minimal_engine_actually_runs_and_disposes_cleanly(tmp_path):
                 sys.modules.pop(mod_name, None)
 
 
+def test_async_service_methods_are_async_and_await_repo(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "content" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    assert "from sqlalchemy.ext.asyncio import AsyncSession" in service_src
+    assert "from sqlalchemy.orm import Session" not in service_src
+
+    create_start = service_src.index("async def create_post(")
+    create_end = service_src.index("\n    async def list_posts(")
+    create_src = service_src[create_start:create_end]
+    assert "db: AsyncSession" in create_src
+    assert "await repo.get_author_by_id(" in create_src
+    assert "return await repo.create_post(db, data)" in create_src
+
+    delete_start = service_src.index("async def delete_post(")
+    delete_src = service_src[delete_start:]
+    assert "return await repo.delete_post(db, item_id)" in delete_src
+
+
+def test_sync_service_still_unchanged_when_async_mode_omitted(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "catalog" / "service.py").read_text(encoding="utf-8")
+    assert "from sqlalchemy.orm import Session" in service_src
+    assert "async def" not in service_src
+    assert "await " not in service_src
+
+
+def test_async_service_fk_validation_and_delete_actually_work(tmp_path):
+    import asyncio
+
+    import pytest
+
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "service_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        content_service = importlib.import_module("modules.content.service")
+
+        async def run():
+            await database_base.init_db()
+            service = content_service.get_content_service()
+            async with database_base.AsyncSessionLocal() as db:
+                with pytest.raises(ValueError):
+                    await service.create_post(db, {"title": "Bad", "author_id": 999})
+
+                author = await service.create_author(db, {"name": "Ada"})
+                post = await service.create_post(db, {"title": "Good", "author_id": author.id})
+
+                deleted = await service.delete_post(db, post.id)
+                assert deleted is True
+                assert await service.get_post(db, post.id) is None
+            await database_base.engine.dispose()
+
+        asyncio.run(run())
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
 def test_async_repo_uses_select_execute_not_query(tmp_path):
     erd = load_erd(f"{FIXTURES}/async_relationships.yml")
     state = translate(erd)

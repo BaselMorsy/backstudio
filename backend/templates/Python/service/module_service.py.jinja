@@ -1,7 +1,12 @@
 """{{ project.name }} - {{ module.name }} service"""
 
+{% set is_async = project.database_config.async_mode %}
 from typing import List, Optional
+{% if is_async %}
+from sqlalchemy.ext.asyncio import AsyncSession
+{% else %}
 from sqlalchemy.orm import Session
+{% endif %}
 
 from database import repo
 from database.models import (
@@ -24,40 +29,40 @@ class {{ module.name|pascal_case }}Service:
         pass
 
 {% for entity in module.entities %}
-    def create_{{ entity.snake_name }}(self, db: Session, data: dict) -> {{ entity.name }}:
+    {{ 'async ' if is_async }}def create_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, data: dict) -> {{ entity.name }}:
 {% for rel in entity.owned_relationships %}
-        if data.get("{{ rel.fk_column }}") is not None and repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
+        if data.get("{{ rel.fk_column }}") is not None and {{ 'await ' if is_async }}repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
             raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
 {% endfor %}
-        return repo.create_{{ entity.snake_name }}(db, data)
+        return {{ 'await ' if is_async }}repo.create_{{ entity.snake_name }}(db, data)
 
-    def list_{{ entity.plural_snake }}(
+    {{ 'async ' if is_async }}def list_{{ entity.plural_snake }}(
         self,
-        db: Session,
+        db: {{ 'AsyncSession' if is_async else 'Session' }},
         skip: int = 0,
         limit: int = 100,
 {% for rel in entity.owned_relationships %}
         {{ rel.fk_column }}: Optional[int] = None,
 {% endfor %}
     ) -> List[{{ entity.name }}]:
-        return repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
+        return {{ 'await ' if is_async }}repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
 
-    def get_{{ entity.snake_name }}(self, db: Session, item_id: int) -> Optional[{{ entity.name }}]:
-        return repo.get_{{ entity.snake_name }}_by_id(db, item_id)
+    {{ 'async ' if is_async }}def get_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, item_id: int) -> Optional[{{ entity.name }}]:
+        return {{ 'await ' if is_async }}repo.get_{{ entity.snake_name }}_by_id(db, item_id)
 
-    def update_{{ entity.snake_name }}(self, db: Session, item_id: int, data: dict) -> Optional[{{ entity.name }}]:
+    {{ 'async ' if is_async }}def update_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, item_id: int, data: dict) -> Optional[{{ entity.name }}]:
 {% for rel in entity.owned_relationships %}
 {% if not rel.fk_nullable %}
         if "{{ rel.fk_column }}" in data and data["{{ rel.fk_column }}"] is None:
             raise ValueError("{{ rel.fk_column }} cannot be null")
 {% endif %}
-        if data.get("{{ rel.fk_column }}") is not None and repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
+        if data.get("{{ rel.fk_column }}") is not None and {{ 'await ' if is_async }}repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
             raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
 {% endfor %}
-        return repo.update_{{ entity.snake_name }}(db, item_id, data)
+        return {{ 'await ' if is_async }}repo.update_{{ entity.snake_name }}(db, item_id, data)
 
-    def delete_{{ entity.snake_name }}(self, db: Session, item_id: int) -> bool:
-        return repo.delete_{{ entity.snake_name }}(db, item_id)
+    {{ 'async ' if is_async }}def delete_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, item_id: int) -> bool:
+        return {{ 'await ' if is_async }}repo.delete_{{ entity.snake_name }}(db, item_id)
 
 {% endfor %}
 

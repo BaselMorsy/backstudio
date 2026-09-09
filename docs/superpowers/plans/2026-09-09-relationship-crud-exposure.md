@@ -256,7 +256,7 @@ Then in the existing `crud_entities.append({...})` block, add two lines reusing 
         })
 ```
 
-`_build_user_entity`'s returned dict also needs the two new keys (as empty lists — `User` never appears in `entities`/`crud_entities`, but it IS a `data_models` entry, and `repo.py.jinja` iterates all of `project.data_models`, so it must have these keys present or Task 3's template will hit a Jinja `Undefined` on `model.owned_relationships` for `User`):
+Also add the same two keys (as empty lists) to `_build_user_entity`'s returned dict, for readability of its own contract — note this is defensive, not load-bearing: the loop above already runs over every `data_models.values()` entry including `"User"` (added to `data_models` earlier, before that loop runs) and unconditionally sets both keys on it, so `User`'s dict has correct, non-empty-if-applicable values by the time `repo.py.jinja` reads `project.data_models` regardless of what `_build_user_entity` itself returns:
 
 ```python
     return {

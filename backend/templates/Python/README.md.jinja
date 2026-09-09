@@ -196,10 +196,11 @@ alembic upgrade head
 
 ## 🤝 Contributing
 
-This is a generated project. To modify:
-1. Update specs in BackStudio
-2. Regenerate code with same checksum guarantee
-3. Your service implementations are preserved
+This is a generated project. `backstudio generate --force` fully overwrites this directory,
+including any custom logic you've added to `modules/*/service.py` — the CLI's ERD-to-codebase
+generation is a one-time scaffold, not a keep-in-sync tool. (The one exception is `.env`: an
+existing `.env` file is never overwritten by `--force`.) If you need to regenerate after hand-editing
+generated code, back up your changes first and reapply them manually.
 
 ---
 

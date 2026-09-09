@@ -187,7 +187,7 @@ def _resolve_rbac(erd: ERDConfig, entity: EntitySpec) -> Dict[str, List[str]]:
 def _resolve_auth_module_name(erd: ERDConfig) -> str:
     for svc in erd.services:
         if svc.entities == ["User"]:
-            return svc.name
+            return _snake_case(svc.name)
     return "auth"
 
 

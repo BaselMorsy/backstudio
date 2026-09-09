@@ -399,6 +399,16 @@ Runs validation, translates the ERD, generates the full codebase under
 reachable database, `alembic` not resolvable, etc.) a warning is printed with the underlying error
 and generation still succeeds. Prints `Generated at: <path>` on success.
 
+**`--force` fully overwrites, with no preservation of hand-edited code**: `generate --force`
+deletes the entire `<output>/<project.name>/codebase` directory (via `shutil.rmtree`) and
+regenerates it from scratch. The **only** thing preserved across a `--force` regeneration is an
+existing `.env` file — anything else you've hand-edited, including business logic you've added to
+`modules/*/service.py` (the intended customization surface — see
+[Full worked example](#full-worked-example-with-real-output)), is destroyed and replaced with
+freshly generated code. Treat `backstudio generate` as a one-time scaffold, not a tool that keeps
+your codebase in sync with the ERD — back up and reapply any hand-written changes yourself before
+running it again with `--force`.
+
 ## Full worked example (with real output)
 
 This is an actual transcript — every command below was run against `examples/blog.yml`, with no

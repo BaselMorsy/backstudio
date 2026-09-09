@@ -58,3 +58,17 @@ def test_services_block_parses():
 def test_services_defaults_to_empty_list():
     erd = ERDConfig(**MINIMAL)
     assert erd.services == []
+
+
+def test_non_identifier_service_name_rejected():
+    bad = dict(MINIMAL)
+    bad["services"] = [{"name": "Order Processing", "entities": ["Widget"]}]
+    with pytest.raises(ValidationError):
+        ERDConfig(**bad)
+
+
+def test_uppercase_service_name_rejected():
+    bad = dict(MINIMAL)
+    bad["services"] = [{"name": "Widgets", "entities": ["Widget"]}]
+    with pytest.raises(ValidationError):
+        ERDConfig(**bad)

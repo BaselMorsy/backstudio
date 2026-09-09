@@ -85,6 +85,17 @@ class ServiceDecl(BaseModel):
     name: str = Field(..., min_length=1)
     entities: List[str] = Field(..., min_length=1)
 
+    @field_validator("name")
+    @classmethod
+    def name_is_valid_python_identifier(cls, v: str) -> str:
+        if not (v.isidentifier() and v.islower()):
+            raise ValueError(
+                f"services: service name '{v}' must be a valid lowercase Python identifier "
+                "(letters, digits, underscores; not starting with a digit) - it becomes the "
+                "generated modules/<name>/ directory and function-name segment"
+            )
+        return v
+
 
 class EndpointRBAC(BaseModel):
     create: Optional[List[str]] = None

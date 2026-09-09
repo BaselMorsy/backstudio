@@ -45,3 +45,7 @@ entities:
     endpoints:
       rbac:
         delete: [admin]
+
+services:
+  - name: posting
+    entities: [Category, Post]

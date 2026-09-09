@@ -222,6 +222,23 @@ services:
         load_erd(bad)
 
 
+def test_service_named_auth_collides_with_default_auth_module_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: auth, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="collides with the auth service's module name"):
+        load_erd(bad)
+
+
 def test_user_service_renames_auth_module_without_error():
     # valid_full.yml (updated in this task) does not rename auth; this constructs
     # an inline-equivalent valid case directly to confirm the User-only exception works.

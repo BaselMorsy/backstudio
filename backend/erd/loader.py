@@ -104,6 +104,15 @@ def _validate_services(erd: ERDConfig) -> None:
     if dup_service_names:
         raise ERDValidationError(f"Duplicate service name(s): {', '.join(dup_service_names)}")
 
+    if erd.auth.enabled:
+        auth_module_name = next((s.name for s in erd.services if s.entities == ["User"]), "auth")
+        colliding = [s.name for s in erd.services if s.entities != ["User"] and s.name == auth_module_name]
+        if colliding:
+            raise ERDValidationError(
+                f"Service '{auth_module_name}': collides with the auth service's module name — "
+                "rename it, or rename the auth service by declaring a services entry with entities: [User]"
+            )
+
     entity_names = {e.name for e in erd.entities if e.name != "User"}
     assigned: Dict[str, List[str]] = {}
     auth_services: List[str] = []

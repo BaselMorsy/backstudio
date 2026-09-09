@@ -45,6 +45,9 @@ class CodeGenerator:
     def _register_filters(self) -> None:
         """Register custom Jinja2 filters for code generation"""
 
+        # Must stay identical to `_snake_case` in backend/erd/translate.py - templates
+        # mix the two (e.g. repo.get_<target_snake>_by_id names come from translate.py
+        # while sibling names come from this filter), so drift breaks generated code.
         def to_snake_case(text: str) -> str:
             """Convert text to snake_case"""
             import re

@@ -19,6 +19,10 @@ AUTH_USER_FIELDS: List[Dict[str, Any]] = [
 
 
 def _snake_case(text: str) -> str:
+    # Must stay identical to `to_snake_case` in backend/services/code_generator.py
+    # (the Jinja `snake_case` filter) - module_service.py.jinja calls
+    # repo.get_<target_snake>_by_id using THIS function's output, so any drift
+    # between the two would generate a call to a repo function that doesn't exist.
     text = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", text)
     return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text).lower()
 

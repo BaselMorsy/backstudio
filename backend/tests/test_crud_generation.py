@@ -284,3 +284,85 @@ def test_repo_filter_and_selectinload_work_against_a_real_db(tmp_path):
 
         fetched = repo.get_post_by_id(db, post.id)
         assert [t.name for t in fetched.tags] == ["python"]
+
+
+def test_service_create_validates_owned_relationship_fk_exists(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # Product has many-to-one to Category
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "catalog" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    create_start = service_src.index("def create_product(")
+    create_end = service_src.index("\n    def ", create_start + 1)
+    create_src = service_src[create_start:create_end]
+    assert 'data.get("category_id")' in create_src
+    assert "repo.get_category_by_id(db, data[" in create_src
+    assert "raise ValueError(" in create_src
+
+    update_start = service_src.index("def update_product(")
+    update_end = service_src.index("\n    def ", update_start + 1)
+    assert "raise ValueError(" in service_src[update_start:update_end]
+
+
+def test_service_create_and_update_actually_reject_bad_fk_at_runtime(tmp_path, monkeypatch):
+    """Reuses _GeneratedProjectImporter - see the note on the analogous repo-level
+    test in Task 3 for why (module purge safety).
+
+    Deviation from the brief's literal test signature: valid_full.yml has
+    auth.enabled: true with jwt.secret_env_var: JWT_SECRET, so importing
+    database.base (transitively imported by modules.catalog.service) requires
+    JWT_SECRET to be set, or config.py's _require_env raises RuntimeError before
+    we ever get to exercise the service. test_generated_project_runtime.py
+    handles this the same way (monkeypatch.setenv("JWT_SECRET", ...)) for every
+    test that imports a generated project with auth enabled.
+    """
+    from backend.tests.test_generated_project_runtime import _GeneratedProjectImporter
+
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        database_base = importlib.import_module("database.base")
+        catalog_service = importlib.import_module("modules.catalog.service")
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        engine = create_engine("sqlite:///:memory:")
+        database_base.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        db = Session()
+
+        service = catalog_service.get_catalog_service()
+
+        import pytest
+        with pytest.raises(ValueError):
+            service.create_product(db, {"name": "Widget", "price": 9.99, "sku": "W1", "category_id": 999})
+
+
+def test_service_list_accepts_owned_relationship_filter(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # Product has many-to-one to Category
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "catalog" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    list_start = service_src.index("def list_products(")
+    list_end = service_src.index("\n    def ", list_start + 1)
+    list_src = service_src[list_start:list_end]
+    assert "category_id: Optional[int] = None" in list_src
+    assert "category_id=category_id" in list_src

@@ -25,15 +25,31 @@ class {{ module.name|pascal_case }}Service:
 
 {% for entity in module.entities %}
     def create_{{ entity.snake_name }}(self, db: Session, data: dict) -> {{ entity.name }}:
+{% for rel in entity.owned_relationships %}
+        if data.get("{{ rel.fk_column }}") is not None and repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
+            raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
+{% endfor %}
         return repo.create_{{ entity.snake_name }}(db, data)
 
-    def list_{{ entity.plural_snake }}(self, db: Session, skip: int = 0, limit: int = 100) -> List[{{ entity.name }}]:
-        return repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit)
+    def list_{{ entity.plural_snake }}(
+        self,
+        db: Session,
+        skip: int = 0,
+        limit: int = 100,
+{% for rel in entity.owned_relationships %}
+        {{ rel.fk_column }}: Optional[int] = None,
+{% endfor %}
+    ) -> List[{{ entity.name }}]:
+        return repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
 
     def get_{{ entity.snake_name }}(self, db: Session, item_id: int) -> Optional[{{ entity.name }}]:
         return repo.get_{{ entity.snake_name }}_by_id(db, item_id)
 
     def update_{{ entity.snake_name }}(self, db: Session, item_id: int, data: dict) -> Optional[{{ entity.name }}]:
+{% for rel in entity.owned_relationships %}
+        if data.get("{{ rel.fk_column }}") is not None and repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
+            raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
+{% endfor %}
         return repo.update_{{ entity.snake_name }}(db, item_id, data)
 
     def delete_{{ entity.snake_name }}(self, db: Session, item_id: int) -> bool:

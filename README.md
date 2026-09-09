@@ -229,6 +229,12 @@ database:
   use_env_vars: true           # optional, default true
   pool_size: 10                  # optional, default 10
   echo: false                     # optional, default false — echo SQL to stdout
+  async_mode: false              # optional, default false — when true, generates an async
+                                   # SQLAlchemy stack (async engine/session, select()/execute()-based
+                                   # repo layer, async def service/route/auth handlers) instead of sync.
+                                   # For non-SQLite databases, DATABASE_URL needs an async-driver-qualified
+                                   # scheme: sqlite+aiosqlite:/// for SQLite, postgresql+asyncpg:// for
+                                   # PostgreSQL, mysql+aiomysql:// for MySQL
 ```
 
 ### `auth` (optional, default disabled)

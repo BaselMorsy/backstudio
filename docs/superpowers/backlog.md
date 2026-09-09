@@ -106,10 +106,20 @@ deleted, so we keep a record of what was considered and when.
   exists; RLS (does this user own *this* row) does not. Flagged by the user
   as "extremely important." To be designed after/alongside async support,
   since both touch the repo/service call chain.
-- [ ] **Async support.** Repo functions and API handlers are sync-only today,
+- [x] **Async support.** Repo functions and API handlers are sync-only today,
   deliberately deferred during the modular-services restructuring. Needs its
   own design pass — whether repo functions become async too, or only the
   route/service layer.
+  Fixed 2026-09-09: designed and implemented per
+  `docs/superpowers/specs/2026-09-09-async-support-design.md` and
+  `docs/superpowers/plans/2026-09-09-async-support.md`. Opt-in `database.async_mode`
+  field propagated end-to-end through all four layers: async SQLAlchemy engine/session,
+  `select()`/`execute()`-based repo functions, `async def` service methods and route
+  handlers, async auth flows, and async-aware Alembic migrations. Two notable findings:
+  `AsyncSession.delete()` must be awaited (un-awaited, it silently no-ops like a coroutine
+  never `await`ed), and the async engine requires explicit `await engine.dispose()` on
+  shutdown or it hangs process exit. RLS (row-level access control, next in the backlog)
+  is now unblocked to be designed directly against this async shape.
 - [ ] **Spec 2 — Auth service expansion.** Agreed scope, never yet written as
   a formal spec:
   - Admin user management: `list_users` / `get_user` / `set_user_roles` /

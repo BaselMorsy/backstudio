@@ -48,10 +48,46 @@ deleted, so we keep a record of what was considered and when.
 
 ## Documentation
 
-- [ ] `backend/templates/Python/README.md.jinja` (the generated project's own
+- [x] `backend/templates/Python/README.md.jinja` (the generated project's own
   README template) is still written for the old REST-API-driven flow —
   renders empty "Services" / "Implementation Guide" sections since
   `project.services` is always `[]` in the CLI pipeline. Only the actively
   -misleading "your service implementations are preserved" line was patched
   during the modular-services fix wave; the rest was never rewritten for the
   `modules/` structure.
+  Fixed 2026-09-09: Project Structure/Modules/Implementation Guide/Migrations
+  sections now reflect `project.modules`, `auth_module_name`, `rbac_enabled`,
+  and the unconditional Alembic scaffolding; old `project.services` blocks
+  kept alongside (still rendered by the legacy UI flow — see the repo-cleanup
+  item below, which will eventually let these be deleted outright).
+
+## Repo cleanup — CLI-only (requested 2026-09-09, do last)
+
+- [ ] **Strip the repo down to just the CLI tool.** The repo started as a
+  UI-driven backend generator and was pivoted to an ERD-driven CLI this
+  session, but the old UI-serving subsystem was never removed — it still
+  exists alongside the CLI and the two share some templates/state shape
+  (e.g. `README.md.jinja`'s `project.services` blocks, `code_generator.py`'s
+  per-entity `services` loop). User wants no frontend, no MCP server, no
+  other fluff — CLI only.
+  - Candidates identified by survey (confirm final list before deleting):
+    `frontend/`, `mcp_server/`, `backend/api/` (`routes.py`), `backend/main.py`
+    (the old FastAPI app entrypoint serving the UI/API), `backend/services/project_service.py`
+    (old UI project-state service), `setup.bat`/`setup.sh`, `start.bat`/`start.sh`,
+    `stop.bat`/`stop.sh` (old UI dev-server scripts).
+  - Once the old UI flow is gone, `code_generator.py`'s `state.get('services', [])`
+    per-entity generation branch and the `service.py.jinja`/`schemas.py.jinja`/
+    `routes.py.jinja` templates it uses become dead code too — remove them, and
+    simplify `README.md.jinja` back down to only the `modules`/`auth` sections
+    (the legacy `project.services` blocks added there this session can go).
+  - Also sweep: root `README.md`/`RELEASE_NOTES.md` for any remaining UI-flow
+    references, `pyproject.toml`/`backend/requirements.txt` for now-unused
+    dependencies (e.g. anything only the FastAPI UI server needed), and any
+    tests under `backend/tests/` that only exercise the old UI/API/MCP path.
+  - Do this last, after the other backlog items that still assume the old
+    flow's templates/state shape are settled, to avoid rebasing cleanup work
+    on top of moving targets.
+  - Also noticed while doing the README fix: there's no root `.gitignore` in
+    this repo at all (only the `.gitignore.jinja` template for *generated*
+    projects), so `backend/**/__pycache__/`, `venv/`, `workspace/` show up as
+    untracked noise in every `git status`. Add one as part of this cleanup.

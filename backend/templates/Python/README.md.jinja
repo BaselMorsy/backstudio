@@ -19,6 +19,21 @@ This project was automatically generated from your specifications. The code is d
 │   ├── base.py              # Database configuration
 │   ├── models.py            # SQLAlchemy models
 │   └── repo.py              # Repository functions (CRUD)
+{% if project.modules or project.auth_enabled %}
+├── modules/
+{% for module in project.modules %}
+│   ├── {{ module.snake_name }}/
+│   │   ├── schemas.py       # Pydantic schemas
+│   │   ├── service.py       # Business logic (edit this)
+│   │   └── routes.py        # API endpoints
+{% endfor %}
+{% if project.auth_enabled %}
+│   ├── {{ project.auth_module_name }}/
+│   │   ├── schemas.py       # Auth request/response schemas
+│   │   ├── service.py       # Auth business logic (edit this)
+│   │   └── routes.py        # register/login/refresh/me endpoints
+{% endif %}
+{% endif %}
 {% if project.services %}
 {% for service in project.services %}
 ├── {{ service.name|snake_case }}/
@@ -27,9 +42,18 @@ This project was automatically generated from your specifications. The code is d
 │   └── routes.py            # API endpoints
 {% endfor %}
 {% endif %}
+{% if project.rbac_enabled %}
+├── rbac.py                  # Role-based access control dependency
+{% endif %}
+├── alembic/                 # Database migrations
+├── alembic.ini
+├── config.py                # Settings (loads .env)
 ├── middleware.py            # Custom middlewares
 ├── dependencies.py          # Dependency injection
 ├── requirements.txt         # Python dependencies
+{% if project.auth_enabled %}
+├── .env                     # JWT secret (auto-generated, gitignored)
+{% endif %}
 └── README.md               # This file
 ```
 
@@ -77,6 +101,13 @@ DATABASE_URL=sqlite:///./app.db
 DEBUG=True
 ```
 
+{% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
+`backstudio generate` already did this for you: the first time it generates this project it
+writes a random `{{ project.security_config.jwt_secret_env_var }}` into `.env` for local
+development (skipped if the variable is already set, or if `.env` already exists). Replace it
+with a securely-managed secret before deploying anywhere real.
+{% endif %}
+
 ## 🚀 Running
 
 ```bash
@@ -105,16 +136,43 @@ Table: `{{ model.table_name }}`
 
 Fields:
 {% for field in model.fields %}
-- `{{ field.name }}` ({{ field.type }}){% if field.primary_key %} - Primary Key{% endif %}{% if field.unique %} - Unique{% endif %}
+- `{{ field.name }}` ({{ field.type }}){% if field.primary_key %} - Primary Key{% endif %}{% if field.unique %} - Unique{% endif +%}
 {% endfor %}
 
 {% endfor %}
 {% else %}
-No data models defined. Add models through the BackStudio API.
+No data models defined.
 {% endif %}
 
-## 🔌 Services
+## 🔌 Modules
 
+{% if project.modules %}
+{% for module in project.modules %}
+### {{ module.name }}
+
+Entities: {% for entity in module.entities %}`{{ entity.name }}`{% if not loop.last %}, {% endif %}{% endfor +%}
+
+{% for entity in module.entities %}
+#### {{ entity.name }} — `{{ entity.base_path }}`
+
+Enabled actions: {{ entity.enabled_actions|join(', ') if entity.enabled_actions else '(none)' }}
+{% if project.rbac_enabled %}
+
+| Action | Allowed roles |
+|---|---|
+{% for action, roles in entity.rbac.items() %}| {{ action }} | {{ roles|join(', ') if roles else '(none)' }} |
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if project.auth_enabled %}
+### {{ project.auth_module_name }} (auth)
+
+JWT-based authentication: register, login, refresh, and `me` endpoints. See the
+Implementation Guide below to customize it.
+{% endif %}
 {% if project.services %}
 {% for service in project.services %}
 ### {{ service.name }}
@@ -134,8 +192,9 @@ No endpoints configured yet.
 {% endif %}
 
 {% endfor %}
-{% else %}
-No services defined. Add services through the BackStudio API.
+{% endif %}
+{% if not project.modules and not project.services and not project.auth_enabled %}
+No modules or services defined.
 {% endif %}
 
 ## 🔒 Security
@@ -146,16 +205,37 @@ No services defined. Add services through the BackStudio API.
 - **JWT Algorithm:** {{ project.security_config.jwt_algorithm }}
 - **Token Expiration:** {{ project.security_config.jwt_expiration_minutes }} minutes
 {% endif %}
-- **CORS:** {% if project.security_config.allowed_origins %}Enabled ({{ project.security_config.allowed_origins|length }} origins){% else %}Disabled{% endif %}
-- **Rate Limiting:** {% if project.security_config.rate_limit_enabled %}Enabled ({{ project.security_config.rate_limit_requests }} req/{{ project.security_config.rate_limit_window_minutes }}min){% else %}Disabled{% endif %}
+- **CORS:** {% if project.security_config.allowed_origins %}Enabled ({{ project.security_config.allowed_origins|length }} origins){% else %}Disabled{% endif +%}
+- **Rate Limiting:** {% if project.security_config.rate_limit_enabled %}Enabled ({{ project.security_config.rate_limit_requests }} req/{{ project.security_config.rate_limit_window_minutes }}min){% else %}Disabled{% endif +%}
 {% else %}
-No security configuration. Add through the BackStudio API.
+No authentication configured. Set `auth.enabled: true` in the ERD YAML and regenerate to add JWT auth.
+{% endif %}
+{% if project.rbac_enabled %}
+- **RBAC:** Enabled — roles: {{ project.rbac_roles|join(', ') }}
 {% endif %}
 
 ## ✍️ Implementation Guide
 
 This generated code provides the complete boilerplate. You only need to implement the business logic in service functions:
 
+{% if project.modules %}
+{% for module in project.modules %}
+### {{ module.name }}
+
+Edit `modules/{{ module.snake_name }}/service.py` and customize the generated CRUD wrapper
+functions for {% for entity in module.entities %}`{{ entity.name }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+Each function calls the matching repository function in `database/repo.py` — add validation
+or side effects there, or add new functions/endpoints in `modules/{{ module.snake_name }}/service.py`
+and `modules/{{ module.snake_name }}/routes.py`.
+
+{% endfor %}
+{% endif %}
+{% if project.auth_enabled %}
+### {{ project.auth_module_name }}
+
+Edit `modules/{{ project.auth_module_name }}/service.py` to customize registration, login,
+token refresh, and `get_current_user`.
+{% endif %}
 {% if project.services %}
 {% for service in project.services %}
 ### {{ service.name }}
@@ -167,7 +247,7 @@ Edit `{{ service.name|snake_case }}/service.py` and implement:
 - `{{ func.name }}()` - {{ func.description or 'TODO: Add description' }}
 {% endfor %}
 {% else %}
-No functions defined yet. Add through the BackStudio API.
+No functions defined yet.
 {% endif %}
 
 {% endfor %}
@@ -175,14 +255,14 @@ No functions defined yet. Add through the BackStudio API.
 
 ## 🔄 Database Migrations
 
+Alembic is already configured (`alembic.ini`, `alembic/`) and `backstudio generate` best-effort
+runs the first `alembic revision --autogenerate` for you.
+
 ```bash
-# Initialize Alembic (if using)
-alembic init alembic
+# Create a migration after changing entities in the ERD and regenerating
+alembic revision --autogenerate -m "describe your change"
 
-# Create migration
-alembic revision --autogenerate -m "Initial migration"
-
-# Run migrations
+# Apply migrations
 alembic upgrade head
 ```
 

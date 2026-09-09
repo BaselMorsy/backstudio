@@ -1,0 +1,18 @@
+project:
+  name: AsyncPostgres
+  version: "1.0.0"
+
+database:
+  type: postgresql
+  database_name: async_pg.db
+  async_mode: true
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

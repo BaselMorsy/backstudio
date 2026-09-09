@@ -14,16 +14,26 @@ python-dotenv==1.2.1
 # Database dependencies
 {% if project.database_config.type == 'postgresql' %}
 sqlalchemy==2.0.23
+{% if project.database_config.async_mode %}
+asyncpg==0.29.0
+{% else %}
 psycopg2-binary==2.9.9
+{% endif %}
 alembic==1.13.0
 {% elif project.database_config.type == 'mysql' %}
 sqlalchemy==2.0.23
+{% if project.database_config.async_mode %}
+aiomysql==0.2.0
+{% else %}
 pymysql==1.1.0
 cryptography==41.0.7
+{% endif %}
 alembic==1.13.0
 {% elif project.database_config.type == 'sqlite' %}
 sqlalchemy==2.0.23
+{% if project.database_config.async_mode %}
 aiosqlite==0.19.0
+{% endif %}
 alembic==1.13.0
 {% elif project.database_config.type == 'mongodb' %}
 motor==3.3.2

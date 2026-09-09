@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database.base import init_db
+from database.base import {% if project.database_config.async_mode %}engine, {% endif %}init_db
 {% if project.middlewares %}
 from middleware import {% for mw in project.middlewares %}{{ mw.name|snake_case }}{{ ", " if not loop.last else "" }}{% endfor %}
 {% endif %}
@@ -26,10 +26,14 @@ from modules.{{ project.auth_module_name }}.routes import router as auth_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    init_db()
+    {{ 'await ' if project.database_config.async_mode }}init_db()
     yield
-    # Shutdown (if cleanup needed)
+    # Shutdown
+{% if project.database_config.async_mode %}
+    await engine.dispose()
+{% else %}
     pass
+{% endif %}
 
 # Initialize FastAPI app
 app = FastAPI(

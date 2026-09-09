@@ -47,6 +47,10 @@ class {{ module.name|pascal_case }}Service:
 
     def update_{{ entity.snake_name }}(self, db: Session, item_id: int, data: dict) -> Optional[{{ entity.name }}]:
 {% for rel in entity.owned_relationships %}
+{% if not rel.fk_nullable %}
+        if "{{ rel.fk_column }}" in data and data["{{ rel.fk_column }}"] is None:
+            raise ValueError("{{ rel.fk_column }} cannot be null")
+{% endif %}
         if data.get("{{ rel.fk_column }}") is not None and repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"]) is None:
             raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
 {% endfor %}

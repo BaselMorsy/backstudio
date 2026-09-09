@@ -81,6 +81,12 @@ def _validate_semantics(erd: ERDConfig) -> None:
                 )
 
         for rel in entity.relationships:
+            if rel.target == entity.name:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': relationship '{rel.name}' targets itself "
+                    "— self-referential relationships are not yet supported by the CLI's "
+                    "code generation."
+                )
             if rel.target not in known_entities:
                 raise ERDValidationError(
                     f"Entity '{entity.name}': relationship '{rel.name}' target "

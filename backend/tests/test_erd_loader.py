@@ -55,6 +55,30 @@ entities:
         load_erd(bad)
 
 
+def test_self_referential_relationship_rejected(tmp_path):
+    """A relationship targeting its own entity would generate a duplicate FK column,
+    a duplicate relationship() and a duplicate keyword argument in the service/route
+    signatures (a SyntaxError) - reject it at validation time instead of emitting a
+    project that can't be imported.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Employee
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: manager, cardinality: many-to-one, target: Employee}
+services:
+  - {name: hr, entities: [Employee]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="targets itself"):
+        load_erd(bad)
+
+
 def test_rbac_without_auth_rejected(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text(

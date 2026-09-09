@@ -80,6 +80,11 @@ deleted, so we keep a record of what was considered and when.
   `backend/tests/test_generated_project_runtime.py`; full suite 96 passed,
   no regressions.
 
+- [ ] **Self-referential relationships (e.g. `Employee.manager` → `Employee`).**
+  Rejected outright by `loader.py` since 2026-09-09 (clear `ERDValidationError`
+  at validate/generate time) instead of silently generating an unimportable
+  project — real support needs `remote_side` in `models.py.jinja` plus
+  deduplication in `translate.py`'s owned/m2m derivation.
 - [ ] **Row-level access control (RLS).** RBAC (role → action) already
   exists; RLS (does this user own *this* row) does not. Flagged by the user
   as "extremely important." To be designed after/alongside async support,

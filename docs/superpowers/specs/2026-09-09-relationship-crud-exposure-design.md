@@ -53,8 +53,11 @@ many-to-many pieces the manual workaround still doesn't cover.
   - An optional query-param filter on the owning entity's own `list`
     endpoint (e.g. `GET /posts?category_id=5`), reusing the existing
     paginated list endpoint rather than adding a new route.
-- Every `many-to-many` relationship: a read-only `<target_plural>_ids`
-  field (e.g. `tag_ids: List[int]`) on `Response` only, populated via
+- Every `many-to-many` relationship: a read-only
+  `<target_model_snake>_ids` field — the target model name in singular
+  snake_case plus `_ids` (e.g. `Tag` → `tag_ids: List[int]`,
+  `OrderItem` → `order_item_ids: List[int]`) — on `Response` only,
+  populated via
   `selectinload` in the repo layer to avoid N+1 queries on `list`/`get`.
 
 **Explicitly out of scope** (per discussion — may become their own future
@@ -98,7 +101,7 @@ per-entity relationship list — no new parsing of the ERD:
         {
             "attribute": rel["source"]["attribute"] if rel["source"]["model"] == entity.name else rel["target"]["attribute"],
             "target_model": <the OTHER side's model name>,
-            "target_plural_snake": _pluralize(<target_model>),
+            "target_plural_snake": _pluralize(<target_model>),  # carried, but not used to name the Response field - see §4
         }
         for rel in <this entity's relationships>
         if rel["cardinality"] == "many-to-many"
@@ -135,12 +138,15 @@ For each entry in `owned_relationships`:
   alongside the entity's own fields, not nested.
 
 For each entry in `many_to_many_relationships`, `Response` only gets
-`{{ target_plural_snake }}_ids: List[int]`. Since a plain
+`{{ target_model|snake_case }}_ids: List[int]` — the target **model** name
+in singular snake_case, not the pluralized attribute name (so `Tag` →
+`tag_ids`, `OrderItem` → `order_item_ids`; never `tags_ids`/
+`order_items_ids`). Since a plain
 `class Config: from_attributes = True` can't rename+transform `tags`
 (a list of ORM `Tag` objects) into `tag_ids` (a list of `int`) on its own,
 the `Response` class gets a Pydantic v2 `model_validator(mode="before")`
 that, given the raw ORM object, reads `getattr(obj, "<attribute>")` and
-maps it to `<target_plural_snake>_ids = [t.id for t in ...]` before the
+maps it to `<target_model_snake>_ids = [t.id for t in ...]` before the
 rest of the model validates normally. `Create`/`Update` get nothing for
 many-to-many relationships (read-only, per §2).
 
@@ -177,6 +183,16 @@ check). A missing required (`fk_nullable: false`) FK on `Create` is
 already rejected by Pydantic itself (`422`) before the service method
 ever runs — the service-level check only needs to cover "present but
 wrong", not "missing".
+
+This existence check is **advisory, not atomic**: the referenced row is
+looked up in a separate statement from the insert/update, so a concurrent
+delete landing between the check and the write (a TOCTOU race) can still
+let a dangling reference through — the check converts the common case (a
+typo'd or stale id) from an opaque `500` into a clean `400`, it is not a
+strict integrity guarantee. That trade-off is acceptable for a
+schema-first CRUD scaffold; real enforcement belongs to the database's
+own FK constraint (which this CLI's SQLite output doesn't enable today —
+see §2).
 
 ## 6. Read side: query-param filter + N+1 avoidance
 

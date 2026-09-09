@@ -319,6 +319,33 @@ An entity with two relationships to the same target (e.g. a `Message` with a `se
 derived from each relationship's own `name`, and the loader raises a clear error if two
 relationships on the same entity would still collide.
 
+A relationship targeting its own entity (e.g. `Employee` → `Employee` for a `manager`) is
+rejected with a clear error — self-referential relationships are not supported yet.
+
+**What a relationship adds to the generated API.** Declaring a relationship doesn't just wire
+up `database/models.py`; it also changes the generated schemas, service and routes:
+
+- **`many-to-one` / `one-to-one`** (and `one-to-many` seen from the FK-owning side) — the
+  entity that holds the FK column gets that column as a real field on all three of its
+  schemas. For `examples/blog.yml`'s `Post` → `Category`, `PostCreate`, `PostUpdate` and
+  `PostResponse` each gain `category_id: Optional[int] = None` (it's `int` instead when the
+  relationship is `nullable: false`, and named after `foreign_key_column` if you override it).
+  So `POST /posts` with `{"title": "Hi", "body": "...", "category_id": 3}` now sets the
+  category, and `category_id` comes back in the response body.
+- **A nonexistent id returns `400`.** The service checks the referenced row exists before
+  writing, so `POST /posts` with `{"category_id": 999}` returns
+  `400 {"detail": "Category 999 not found"}` rather than a raw DB error (or, on SQLite, a
+  silently dangling reference). The check is advisory, not transactional.
+- **The owning entity's list endpoint gains a filter.** `list_post_route` picks up an optional
+  `category_id` query param, so `GET /posts?category_id=3` returns only that category's posts —
+  the read direction of a one-to-many, without a nested collection on `CategoryResponse`.
+- **`many-to-many`** — the `Response` schema (only) gains a read-only id list named after the
+  **target model in singular snake_case** plus `_ids`: a `Post` with a many-to-many to `Tag`
+  gets `tag_ids: List[int] = []` on `PostResponse`, and `Tag` gets `post_ids` on
+  `TagResponse`. It's populated from the loaded association (via `selectinload`, so listing
+  posts costs one extra query, not one per row). There is no write path for it yet — sending
+  `tag_ids` to `POST`/`PUT` does nothing; associate rows in your own code for now.
+
 #### `endpoints`
 
 ```yaml

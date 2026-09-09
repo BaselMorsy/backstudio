@@ -72,3 +72,15 @@ def test_uppercase_service_name_rejected():
     bad["services"] = [{"name": "Widgets", "entities": ["Widget"]}]
     with pytest.raises(ValidationError):
         ERDConfig(**bad)
+
+
+def test_database_async_mode_defaults_to_false():
+    from backend.erd.schema import DatabaseSpec
+    spec = DatabaseSpec(type="sqlite", database_name="d.db")
+    assert spec.async_mode is False
+
+
+def test_database_async_mode_can_be_enabled():
+    from backend.erd.schema import DatabaseSpec
+    spec = DatabaseSpec(type="sqlite", database_name="d.db", async_mode=True)
+    assert spec.async_mode is True

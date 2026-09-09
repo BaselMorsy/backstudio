@@ -819,3 +819,35 @@ def test_self_referential_one_to_many_produces_distinct_attributes():
             "target_snake": "category",
         }
     ]
+
+
+def test_translate_passes_database_async_mode_through():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Demo", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="d.db", async_mode=True),
+        entities=[
+            EntitySpec(
+                name="Widget",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+    assert state["database_config"]["async_mode"] is True
+
+
+def test_translate_database_async_mode_defaults_false():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Demo", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="d.db"),
+        entities=[
+            EntitySpec(
+                name="Widget",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+    assert state["database_config"]["async_mode"] is False

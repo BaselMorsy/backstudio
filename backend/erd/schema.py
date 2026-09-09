@@ -32,6 +32,7 @@ class DatabaseSpec(BaseModel):
     use_env_vars: bool = True
     pool_size: int = 10
     echo: bool = False
+    async_mode: bool = False
 
 
 class JWTSpec(BaseModel):

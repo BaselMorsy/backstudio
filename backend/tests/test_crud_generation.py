@@ -126,3 +126,79 @@ def test_all_actions_disabled_entity_gets_schemas_and_service_but_no_routes(tmp_
         assert f"def {action}_audit_log_route" not in routes_src
     assert '"/audit_logs"' not in routes_src
     assert 'summary="Create AuditLog"' not in routes_src
+
+
+def test_owned_relationship_fk_field_on_create_update_response(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # Product has many-to-one to Category
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "catalog" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+
+    create_start = schemas_src.index("class ProductCreate(BaseModel):")
+    update_start = schemas_src.index("class ProductUpdate(BaseModel):")
+    response_start = schemas_src.index("class ProductResponse(BaseModel):")
+    create_src = schemas_src[create_start:update_start]
+    update_src = schemas_src[update_start:response_start]
+    response_src = schemas_src[response_start:]
+
+    assert "category_id: Optional[int] = None" in create_src  # nullable by default
+    assert "category_id: Optional[int] = None" in update_src
+    assert "category_id: Optional[int] = None" in response_src
+
+
+def test_many_to_many_id_list_on_response_only(tmp_path):
+    erd = load_erd(f"{FIXTURES}/many_to_many.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "content" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+
+    create_start = schemas_src.index("class PostCreate(BaseModel):")
+    update_start = schemas_src.index("class PostUpdate(BaseModel):")
+    response_start = schemas_src.index("class PostResponse(BaseModel):")
+    create_src = schemas_src[create_start:update_start]
+    update_src = schemas_src[update_start:response_start]
+    response_src = schemas_src[response_start:]
+
+    assert "tag_ids" not in create_src
+    assert "tag_ids" not in update_src
+    assert "tag_ids: List[int] = []" in response_src
+    assert "model_validator" in response_src
+
+
+def test_many_to_many_response_validator_extracts_ids_from_orm_relationship(tmp_path):
+    """The strongest check: actually import the rendered schemas.py and validate a
+    fake ORM-like object through it, proving the model_validator works at runtime -
+    not just that the text is present.
+    """
+    erd = load_erd(f"{FIXTURES}/many_to_many.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "generated_m2m_schemas", codebase_dir / "modules" / "content" / "schemas.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class FakeTag:
+        def __init__(self, id_):
+            self.id = id_
+
+    class FakePost:
+        id = 1
+        title = "Hello"
+        tags = [FakeTag(1), FakeTag(2)]
+
+    result = module.PostResponse.model_validate(FakePost())
+    assert result.tag_ids == [1, 2]

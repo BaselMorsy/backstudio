@@ -1,0 +1,26 @@
+project:
+  name: M2MDemo
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: m2m.db
+
+entities:
+  - name: Post
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string}
+    relationships:
+      - name: tags
+        cardinality: many-to-many
+        target: Tag
+
+  - name: Tag
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+services:
+  - name: content
+    entities: [Post, Tag]

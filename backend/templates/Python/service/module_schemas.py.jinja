@@ -1,9 +1,10 @@
 """{{ project.name }} - {{ module.name }} schemas (auto-generated CRUD)"""
 
 {% set json_fields = module.entities|map(attribute='fields')|sum(start=[])|selectattr('type', 'equalto', 'json')|list %}
-from typing import Optional{% if json_fields %}, Any{% endif +%}
+{% set has_m2m = (module.entities|map(attribute='many_to_many_relationships')|map('length')|sum) > 0 %}
+from typing import Optional{% if json_fields %}, Any{% endif %}{% if has_m2m %}, List{% endif +%}
 from datetime import date, datetime
-from pydantic import BaseModel
+from pydantic import BaseModel{% if has_m2m %}, model_validator{% endif +%}
 
 {% for entity in module.entities %}
 
@@ -14,7 +15,10 @@ class {{ entity.name }}Create(BaseModel):
     {{ field.name }}: {% if field.nullable %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %}{% if field.default is not none %} = {{ field.default|python_value }}{% elif field.nullable %} = None{% endif +%}
 {% endif %}
 {% endfor %}
-{% if entity.fields|rejectattr('primary_key')|list|length == 0 %}
+{% for rel in entity.owned_relationships %}
+    {{ rel.fk_column }}: {% if rel.fk_nullable %}Optional[int] = None{% else %}int{% endif +%}
+{% endfor %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
     pass
 {% endif %}
 
@@ -26,7 +30,10 @@ class {{ entity.name }}Update(BaseModel):
     {{ field.name }}: Optional[{{ get_python_type(field.type) }}] = None
 {% endif %}
 {% endfor %}
-{% if entity.fields|rejectattr('primary_key')|list|length == 0 %}
+{% for rel in entity.owned_relationships %}
+    {{ rel.fk_column }}: Optional[int] = None
+{% endfor %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
     pass
 {% endif %}
 
@@ -42,6 +49,23 @@ class {{ entity.name }}Response(BaseModel):
     {{ field.name }}: {{ get_python_type(field.type) }} = None
 {% endif %}
 {% endfor %}
+{% for rel in entity.owned_relationships %}
+    {{ rel.fk_column }}: {% if rel.fk_nullable %}Optional[int] = None{% else %}int{% endif +%}
+{% endfor %}
+{% for rel in entity.many_to_many_relationships %}
+    {{ rel.target_model|snake_case }}_ids: List[int] = []
+{% endfor %}
+{% if entity.many_to_many_relationships %}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compute_m2m_ids(cls, data):
+        if not isinstance(data, dict):
+{% for rel in entity.many_to_many_relationships %}
+            data.{{ rel.target_model|snake_case }}_ids = [item.id for item in getattr(data, "{{ rel.attribute }}", [])]
+{% endfor %}
+        return data
+{% endif %}
 
     class Config:
         from_attributes = True

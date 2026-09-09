@@ -1,43 +1,48 @@
-"""{{ project.name }} - {{ entity.name }} routes (auto-generated CRUD)"""
+"""{{ project.name }} - {{ module.name }} routes (auto-generated CRUD)"""
 
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from database.base import get_db
-from database.repo import (
-    create_{{ entity.snake_name }},
-    get_{{ entity.snake_name }}_by_id,
-    get_all_{{ entity.snake_name }}s,
-    update_{{ entity.snake_name }},
-    delete_{{ entity.snake_name }},
+from .schemas import (
+{% for entity in module.entities %}
+    {{ entity.name }}Create, {{ entity.name }}Response, {{ entity.name }}Update,
+{% endfor %}
 )
-from .schemas import {{ entity.name }}Create, {{ entity.name }}Response, {{ entity.name }}Update
+from .service import {{ module.name|pascal_case }}Service, get_{{ module.snake_name }}_service
 {% if project.rbac_enabled %}
 from rbac import require_roles
 {% endif %}
 
 router = APIRouter()
 
+{% for entity in module.entities %}
 {% if 'create' in entity.enabled_actions %}
 @router.post(
-    "",
+    "{{ entity.base_path }}",
     response_model={{ entity.name }}Response,
     status_code=status.HTTP_201_CREATED,
     summary="Create {{ entity.name }}",
+    tags={{ entity.tags|tojson }},
 {% if project.rbac_enabled and entity.rbac['create'] %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def create_{{ entity.snake_name }}_route(payload: {{ entity.name }}Create, db: Session = Depends(get_db)) -> {{ entity.name }}Response:
-    return create_{{ entity.snake_name }}(db, payload.model_dump())
+def create_{{ entity.snake_name }}_route(
+    payload: {{ entity.name }}Create,
+    db: Session = Depends(get_db),
+    service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+) -> {{ entity.name }}Response:
+    return service.create_{{ entity.snake_name }}(db, payload.model_dump())
 {% endif %}
 
 {% if 'list' in entity.enabled_actions %}
 @router.get(
-    "",
+    "{{ entity.base_path }}",
     response_model=List[{{ entity.name }}Response],
     summary="List {{ entity.name }} records",
+    tags={{ entity.tags|tojson }},
 {% if project.rbac_enabled and entity.rbac['list'] %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
@@ -46,21 +51,27 @@ def list_{{ entity.snake_name }}_route(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> List[{{ entity.name }}Response]:
-    return get_all_{{ entity.snake_name }}s(db, skip=skip, limit=limit)
+    return service.list_{{ entity.snake_name }}s(db, skip=skip, limit=limit)
 {% endif %}
 
 {% if 'read' in entity.enabled_actions %}
 @router.get(
-    "/{item_id}",
+    "{{ entity.base_path }}/{item_id}",
     response_model={{ entity.name }}Response,
     summary="Get {{ entity.name }} by id",
+    tags={{ entity.tags|tojson }},
 {% if project.rbac_enabled and entity.rbac['read'] %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def get_{{ entity.snake_name }}_route(item_id: int, db: Session = Depends(get_db)) -> {{ entity.name }}Response:
-    item = get_{{ entity.snake_name }}_by_id(db, item_id)
+def get_{{ entity.snake_name }}_route(
+    item_id: int,
+    db: Session = Depends(get_db),
+    service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+) -> {{ entity.name }}Response:
+    item = service.get_{{ entity.snake_name }}(db, item_id)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
     return item
@@ -68,15 +79,21 @@ def get_{{ entity.snake_name }}_route(item_id: int, db: Session = Depends(get_db
 
 {% if 'update' in entity.enabled_actions %}
 @router.put(
-    "/{item_id}",
+    "{{ entity.base_path }}/{item_id}",
     response_model={{ entity.name }}Response,
     summary="Update {{ entity.name }}",
+    tags={{ entity.tags|tojson }},
 {% if project.rbac_enabled and entity.rbac['update'] %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def update_{{ entity.snake_name }}_route(item_id: int, payload: {{ entity.name }}Update, db: Session = Depends(get_db)) -> {{ entity.name }}Response:
-    item = update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
+def update_{{ entity.snake_name }}_route(
+    item_id: int,
+    payload: {{ entity.name }}Update,
+    db: Session = Depends(get_db),
+    service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+) -> {{ entity.name }}Response:
+    item = service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
     return item
@@ -84,15 +101,21 @@ def update_{{ entity.snake_name }}_route(item_id: int, payload: {{ entity.name }
 
 {% if 'delete' in entity.enabled_actions %}
 @router.delete(
-    "/{item_id}",
+    "{{ entity.base_path }}/{item_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete {{ entity.name }}",
+    tags={{ entity.tags|tojson }},
 {% if project.rbac_enabled and entity.rbac['delete'] %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def delete_{{ entity.snake_name }}_route(item_id: int, db: Session = Depends(get_db)) -> None:
-    deleted = delete_{{ entity.snake_name }}(db, item_id)
+def delete_{{ entity.snake_name }}_route(
+    item_id: int,
+    db: Session = Depends(get_db),
+    service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+) -> None:
+    deleted = service.delete_{{ entity.snake_name }}(db, item_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
 {% endif %}
+{% endfor %}

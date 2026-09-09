@@ -1,9 +1,10 @@
-"""{{ project.name }} - {{ entity.name }} schemas (auto-generated CRUD)"""
+"""{{ project.name }} - {{ module.name }} schemas (auto-generated CRUD)"""
 
 from typing import Any, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
 
+{% for entity in module.entities %}
 
 class {{ entity.name }}Create(BaseModel):
     """Fields required to create a {{ entity.name }}."""
@@ -32,12 +33,9 @@ class {{ entity.name }}Update(BaseModel):
 class {{ entity.name }}Response(BaseModel):
     """{{ entity.name }} as returned by the API."""
 {% for field in entity.fields %}
-{% if field.primary_key %}
-    {{ field.name }}: {{ get_python_type(field.type) }}
-{% else %}
-    {{ field.name }}: {% if field.nullable %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %} = None
-{% endif %}
+    {{ field.name }}: {% if field.nullable and not field.primary_key %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %} = None
 {% endfor %}
 
     class Config:
         from_attributes = True
+{% endfor %}

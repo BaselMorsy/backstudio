@@ -13,7 +13,7 @@ def test_generate_writes_codebase_and_reports_path(tmp_path):
     assert result.exit_code == 0
     assert "Generated at:" in result.output
     assert (tmp_path / "Demo" / "codebase" / "server.py").exists()
-    assert (tmp_path / "Demo" / "codebase" / "widgets" / "routes.py").exists()
+    assert (tmp_path / "Demo" / "codebase" / "modules" / "widgets" / "routes.py").exists()
 
 
 def test_generate_refuses_to_overwrite_without_force(tmp_path):

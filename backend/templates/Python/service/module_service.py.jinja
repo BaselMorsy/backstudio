@@ -1,0 +1,51 @@
+"""{{ project.name }} - {{ module.name }} service"""
+
+from typing import List, Optional
+from sqlalchemy.orm import Session
+
+from database import repo
+from database.models import (
+{% for entity in module.entities %}
+    {{ entity.name }},
+{% endfor %}
+)
+
+
+class {{ module.name|pascal_case }}Service:
+    """{{ module.name|pascal_case }}Service - business logic for {{ module.entities|map(attribute='name')|join(', ') }}.
+
+    Singleton: constructed once per process (see get_{{ module.snake_name }}_service below).
+    Do not store per-request state on self (e.g. the current user, request data) --
+    pass it as a method parameter instead, or it will leak across concurrent requests
+    sharing this same instance.
+    """
+
+    def __init__(self) -> None:
+        pass
+
+{% for entity in module.entities %}
+    def create_{{ entity.snake_name }}(self, db: Session, data: dict) -> {{ entity.name }}:
+        return repo.create_{{ entity.snake_name }}(db, data)
+
+    def list_{{ entity.snake_name }}s(self, db: Session, skip: int = 0, limit: int = 100) -> List[{{ entity.name }}]:
+        return repo.get_all_{{ entity.snake_name }}s(db, skip=skip, limit=limit)
+
+    def get_{{ entity.snake_name }}(self, db: Session, item_id: int) -> Optional[{{ entity.name }}]:
+        return repo.get_{{ entity.snake_name }}_by_id(db, item_id)
+
+    def update_{{ entity.snake_name }}(self, db: Session, item_id: int, data: dict) -> Optional[{{ entity.name }}]:
+        return repo.update_{{ entity.snake_name }}(db, item_id, data)
+
+    def delete_{{ entity.snake_name }}(self, db: Session, item_id: int) -> bool:
+        return repo.delete_{{ entity.snake_name }}(db, item_id)
+
+{% endfor %}
+
+_{{ module.snake_name }}_service_instance: Optional["{{ module.name|pascal_case }}Service"] = None
+
+
+def get_{{ module.snake_name }}_service() -> "{{ module.name|pascal_case }}Service":
+    global _{{ module.snake_name }}_service_instance
+    if _{{ module.snake_name }}_service_instance is None:
+        _{{ module.snake_name }}_service_instance = {{ module.name|pascal_case }}Service()
+    return _{{ module.snake_name }}_service_instance

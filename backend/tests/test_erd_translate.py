@@ -27,7 +27,7 @@ def test_translate_minimal():
     assert state["rbac_enabled"] is False
     assert [m["name"] for m in state["data_models"]] == ["Widget"]
 
-    entity = state["crud_entities"][0]
+    entity = state["modules"][0]["entities"][0]
     assert entity["name"] == "Widget"
     assert entity["plural_snake"] == "widgets"
     assert entity["base_path"] == "/widgets"
@@ -59,7 +59,8 @@ def test_translate_full_injects_user_and_relationships():
     category = next(m for m in state["data_models"] if m["name"] == "Category")
     assert len(category["relationships"]) == 1  # same relationship appears on both sides
 
-    product_entity = next(e for e in state["crud_entities"] if e["name"] == "Product")
+    catalog_module = next(m for m in state["modules"] if m["name"] == "catalog")
+    product_entity = next(e for e in catalog_module["entities"] if e["name"] == "Product")
     assert product_entity["rbac"]["create"] == ["admin"]
     assert product_entity["rbac"]["delete"] == ["admin"]
     assert product_entity["rbac"]["read"] == ["admin", "editor", "viewer"]  # from rbac.default_permissions
@@ -380,11 +381,12 @@ def test_translate_field_types_are_strings_not_enums():
         f"database type should be 'postgresql', got {repr(state['database_config']['type'])}"
     )
 
-    # Check crud_entities fields as well
-    product_entity = next(e for e in state["crud_entities"] if e["name"] == "Product")
+    # Check module-grouped entity fields as well
+    catalog_module = next(m for m in state["modules"] if m["name"] == "catalog")
+    product_entity = next(e for e in catalog_module["entities"] if e["name"] == "Product")
     for field in product_entity["fields"]:
         assert isinstance(field["type"], str), (
-            f"CRUD entity field {field['name']} type should be string, got {type(field['type']).__name__}"
+            f"Module entity field {field['name']} type should be string, got {type(field['type']).__name__}"
         )
 
 

@@ -28,12 +28,12 @@ def test_shophub_mini_generates_a_complete_working_tree(tmp_path):
         "database/models.py",
         "database/repo.py",
         "database/base.py",
-        "categories/routes.py",
-        "categories/schemas.py",
-        "products/routes.py",
-        "products/schemas.py",
-        "orders/routes.py",
-        "orders/schemas.py",
+        "modules/catalog/routes.py",
+        "modules/catalog/schemas.py",
+        "modules/catalog/service.py",
+        "modules/ordering/routes.py",
+        "modules/ordering/schemas.py",
+        "modules/ordering/service.py",
         "auth/routes.py",
         "auth/service.py",
         "auth/schemas.py",
@@ -52,9 +52,9 @@ def test_shophub_mini_generates_a_complete_working_tree(tmp_path):
     assert "class Product(Base):" in models_src
     assert "class Order(Base):" in models_src
 
-    products_routes_src = (codebase_dir / "products" / "routes.py").read_text(encoding="utf-8")
-    assert "from rbac import require_roles" in products_routes_src
-    assert 'require_roles("admin")' in products_routes_src
+    catalog_routes_src = (codebase_dir / "modules" / "catalog" / "routes.py").read_text(encoding="utf-8")
+    assert "from rbac import require_roles" in catalog_routes_src
+    assert 'require_roles("admin")' in catalog_routes_src
 
 
 def test_shophub_mini_byte_compiles(tmp_path):

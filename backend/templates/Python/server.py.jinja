@@ -13,9 +13,9 @@ from middleware import {% for mw in project.middlewares %}{{ mw.name|snake_case 
 from {{ service.name|snake_case }}.routes import router as {{ service.name|snake_case }}_router
 {% endfor %}
 {% endif %}
-{% if project.crud_entities %}
-{% for entity in project.crud_entities %}
-from {{ entity.plural_snake }}.routes import router as {{ entity.plural_snake }}_router
+{% if project.modules %}
+{% for module in project.modules %}
+from modules.{{ module.snake_name }}.routes import router as {{ module.snake_name }}_router
 {% endfor %}
 {% endif %}
 {% if project.auth_enabled %}
@@ -76,9 +76,9 @@ app.include_router(
 )
 {% endfor %}
 {% endif %}
-{% if project.crud_entities %}
-{% for entity in project.crud_entities %}
-app.include_router({{ entity.plural_snake }}_router, prefix="{{ entity.base_path }}", tags={{ entity.tags|tojson }})
+{% if project.modules %}
+{% for module in project.modules %}
+app.include_router({{ module.snake_name }}_router)
 {% endfor %}
 {% endif %}
 {% if project.auth_enabled %}

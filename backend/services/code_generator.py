@@ -241,20 +241,29 @@ class CodeGenerator:
                 self._render_template("Python/service/routes.py.jinja", service_context)
             )
 
-        # Generate auto-CRUD entity directories from an ERD (services list is separate/legacy)
-        for entity in state.get('crud_entities', []):
-            entity_dir = output_dir / entity['plural_snake']
-            ensure_directory(entity_dir)
-            (entity_dir / "__init__.py").touch()
+        # Generate one directory per service/module from an ERD
+        if state.get('modules'):
+            modules_dir = output_dir / "modules"
+            ensure_directory(modules_dir)
+            (modules_dir / "__init__.py").touch()
 
-            entity_context = {'project': state, 'entity': entity}
+        for module in state.get('modules', []):
+            module_dir = output_dir / "modules" / module['snake_name']
+            ensure_directory(module_dir)
+            (module_dir / "__init__.py").touch()
+
+            module_context = {'project': state, 'module': module}
             self._write_file(
-                entity_dir / "schemas.py",
-                self._render_template("Python/service/crud_schemas.py.jinja", entity_context)
+                module_dir / "schemas.py",
+                self._render_template("Python/service/module_schemas.py.jinja", module_context)
             )
             self._write_file(
-                entity_dir / "routes.py",
-                self._render_template("Python/service/crud_routes.py.jinja", entity_context)
+                module_dir / "service.py",
+                self._render_template("Python/service/module_service.py.jinja", module_context)
+            )
+            self._write_file(
+                module_dir / "routes.py",
+                self._render_template("Python/service/module_routes.py.jinja", module_context)
             )
 
         # Auth service (JWT register/login/refresh/me)

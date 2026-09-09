@@ -275,7 +275,6 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "dependencies": [],
         "database_config": erd.database.model_dump(mode='json'),
         "security_config": security_config,
-        "crud_entities": crud_entities,
         "modules": modules,
         "auth_module_name": auth_module_name,
         "auth_enabled": erd.auth.enabled,

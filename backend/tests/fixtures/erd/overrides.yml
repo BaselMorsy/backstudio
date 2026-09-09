@@ -1,0 +1,28 @@
+project:
+  name: OverridesDemo
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: overrides.db
+
+entities:
+  - name: Category
+    table_name: cats
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+    endpoints:
+      base_path: /my-categories
+      tags: [custom-tag]
+
+  - name: AuditLog
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: message, type: string}
+    endpoints:
+      enabled: []
+
+services:
+  - name: stuff
+    entities: [Category, AuditLog]

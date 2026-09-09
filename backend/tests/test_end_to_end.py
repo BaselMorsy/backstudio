@@ -80,6 +80,43 @@ def test_shophub_mini_relationship_crosses_service_boundary(tmp_path):
     assert "product = relationship(" in order_class_src
 
 
+def test_one_to_one_relationship_generates_and_compiles(tmp_path):
+    """One-to-one cardinality is unit-tested at the translate() level in
+    test_erd_translate.py; this exercises the full generation pipeline
+    (rendered models.py + byte-compile), which wasn't covered before.
+    """
+    erd = load_erd(f"{FIXTURES}/one_to_one.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    ast.parse(models_src)
+
+    author_start = models_src.index("class Author(Base):")
+    profile_start = models_src.index("class Profile(Base):")
+    author_src = models_src[author_start:profile_start]
+
+    # FK lives on the source (Author) for one-to-one, and must be unique.
+    assert "profile_id" in author_src
+    assert "ForeignKey('profiles.id')" in author_src or 'ForeignKey("profiles.id")' in author_src
+    assert "unique=True" in author_src
+    assert "profile = relationship(" in author_src
+    assert "uselist=False" in author_src
+
+    profile_src = models_src[profile_start:]
+    assert "author = relationship(" in profile_src
+    assert "uselist=False" in profile_src
+
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_shophub_mini_byte_compiles(tmp_path):
     """A stronger check than ast.parse: byte-compile every generated module."""
     erd = load_erd(f"{FIXTURES}/shophub_mini.yml")

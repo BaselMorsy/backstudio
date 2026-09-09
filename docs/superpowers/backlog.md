@@ -65,10 +65,22 @@ deleted, so we keep a record of what was considered and when.
 - [ ] Generated CRUD schemas can't express relationships. Confirmed this
   matches the original spec's documented scope — not a bug, a known
   limitation worth revisiting if relationship-aware schemas become valuable.
-- [ ] No test coverage (though manually confirmed working) for: all-actions
+- [x] No test coverage (though manually confirmed working) for: all-actions
   -disabled entity, zero-entity ERD, auth-enabled/rbac-disabled generation,
   one-to-one relationship generation specifically, custom `table_name`,
   `base_path`/`tags` overrides.
+  Addressed 2026-09-09: zero-entity ERD turned out to already be covered
+  (`test_empty_entities_rejected`/`test_missing_entities_key_rejected` in
+  `test_erd_loader.py`). Added 5 new tests for the rest, with 3 new fixtures
+  (`overrides.yml`, `auth_no_rbac.yml`, `one_to_one.yml`):
+  `test_custom_table_name_overrides_pluralized_default`,
+  `test_custom_base_path_and_tags_used_in_routes`,
+  `test_all_actions_disabled_entity_gets_schemas_and_service_but_no_routes`
+  (all in `test_crud_generation.py`),
+  `test_auth_enabled_rbac_disabled_generates_auth_without_rbac_gating`
+  (`test_rbac_generation.py`), and
+  `test_one_to_one_relationship_generates_and_compiles` (`test_end_to_end.py`,
+  byte-compiles the rendered project). Full suite: 78 passed.
 
 ## Documentation
 

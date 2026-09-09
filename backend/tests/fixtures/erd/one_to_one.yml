@@ -1,0 +1,26 @@
+project:
+  name: OneToOneDemo
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: one_to_one.db
+
+entities:
+  - name: Author
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+    relationships:
+      - name: profile
+        cardinality: one-to-one
+        target: Profile
+
+  - name: Profile
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: bio, type: text}
+
+services:
+  - name: people
+    entities: [Author, Profile]

@@ -71,3 +71,58 @@ def test_rbac_dependency_only_imported_when_rbac_enabled(tmp_path):
     routes_src = (codebase_dir / "modules" / "widgets" / "routes.py").read_text(encoding="utf-8")
     ast.parse(routes_src)
     assert "from rbac import require_roles" not in routes_src
+
+
+def test_custom_table_name_overrides_pluralized_default(tmp_path):
+    erd = load_erd(f"{FIXTURES}/overrides.yml")  # Category declares table_name: cats
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    ast.parse(models_src)
+    assert '__tablename__ = "cats"' in models_src
+    assert '__tablename__ = "categories"' not in models_src
+
+
+def test_custom_base_path_and_tags_used_in_routes(tmp_path):
+    erd = load_erd(f"{FIXTURES}/overrides.yml")  # Category overrides base_path and tags
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "stuff" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert '"/my-categories"' in routes_src
+    assert '"/categories"' not in routes_src
+    assert 'tags=["custom-tag"]' in routes_src
+
+
+def test_all_actions_disabled_entity_gets_schemas_and_service_but_no_routes(tmp_path):
+    """AuditLog declares endpoints.enabled: [] - it should still get full CRUD
+    schemas and service methods (those don't look at enabled_actions), but zero
+    route decorators in the shared module routes.py.
+    """
+    erd = load_erd(f"{FIXTURES}/overrides.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "stuff" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+    assert "class AuditLogCreate(BaseModel):" in schemas_src
+    assert "class AuditLogResponse(BaseModel):" in schemas_src
+
+    service_src = (codebase_dir / "modules" / "stuff" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+    assert "def create_audit_log(self, db: Session, data: dict)" in service_src
+
+    routes_src = (codebase_dir / "modules" / "stuff" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    for action in ("create", "list", "get", "update", "delete"):
+        assert f"def {action}_audit_log_route" not in routes_src
+    assert '"/audit_logs"' not in routes_src
+    assert 'summary="Create AuditLog"' not in routes_src

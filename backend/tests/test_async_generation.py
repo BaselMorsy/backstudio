@@ -373,3 +373,43 @@ def test_async_repo_functions_actually_run_against_a_real_db(tmp_path):
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_async_routes_are_async_and_await_service(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "content" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    assert "from sqlalchemy.ext.asyncio import AsyncSession" in routes_src
+    assert "from sqlalchemy.orm import Session" not in routes_src
+
+    create_start = routes_src.index("async def create_post_route(")
+    create_end = routes_src.index("\n@router", create_start)
+    create_src = routes_src[create_start:create_end]
+    assert "async def create_post_route(" in create_src
+    assert "db: AsyncSession = Depends(get_db)" in create_src
+    assert "await service.create_post(db, payload.model_dump())" in create_src
+
+    list_start = routes_src.index("async def list_post_route(")
+    list_end = routes_src.index("\n@router", list_start)
+    list_src = routes_src[list_start:list_end]
+    assert "async def list_post_route(" in list_src
+    assert "await service.list_posts(" in list_src
+
+
+def test_sync_routes_still_unchanged_when_async_mode_omitted(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "catalog" / "routes.py").read_text(encoding="utf-8")
+    assert "from sqlalchemy.orm import Session" in routes_src
+    assert "async def" not in routes_src
+    assert "await " not in routes_src

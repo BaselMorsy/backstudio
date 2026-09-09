@@ -1,9 +1,14 @@
 """{{ project.name }} - {{ module.name }} routes (auto-generated CRUD)"""
 
+{% set is_async = project.database_config.async_mode %}
 {% set has_owned_rel = (module.entities|map(attribute='owned_relationships')|map('length')|sum) > 0 %}
 from typing import List{% if has_owned_rel %}, Optional{% endif +%}
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+{% if is_async %}
+from sqlalchemy.ext.asyncio import AsyncSession
+{% else %}
 from sqlalchemy.orm import Session
+{% endif %}
 
 from database.base import get_db
 from .schemas import (
@@ -30,18 +35,18 @@ router = APIRouter()
     dependencies=[Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def create_{{ entity.snake_name }}_route(
+{{ 'async ' if is_async }}def create_{{ entity.snake_name }}_route(
     payload: {{ entity.name }}Create,
-    db: Session = Depends(get_db),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> {{ entity.name }}Response:
 {% if entity.owned_relationships %}
     try:
-        return service.create_{{ entity.snake_name }}(db, payload.model_dump())
+        return {{ 'await ' if is_async }}service.create_{{ entity.snake_name }}(db, payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 {% else %}
-    return service.create_{{ entity.snake_name }}(db, payload.model_dump())
+    return {{ 'await ' if is_async }}service.create_{{ entity.snake_name }}(db, payload.model_dump())
 {% endif %}
 {% endif %}
 
@@ -55,16 +60,16 @@ def create_{{ entity.snake_name }}_route(
     dependencies=[Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def list_{{ entity.snake_name }}_route(
+{{ 'async ' if is_async }}def list_{{ entity.snake_name }}_route(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
 {% for rel in entity.owned_relationships %}
     {{ rel.fk_column }}: Optional[int] = Query(None),
 {% endfor %}
-    db: Session = Depends(get_db),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> List[{{ entity.name }}Response]:
-    return service.list_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
+    return {{ 'await ' if is_async }}service.list_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
 {% endif %}
 
 {% if 'read' in entity.enabled_actions %}
@@ -77,12 +82,12 @@ def list_{{ entity.snake_name }}_route(
     dependencies=[Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def get_{{ entity.snake_name }}_route(
+{{ 'async ' if is_async }}def get_{{ entity.snake_name }}_route(
     item_id: int,
-    db: Session = Depends(get_db),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> {{ entity.name }}Response:
-    item = service.get_{{ entity.snake_name }}(db, item_id)
+    item = {{ 'await ' if is_async }}service.get_{{ entity.snake_name }}(db, item_id)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
     return item
@@ -98,19 +103,19 @@ def get_{{ entity.snake_name }}_route(
     dependencies=[Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def update_{{ entity.snake_name }}_route(
+{{ 'async ' if is_async }}def update_{{ entity.snake_name }}_route(
     item_id: int,
     payload: {{ entity.name }}Update,
-    db: Session = Depends(get_db),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> {{ entity.name }}Response:
 {% if entity.owned_relationships %}
     try:
-        item = service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
+        item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 {% else %}
-    item = service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
+    item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
 {% endif %}
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
@@ -127,12 +132,12 @@ def update_{{ entity.snake_name }}_route(
     dependencies=[Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
-def delete_{{ entity.snake_name }}_route(
+{{ 'async ' if is_async }}def delete_{{ entity.snake_name }}_route(
     item_id: int,
-    db: Session = Depends(get_db),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> None:
-    deleted = service.delete_{{ entity.snake_name }}(db, item_id)
+    deleted = {{ 'await ' if is_async }}service.delete_{{ entity.snake_name }}(db, item_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
 {% endif %}

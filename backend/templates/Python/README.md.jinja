@@ -87,7 +87,17 @@ Create a `.env` file in the project root:
 ```env
 # Database
 {% if project.database_config %}
+{% if project.database_config.async_mode %}
+{% if project.database_config.type == 'postgresql' %}
+DATABASE_URL=postgresql+asyncpg://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
+{% elif project.database_config.type == 'mysql' %}
+DATABASE_URL=mysql+aiomysql://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
+{% else %}
+DATABASE_URL=sqlite+aiosqlite:///./app.db
+{% endif %}
+{% else %}
 DATABASE_URL={{ project.database_config.type }}://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
+{% endif %}
 {% else %}
 DATABASE_URL=sqlite:///./app.db
 {% endif %}

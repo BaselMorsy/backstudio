@@ -808,3 +808,86 @@ def test_async_mode_full_stack_round_trip_against_real_generated_app(tmp_path, m
     # wrong, this test - or, worse, the whole pytest process at the very end of a full
     # suite run - would hang here rather than fail cleanly. Reaching this line at all
     # is part of what this test proves.
+
+
+def test_async_many_to_many_id_list_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """async_relationships.yml: Author/Tag/Post (Post has a many-to-one to Author and a
+    many-to-many to Tag). No auth block in the fixture, so no JWT_SECRET needed - same
+    shape as test_many_to_many_id_list_round_trip_against_real_generated_app above, but
+    generated in async_mode.
+
+    This is the regression test for the async create_<model>() m2m bug: async create()
+    committed and refreshed the new row but never eagerly loaded its many-to-many
+    relationship attributes, so module_schemas.py.jinja's response model_validator
+    (which does `getattr(data, "<rel.attribute>", [])` to compute `<target>_ids`)
+    triggered a lazy load during response serialization - which raises
+    sqlalchemy.exc.MissingGreenlet under AsyncSession and turns POST into a 500 (after
+    the row has already been written). POST /tags and POST /posts returning 201 with
+    the correct id-list field is exactly what used to fail here.
+    """
+    erd = load_erd(f"{FIXTURES}/async_relationships.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "async_m2m_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import asyncio
+        import importlib
+
+        server_module = importlib.import_module("server")
+        database_base = importlib.import_module("database.base")
+        database_models = importlib.import_module("database.models")
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # --- the critical assertions: these 500'd before the fix ---
+            post_resp = client.post("/posts", json={"title": "Hello"})
+            assert post_resp.status_code == 201, post_resp.text
+            post_id = post_resp.json()["id"]
+            assert post_resp.json()["tag_ids"] == []
+
+            tag1_resp = client.post("/tags", json={"name": "python"})
+            assert tag1_resp.status_code == 201, tag1_resp.text
+            tag2_resp = client.post("/tags", json={"name": "fastapi"})
+            assert tag2_resp.status_code == 201, tag2_resp.text
+            tag1_id, tag2_id = tag1_resp.json()["id"], tag2_resp.json()["id"]
+
+            # link tags directly via the ORM - there is no write endpoint for
+            # many-to-many (out of scope per spec). Async session, so this needs its
+            # own event loop rather than the sync SessionLocal()/db.query() pattern
+            # used by the sync many-to-many test; selectinload eagerly loads the m2m
+            # collection before it's touched, mirroring get_post_by_id's own pattern,
+            # so this helper itself doesn't hit the same lazy-load-outside-greenlet
+            # trap this test exists to catch on the create() path.
+            async def _link_tags():
+                async with database_base.AsyncSessionLocal() as db:
+                    post_result = await db.execute(
+                        select(database_models.Post)
+                        .options(selectinload(database_models.Post.tags))
+                        .where(database_models.Post.id == post_id)
+                    )
+                    post_obj = post_result.scalar_one()
+                    tags_result = await db.execute(
+                        select(database_models.Tag).where(database_models.Tag.id.in_([tag1_id, tag2_id]))
+                    )
+                    tag_objs = tags_result.scalars().all()
+                    post_obj.tags.extend(tag_objs)
+                    await db.commit()
+
+            asyncio.run(_link_tags())
+
+            get_resp = client.get(f"/posts/{post_id}")
+            assert get_resp.status_code == 200, get_resp.text
+            assert sorted(get_resp.json()["tag_ids"]) == sorted([tag1_id, tag2_id])
+
+            list_resp = client.get("/posts")
+            assert list_resp.status_code == 200, list_resp.text
+            listed_post = next(p for p in list_resp.json() if p["id"] == post_id)
+            assert sorted(listed_post["tag_ids"]) == sorted([tag1_id, tag2_id])

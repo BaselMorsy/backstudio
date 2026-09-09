@@ -23,6 +23,9 @@ async def create_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|sna
     db.add({{ model.name|snake_case }})
     await db.commit()
     await db.refresh({{ model.name|snake_case }})
+{% for rel in model.many_to_many_relationships %}
+    await db.refresh({{ model.name|snake_case }}, attribute_names=["{{ rel.attribute }}"])
+{% endfor %}
     return {{ model.name|snake_case }}
 {% else %}
 def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_data: dict) -> {{ model.name|pascal_case }}:

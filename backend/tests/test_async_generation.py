@@ -578,3 +578,53 @@ def test_async_auth_register_and_login_actually_work(tmp_path):
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_async_postgresql_readme_documents_asyncpg_database_url(tmp_path):
+    """README.md.jinja is the *generated project's* README (distinct from this repo's
+    root README.md, which Task 9 already correctly updated). Following its DATABASE_URL
+    instructions verbatim must not produce a broken app: an async+postgresql project
+    ships asyncpg (not psycopg2) in requirements.txt, so the README must document the
+    postgresql+asyncpg:// scheme, not a bare postgresql:// one.
+    """
+    erd = load_erd(f"{FIXTURES}/async_postgresql.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    readme_src = (codebase_dir / "README.md").read_text(encoding="utf-8")
+    assert "DATABASE_URL=postgresql+asyncpg://" in readme_src
+    assert "DATABASE_URL=postgresql://" not in readme_src
+
+
+def test_async_mysql_readme_documents_aiomysql_database_url(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_mysql.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    readme_src = (codebase_dir / "README.md").read_text(encoding="utf-8")
+    assert "DATABASE_URL=mysql+aiomysql://" in readme_src
+    assert "DATABASE_URL=mysql://" not in readme_src
+
+
+def test_sync_readme_database_url_unchanged(tmp_path):
+    """valid_full.yml is sync (no async_mode key) with database.type postgresql - the
+    opt-in regression guard for README.md.jinja: a sync project's DATABASE_URL line must
+    render byte-identical to how it did before this fix (bare scheme, no +asyncpg/
+    +aiomysql/+aiosqlite anywhere in the README).
+    """
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+    assert state["database_config"]["async_mode"] is False
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    readme_src = (codebase_dir / "README.md").read_text(encoding="utf-8")
+    assert "DATABASE_URL=postgresql://user:password@localhost/shophub_db" in readme_src
+    assert "+asyncpg" not in readme_src
+    assert "+aiomysql" not in readme_src
+    assert "+aiosqlite" not in readme_src

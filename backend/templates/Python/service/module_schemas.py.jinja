@@ -1,6 +1,7 @@
 """{{ project.name }} - {{ module.name }} schemas (auto-generated CRUD)"""
 
-from typing import Any, Optional
+{% set json_fields = module.entities|map(attribute='fields')|sum(start=[])|selectattr('type', 'equalto', 'json')|list %}
+from typing import Optional{% if json_fields %}, Any{% endif +%}
 from datetime import date, datetime
 from pydantic import BaseModel
 

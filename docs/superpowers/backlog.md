@@ -27,14 +27,38 @@ deleted, so we keep a record of what was considered and when.
 
 ## Minor findings — modular-services final review
 
-- [ ] Missing blank lines between entities in generated `routes.py` (cosmetic).
-- [ ] Auth service uses a different DI pattern (module-level singleton call)
+- [x] Missing blank lines between entities in generated `routes.py` (cosmetic).
+  Fixed 2026-09-09: `module_routes.py.jinja` now emits a blank line after each
+  entity's last route (matching the spacing already used between actions
+  within one entity), verified against the rendered blog example.
+- [x] Auth service uses a different DI pattern (module-level singleton call)
   than regular modules (`Depends(get_X_service)`) — inconsistent, not wrong.
-- [ ] Validation error messages could suggest the YAML fix inline.
-- [ ] Unused `Any` import + naive pluralization (`list_categorys`) —
+  Fixed 2026-09-09: `/register`, `/login`, `/refresh` now take
+  `service: AuthService = Depends(get_..._service)` like every other module's
+  routes. `/me` (and `rbac.py`'s `require_roles`) keep the module-level
+  `_service = get_..._service()` singleton — unavoidable, since `Depends()`
+  needs a bound method at route-definition time, not per-request. Verified
+  via the real HTTP round-trip test in `test_generated_project_runtime.py`.
+- [x] Validation error messages could suggest the YAML fix inline.
+  Fixed 2026-09-09: added actionable suggestions to the `loader.py` messages
+  that lacked them — reserved-field collisions, unknown relationship targets
+  (now lists valid targets), unknown RBAC roles (now lists declared roles),
+  and unassigned/multiply-assigned entities (now names the YAML fix). Schema
+  -level messages (`schema.py`) already had suggestions and were left as-is.
+- [x] Unused `Any` import + naive pluralization (`list_categorys`) —
   pre-existing, not introduced by modular-services.
-- [ ] A user-declared `User` entity combined with `auth.enabled: false` is
+  Fixed 2026-09-09: added `plural_snake` (the same `_pluralize()` used for
+  `crud_entities`) to `translate.py`'s `data_models` entries too, and swapped
+  every naive `{{ entity.snake_name }}s` / `{{ model.name|snake_case }}s` in
+  `repo.py.jinja`, `module_service.py.jinja`, `module_routes.py.jinja` for it
+  (`list_categories`/`get_all_categories`, not `list_categorys`). The `Any`
+  import in `module_schemas.py.jinja` is now conditional on the module
+  actually containing a `json`-typed field.
+- [x] A user-declared `User` entity combined with `auth.enabled: false` is
   silently excluded with no clear error message.
+  Fixed 2026-09-09: `loader.py` now raises a clear `ERDValidationError` for
+  this case ("Entity 'User' is reserved for the auto-managed auth entity...")
+  instead of silently dropping the entity in `translate.py`.
 
 ## Minor findings — original ERD-CLI final review
 

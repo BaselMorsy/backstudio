@@ -33,8 +33,9 @@ def test_generates_auth_module_when_enabled(tmp_path):
     assert '"/register"' in routes_src
     assert '"/login"' in routes_src
     assert '"/me"' in routes_src
-    assert "_service = get_auth_service()" in routes_src
-    assert "_service.register_user(" in routes_src
+    assert "_service = get_auth_service()" in routes_src  # needed for Depends(_service.get_current_user)
+    assert "service: AuthService = Depends(get_auth_service)" in routes_src
+    assert "service.register_user(" in routes_src
 
     # /refresh must take the token in the request body, not a bare query param.
     assert "payload: RefreshRequest" in routes_src

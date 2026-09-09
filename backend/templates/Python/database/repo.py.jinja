@@ -38,7 +38,7 @@ def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: Session, {{ field.na
 {% endif %}
 {%- endfor %}
 
-def get_all_{{ model.name|snake_case }}s(db: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name|pascal_case }}]:
+def get_all_{{ model.plural_snake }}(db: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name|pascal_case }}]:
     """Get all {{ model.name }}s with pagination"""
     return db.query({{ model.name|pascal_case }}).offset(skip).limit(limit).all()
 

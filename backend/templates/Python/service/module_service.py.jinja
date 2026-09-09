@@ -27,8 +27,8 @@ class {{ module.name|pascal_case }}Service:
     def create_{{ entity.snake_name }}(self, db: Session, data: dict) -> {{ entity.name }}:
         return repo.create_{{ entity.snake_name }}(db, data)
 
-    def list_{{ entity.snake_name }}s(self, db: Session, skip: int = 0, limit: int = 100) -> List[{{ entity.name }}]:
-        return repo.get_all_{{ entity.snake_name }}s(db, skip=skip, limit=limit)
+    def list_{{ entity.plural_snake }}(self, db: Session, skip: int = 0, limit: int = 100) -> List[{{ entity.name }}]:
+        return repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit)
 
     def get_{{ entity.snake_name }}(self, db: Session, item_id: int) -> Optional[{{ entity.name }}]:
         return repo.get_{{ entity.snake_name }}_by_id(db, item_id)

@@ -53,6 +53,14 @@ def _validate_semantics(erd: ERDConfig) -> None:
     if duplicates:
         raise ERDValidationError(f"Duplicate entity name(s): {', '.join(duplicates)}")
 
+    if not erd.auth.enabled and "User" in entity_names:
+        raise ERDValidationError(
+            "Entity 'User' is reserved for the auto-managed auth entity, but auth.enabled is "
+            "false — a declared 'User' entity would be silently dropped from generation. "
+            "Either rename this entity, or set auth.enabled: true (declared fields on 'User' "
+            "are then merged into the auto-injected auth fields)."
+        )
+
     known_entities = set(entity_names) | ({"User"} if erd.auth.enabled else set())
 
     for entity in erd.entities:
@@ -67,14 +75,18 @@ def _validate_semantics(erd: ERDConfig) -> None:
             collide = sorted(set(field_names) & RESERVED_USER_FIELDS)
             if collide:
                 raise ERDValidationError(
-                    f"Entity 'User': field(s) {', '.join(collide)} collide with auto-injected auth fields"
+                    f"Entity 'User': field(s) {', '.join(collide)} collide with auto-injected auth "
+                    f"fields ({', '.join(sorted(RESERVED_USER_FIELDS))}) — rename the colliding "
+                    "field(s) on your declared 'User' entity."
                 )
 
         for rel in entity.relationships:
             if rel.target not in known_entities:
                 raise ERDValidationError(
                     f"Entity '{entity.name}': relationship '{rel.name}' target "
-                    f"'{rel.target}' not found among declared entities"
+                    f"'{rel.target}' not found among declared entities "
+                    f"({', '.join(sorted(known_entities)) or 'none declared'}) — check the spelling, "
+                    "or declare the target entity in the ERD's 'entities:' list."
                 )
 
         if erd.rbac.enabled and entity.endpoints.rbac is not None:
@@ -84,7 +96,9 @@ def _validate_semantics(erd: ERDConfig) -> None:
                 if unknown:
                     raise ERDValidationError(
                         f"Entity '{entity.name}': endpoints.rbac.{action} references "
-                        f"unknown role(s): {', '.join(unknown)}"
+                        f"unknown role(s): {', '.join(unknown)} — declared roles are: "
+                        f"{', '.join(erd.rbac.roles) or 'none declared'} (add missing roles to "
+                        "rbac.roles, or fix the typo)."
                     )
 
     _validate_services(erd)
@@ -94,7 +108,10 @@ def _validate_semantics(erd: ERDConfig) -> None:
             unknown = sorted(set(roles) - set(erd.rbac.roles))
             if unknown:
                 raise ERDValidationError(
-                    f"rbac.default_permissions.{action} references unknown role(s): {', '.join(unknown)}"
+                    f"rbac.default_permissions.{action} references unknown role(s): "
+                    f"{', '.join(unknown)} — declared roles are: "
+                    f"{', '.join(erd.rbac.roles) or 'none declared'} (add missing roles to "
+                    "rbac.roles, or fix the typo)."
                 )
 
 
@@ -148,7 +165,9 @@ def _validate_services(erd: ERDConfig) -> None:
     if unassigned:
         raise ERDValidationError(
             f"Entity(ies) not assigned to any service: {', '.join(unassigned)} — every entity "
-            "must belong to exactly one service"
+            "must belong to exactly one service. Add each to a 'services:' entry's 'entities:' "
+            "list at the end of the ERD file (e.g. '- {name: <service>, entities: "
+            f"[{unassigned[0]}]}}')."
         )
 
     multiply_assigned = {name: svcs for name, svcs in assigned.items() if len(svcs) > 1}
@@ -158,5 +177,5 @@ def _validate_services(erd: ERDConfig) -> None:
         )
         raise ERDValidationError(
             f"Entity(ies) assigned to multiple services: {details} — each entity must belong to "
-            "exactly one service"
+            "exactly one service. Remove it from all but one service's 'entities:' list."
         )

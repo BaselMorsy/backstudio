@@ -166,7 +166,13 @@ def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
     fields = [dict(f) for f in AUTH_USER_FIELDS]
     if declared:
         fields.extend(f.model_dump(mode='json') for f in declared.fields)
-    return {"name": "User", "table_name": "users", "fields": fields, "relationships": []}
+    return {
+        "name": "User",
+        "table_name": "users",
+        "plural_snake": _pluralize("User"),
+        "fields": fields,
+        "relationships": [],
+    }
 
 
 def _resolve_rbac(erd: ERDConfig, entity: EntitySpec) -> Dict[str, List[str]]:
@@ -212,6 +218,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         entity.name: {
             "name": entity.name,
             "table_name": _table_name(erd, entity.name),
+            "plural_snake": _pluralize(entity.name),
             "fields": [f.model_dump(mode='json') for f in entity.fields],
             "relationships": [],
         }

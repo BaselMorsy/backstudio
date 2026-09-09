@@ -53,7 +53,7 @@ def list_{{ entity.snake_name }}_route(
     db: Session = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 ) -> List[{{ entity.name }}Response]:
-    return service.list_{{ entity.snake_name }}s(db, skip=skip, limit=limit)
+    return service.list_{{ entity.plural_snake }}(db, skip=skip, limit=limit)
 {% endif %}
 
 {% if 'read' in entity.enabled_actions %}
@@ -118,4 +118,5 @@ def delete_{{ entity.snake_name }}_route(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
 {% endif %}
+
 {% endfor %}

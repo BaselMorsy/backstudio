@@ -691,3 +691,131 @@ def test_many_to_many_relationships_both_sides():
     assert tag["many_to_many_relationships"] == [
         {"attribute": "posts", "target_model": "Post", "target_plural_snake": "posts"}
     ]
+
+
+def test_self_referential_many_to_one_produces_distinct_views_and_single_owned_fk():
+    """Employee.manager: both the FK-owning ('manager') and reverse-collection
+    ('manager_employees') views live on the SAME entity - must get distinct
+    attribute names, and owned_relationships must count the FK exactly once even
+    though it appears twice in data_models["Employee"]["relationships"] (once per
+    _view, one for each of the two relationship() declarations models.py.jinja
+    needs to render on the same class).
+    """
+    erd = ERDConfig(
+        project=ProjectMeta(name="Org", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="org.db"),
+        entities=[
+            EntitySpec(
+                name="Employee",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="manager", cardinality="many-to-one", target="Employee")
+                ],
+            ),
+        ],
+        services=[ServiceDecl(name="hr", entities=["Employee"])],
+    )
+    state = translate(erd)
+
+    employee = next(m for m in state["data_models"] if m["name"] == "Employee")
+    rels = employee["relationships"]
+    assert len(rels) == 2, "self-referential relationship must appear twice (once per _view)"
+    views = {r["_view"] for r in rels}
+    assert views == {"source", "target"}
+
+    attributes = {r["source"]["attribute"] if r["_view"] == "source" else r["target"]["attribute"] for r in rels}
+    assert attributes == {"manager", "manager_employees"}
+
+    assert employee["owned_relationships"] == [
+        {
+            "attribute": "manager",
+            "fk_column": "manager_id",
+            "fk_nullable": True,
+            "target_model": "Employee",
+            "target_snake": "employee",
+        }
+    ]
+    assert employee["many_to_many_relationships"] == []
+
+
+def test_self_referential_one_to_one_produces_distinct_attributes():
+    """Employee.buddy: the default (non-self-ref) one-to-one formula would give
+    both sides the identical attribute 'employee' - self-referential must force
+    name_basis to keep them distinct.
+    """
+    erd = ERDConfig(
+        project=ProjectMeta(name="Org", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="org.db"),
+        entities=[
+            EntitySpec(
+                name="Employee",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="buddy", cardinality="one-to-one", target="Employee")
+                ],
+            ),
+        ],
+        services=[ServiceDecl(name="hr", entities=["Employee"])],
+    )
+    state = translate(erd)
+
+    employee = next(m for m in state["data_models"] if m["name"] == "Employee")
+    rels = employee["relationships"]
+    assert len(rels) == 2
+
+    attributes = {r["source"]["attribute"] if r["_view"] == "source" else r["target"]["attribute"] for r in rels}
+    assert attributes == {"buddy", "buddy_employee"}
+    assert len(attributes) == 2, "the two self-referential views must not collide on the same attribute name"
+
+    assert employee["owned_relationships"] == [
+        {
+            "attribute": "buddy",
+            "fk_column": "buddy_id",
+            "fk_nullable": True,
+            "target_model": "Employee",
+            "target_snake": "employee",
+        }
+    ]
+
+
+def test_self_referential_one_to_many_produces_distinct_attributes():
+    """Category.children: the default (non-self-ref) one-to-many target_attribute
+    formula (name_basis alone, no suffix) would collide with source_attribute
+    (also name_basis) once both land on the same class - needs its own
+    self-referential suffix, distinct from one-to-one's/many-to-one's.
+    """
+    erd = ERDConfig(
+        project=ProjectMeta(name="Catalog", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="catalog.db"),
+        entities=[
+            EntitySpec(
+                name="Category",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="children", cardinality="one-to-many", target="Category")
+                ],
+            ),
+        ],
+        services=[ServiceDecl(name="catalog", entities=["Category"])],
+    )
+    state = translate(erd)
+
+    category = next(m for m in state["data_models"] if m["name"] == "Category")
+    rels = category["relationships"]
+    assert len(rels) == 2
+
+    attributes = {r["source"]["attribute"] if r["_view"] == "source" else r["target"]["attribute"] for r in rels}
+    assert attributes == {"children", "children_category"}
+    assert len(attributes) == 2
+
+    # For one-to-many, the target side owns the FK (translate.py's existing
+    # normalization) - self-referential or not, that doesn't change.
+    assert category["owned_relationships"] == [
+        {
+            "attribute": "children_category",
+            "fk_column": "children_id",
+            "fk_nullable": True,
+            "target_model": "Category",
+            "target_snake": "category",
+        }
+    ]

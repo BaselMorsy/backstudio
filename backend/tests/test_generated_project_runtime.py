@@ -620,3 +620,70 @@ def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path,
                 headers=admin_headers,
             )
             assert bad_resp.status_code == 400, bad_resp.text
+
+
+def test_self_referential_relationships_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """self_referential.yml: Employee.manager (many-to-one) and Category.children
+    (one-to-many), both self-referential. No auth/rbac in this fixture. Covers the
+    full stack for a self-referential FK: create, read back the FK, filter by it,
+    and reject a nonexistent FK - exactly like the non-self-referential
+    owned-relationship test above, but with source and target being the same
+    entity, which is exactly the case that used to make `generate` emit an
+    unimportable project (duplicate FK column / duplicate relationship() /
+    duplicate keyword argument).
+    """
+    erd = load_erd(f"{FIXTURES}/self_referential.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "self_ref_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # --- Employee.manager (many-to-one self-referential) ---
+            boss_resp = client.post("/employees", json={"name": "Boss"})
+            assert boss_resp.status_code == 201, boss_resp.text
+            boss_id = boss_resp.json()["id"]
+            assert boss_resp.json()["manager_id"] is None
+
+            report_resp = client.post("/employees", json={"name": "Alice", "manager_id": boss_id})
+            assert report_resp.status_code == 201, report_resp.text
+            report_id = report_resp.json()["id"]
+            assert report_resp.json()["manager_id"] == boss_id
+
+            # a second, unrelated employee, to prove the filter actually filters
+            client.post("/employees", json={"name": "Nobody"})
+
+            filtered_resp = client.get(f"/employees?manager_id={boss_id}")
+            assert filtered_resp.status_code == 200, filtered_resp.text
+            names = [e["name"] for e in filtered_resp.json()]
+            assert names == ["Alice"]
+
+            bad_manager_resp = client.post("/employees", json={"name": "Bob", "manager_id": 999999})
+            assert bad_manager_resp.status_code == 400, bad_manager_resp.text
+
+            get_report_resp = client.get(f"/employees/{report_id}")
+            assert get_report_resp.status_code == 200, get_report_resp.text
+            assert get_report_resp.json()["manager_id"] == boss_id
+
+            # --- Category.children (one-to-many self-referential) ---
+            root_resp = client.post("/categories", json={"label": "Root"})
+            assert root_resp.status_code == 201, root_resp.text
+            root_id = root_resp.json()["id"]
+            assert root_resp.json()["children_id"] is None
+
+            child_resp = client.post("/categories", json={"label": "Child", "children_id": root_id})
+            assert child_resp.status_code == 201, child_resp.text
+            assert child_resp.json()["children_id"] == root_id
+
+            bad_parent_resp = client.post("/categories", json={"label": "Orphan", "children_id": 999999})
+            assert bad_parent_resp.status_code == 400, bad_parent_resp.text

@@ -54,7 +54,7 @@ class {{ model.name|pascal_case }}(Base):
 {% if model.relationships %}
     # Foreign key columns (for relationships)
 {% for rel in model.relationships %}
-    {% if rel.cardinality == 'many-to-one' and rel.foreign_key and rel.source.model == model.name %}
+    {% if rel.cardinality == 'many-to-one' and rel.foreign_key and rel.source.model == model.name and (rel._view is not defined or rel._view == 'source') %}
     {{ rel.foreign_key.column }} = Column(
         {{ get_sqlalchemy_type('integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
@@ -65,7 +65,7 @@ class {{ model.name|pascal_case }}(Base):
         unique=True,
 {% endif %}
     )
-    {% elif rel.cardinality == 'one-to-many' and rel.foreign_key and rel.target.model == model.name %}
+    {% elif rel.cardinality == 'one-to-many' and rel.foreign_key and rel.target.model == model.name and (rel._view is not defined or rel._view == 'target') %}
     {{ rel.foreign_key.column }} = Column(
         {{ get_sqlalchemy_type('integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
@@ -76,7 +76,7 @@ class {{ model.name|pascal_case }}(Base):
         unique=True,
 {% endif %}
     )
-    {% elif rel.cardinality == 'one-to-one' and rel.foreign_key and rel.foreign_key.model == model.name %}
+    {% elif rel.cardinality == 'one-to-one' and rel.foreign_key and rel.foreign_key.model == model.name and (rel._view is not defined or rel._view == 'source') %}
     {{ rel.foreign_key.column }} = Column(
         {{ get_sqlalchemy_type('integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
@@ -89,14 +89,21 @@ class {{ model.name|pascal_case }}(Base):
 {% endfor %}
 
     # Relationships
+    {% set self_pk_field = model.fields|selectattr('primary_key')|first %}
+    {% set self_pk_name = self_pk_field.name if self_pk_field else 'id' %}
 {% for rel in model.relationships %}
-    {%- set is_source = rel.source.model == model.name -%}
+    {%- set is_source = (rel._view == 'source') if (rel._view is defined) else (rel.source.model == model.name) -%}
     {%- set this_side = rel.source if is_source else rel.target -%}
     {%- set other_side = rel.target if is_source else rel.source -%}
+    {%- set is_self_ref = rel.source.model == rel.target.model -%}
+    {%- set this_side_owns_fk = is_source if rel.cardinality in ['many-to-one', 'one-to-one'] else not is_source -%}
     {% if rel.cardinality == 'one-to-many' %}
     {{ this_side.attribute }} = relationship(
         "{{ other_side.model|pascal_case }}",
         back_populates="{{ other_side.attribute }}",
+{% if is_self_ref and this_side_owns_fk %}
+        remote_side=[{{ self_pk_name }}],
+{% endif %}
 {% if this_side.lazy %}
         lazy="{{ this_side.lazy }}",
 {% endif %}
@@ -111,6 +118,9 @@ class {{ model.name|pascal_case }}(Base):
     {{ this_side.attribute }} = relationship(
         "{{ other_side.model|pascal_case }}",
         back_populates="{{ other_side.attribute }}",
+{% if is_self_ref and this_side_owns_fk %}
+        remote_side=[{{ self_pk_name }}],
+{% endif %}
 {% if this_side.lazy %}
         lazy="{{ this_side.lazy }}",
 {% endif %}
@@ -120,6 +130,9 @@ class {{ model.name|pascal_case }}(Base):
         "{{ other_side.model|pascal_case }}",
         back_populates="{{ other_side.attribute }}",
         uselist=False,
+{% if is_self_ref and this_side_owns_fk %}
+        remote_side=[{{ self_pk_name }}],
+{% endif %}
 {% if this_side.lazy %}
         lazy="{{ this_side.lazy }}",
 {% endif %}

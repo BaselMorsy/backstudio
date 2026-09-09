@@ -59,10 +59,18 @@ def _build_relationship(
     entity_table = _table_name(erd, entity.name)
     target_table = _table_name(erd, rel.target)
     name_basis = _snake_case(rel.name)
+    is_self_referential = entity.name == rel.target
 
     if rel.cardinality == "one-to-many":
         source_attribute = rel.attribute or (name_basis if use_name_basis else _pluralize(rel.target))
-        target_attribute = rel.target_attribute or (name_basis if use_name_basis else _snake_case(entity.name))
+        if is_self_referential:
+            # The generic default (name_basis alone, or entity-name-derived) would collide
+            # with source_attribute since both live on the same class for a self-referential
+            # relationship - suffix with the entity name, mirroring one-to-one's convention,
+            # to keep the two sides distinct (e.g. Category.children / Category.children_category).
+            target_attribute = rel.target_attribute or f"{name_basis}_{_snake_case(entity.name)}"
+        else:
+            target_attribute = rel.target_attribute or (name_basis if use_name_basis else _snake_case(entity.name))
     elif rel.cardinality == "many-to-one":
         source_attribute = rel.attribute or (name_basis if use_name_basis else _snake_case(rel.target))
         target_attribute = rel.target_attribute or (
@@ -135,22 +143,31 @@ def _validate_relationship_uniqueness(entity_name: str, rels: List[Dict[str, Any
     attribute name or the same FK column name on that entity - better to fail
     loudly at translation time than silently drop/overwrite one in the generated
     SQLAlchemy class.
+
+    A self-referential relationship appears twice in `rels` (once per `_view`,
+    see `translate()`) - both entries share the same `name` but must resolve to
+    *different* attributes (they're two distinct relationship() declarations on
+    the same class), so the attribute check keys on `(name, view)` rather than
+    `name` alone. The FK-column check stays keyed on `name` alone: both views of
+    a self-referential relationship legitimately share the same FK column, and
+    that's not a collision - only two genuinely different relationships (a real
+    name mismatch) claiming the same column is.
     """
-    seen_attrs: Dict[str, str] = {}
+    seen_attrs: Dict[str, Any] = {}
     seen_fks: Dict[str, str] = {}
     for rel_dict in rels:
-        attribute = (
-            rel_dict["source"]["attribute"] if rel_dict["source"]["model"] == entity_name
-            else rel_dict["target"]["attribute"]
-        )
+        view = rel_dict.get("_view")
+        is_source = (view == "source") if view is not None else (rel_dict["source"]["model"] == entity_name)
+        attribute = rel_dict["source"]["attribute"] if is_source else rel_dict["target"]["attribute"]
+        claim_key = (rel_dict["name"], view)
         prior = seen_attrs.get(attribute)
-        if prior is not None and prior != rel_dict["name"]:
+        if prior is not None and prior != claim_key:
             raise ERDValidationError(
-                f"Entity '{entity_name}': relationships '{prior}' and '{rel_dict['name']}' both derive the "
+                f"Entity '{entity_name}': relationships '{prior[0]}' and '{rel_dict['name']}' both derive the "
                 f"attribute name '{attribute}'. Set an explicit 'attribute'/'target_attribute' on one of them "
                 "to disambiguate."
             )
-        seen_attrs[attribute] = rel_dict["name"]
+        seen_attrs[attribute] = claim_key
 
         fk = rel_dict.get("foreign_key")
         if fk and fk["model"] == entity_name:
@@ -170,13 +187,31 @@ def _owned_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> Li
     cardinality keyword declared it (a one-to-many declared from the parent side and
     the equivalent many-to-one declared from the child side both normalize to the
     same foreign_key.model in _build_relationship, so this check covers both).
+
+    A self-referential relationship appears twice in `rels` (once per `_view`) but
+    owns exactly one FK column - dedupe back down to a single entry, and make sure
+    it's specifically the FK-owning view's attribute that's kept (not just whichever
+    of the two happens to be encountered first): many-to-one/one-to-one own the FK
+    from the source side, one-to-many from the target side, mirroring
+    _build_relationship's fk_model assignment.
     """
     owned: List[Dict[str, Any]] = []
+    seen_names: set = set()
     for rel in rels:
         fk = rel.get("foreign_key")
         if not fk or fk["model"] != entity_name:
             continue
-        is_source = rel["source"]["model"] == entity_name
+        if rel["name"] in seen_names:
+            continue
+        view = rel.get("_view")
+        if view is not None:
+            is_fk_owner_view = (view == "source") if rel["cardinality"] != "one-to-many" else (view == "target")
+            if not is_fk_owner_view:
+                continue
+            is_source = view == "source"
+        else:
+            is_source = rel["source"]["model"] == entity_name
+        seen_names.add(rel["name"])
         other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
         owned.append({
             "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
@@ -189,11 +224,20 @@ def _owned_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> Li
 
 
 def _many_to_many_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """See `_owned_relationships_for` - same `_view`-aware dedup, for the case of a
+    (currently rejected at validation time, see loader.py) self-referential
+    many-to-many relationship, so this stays correct if that's ever lifted.
+    """
     m2m: List[Dict[str, Any]] = []
+    seen_names: set = set()
     for rel in rels:
         if rel["cardinality"] != "many-to-many":
             continue
-        is_source = rel["source"]["model"] == entity_name
+        if rel["name"] in seen_names:
+            continue
+        seen_names.add(rel["name"])
+        view = rel.get("_view")
+        is_source = (view == "source") if view is not None else (rel["source"]["model"] == entity_name)
         other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
         m2m.append({
             "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
@@ -276,13 +320,29 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
     for entity in entities:
         target_counts = Counter(rel.target for rel in entity.relationships)
         for rel in entity.relationships:
-            use_name_basis = target_counts[rel.target] > 1
+            is_self_referential = entity.name == rel.target
+            # Self-referential relationships always get name_basis-derived attribute
+            # names: the generic defaults (bare model-name-derived, no rel.name
+            # involved) collide once both sides land on the same class - see
+            # _build_relationship's is_self_referential branch for one-to-many, and
+            # the collision this avoids for one-to-one/many-to-many.
+            use_name_basis = target_counts[rel.target] > 1 or is_self_referential
             rel_dict = _build_relationship(erd, entity, rel, use_name_basis)
             relationships.append(rel_dict)
-            if entity.name in data_models:
-                data_models[entity.name]["relationships"].append(rel_dict)
-            if rel.target in data_models:
-                data_models[rel.target]["relationships"].append(rel_dict)
+            if is_self_referential:
+                # Both "sides" of the relationship live on the same entity here, so
+                # a single shared dict can't represent both views (source vs target)
+                # at once - append two tagged copies instead of the same object
+                # twice, so downstream consumers (the uniqueness validator, the
+                # owned/m2m derivation, models.py.jinja) can tell them apart.
+                if entity.name in data_models:
+                    data_models[entity.name]["relationships"].append({**rel_dict, "_view": "source"})
+                    data_models[entity.name]["relationships"].append({**rel_dict, "_view": "target"})
+            else:
+                if entity.name in data_models:
+                    data_models[entity.name]["relationships"].append(rel_dict)
+                if rel.target in data_models:
+                    data_models[rel.target]["relationships"].append(rel_dict)
 
     for model_name, model in data_models.items():
         _validate_relationship_uniqueness(model_name, model["relationships"])

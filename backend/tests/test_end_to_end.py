@@ -131,3 +131,49 @@ def test_shophub_mini_byte_compiles(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_self_referential_relationships_generate_and_byte_compile(tmp_path):
+    """self_referential.yml: Employee.manager (many-to-one) and Category.children
+    (one-to-many), both targeting their own entity. Each must produce exactly one
+    FK column and exactly two distinct relationship() attributes per model - a
+    duplicated FK column or relationship() here fails as a SyntaxError at
+    byte-compile time (ast.parse alone would not catch a duplicate keyword
+    argument), which is exactly the bug this fixture guards against.
+    """
+    erd = load_erd(f"{FIXTURES}/self_referential.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    ast.parse(models_src)
+
+    class_starts = sorted(
+        [models_src.index("class Employee(Base):"), models_src.index("class Category(Base):")]
+    )
+    boundaries = class_starts + [len(models_src)]
+    employee_start = models_src.index("class Employee(Base):")
+    category_start = models_src.index("class Category(Base):")
+    employee_end = boundaries[boundaries.index(employee_start) + 1]
+    category_end = boundaries[boundaries.index(category_start) + 1]
+    employee_src = models_src[employee_start:employee_end]
+    category_src = models_src[category_start:category_end]
+
+    assert employee_src.count("manager_id = Column(") == 1
+    assert employee_src.count("remote_side=[id]") == 1
+    assert "manager = relationship(" in employee_src
+    assert "manager_employees = relationship(" in employee_src
+
+    assert category_src.count("children_id = Column(") == 1
+    assert category_src.count("remote_side=[id]") == 1
+    assert "children = relationship(" in category_src
+    assert "children_category = relationship(" in category_src
+
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -81,11 +81,14 @@ def _validate_semantics(erd: ERDConfig) -> None:
                 )
 
         for rel in entity.relationships:
-            if rel.target == entity.name:
+            if rel.target == entity.name and rel.cardinality.value == "many-to-many":
                 raise ERDValidationError(
-                    f"Entity '{entity.name}': relationship '{rel.name}' targets itself "
-                    "— self-referential relationships are not yet supported by the CLI's "
-                    "code generation."
+                    f"Entity '{entity.name}': relationship '{rel.name}' is a self-referential "
+                    "many-to-many — not yet supported by the CLI's code generation (it would "
+                    "collide on the association table's column names; modeling a symmetric "
+                    "self-relationship needs more than this generator's naming conventions can "
+                    "resolve automatically). Self-referential many-to-one, one-to-one, and "
+                    "one-to-many relationships are supported."
                 )
             if rel.target not in known_entities:
                 raise ERDValidationError(

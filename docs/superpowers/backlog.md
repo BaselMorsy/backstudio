@@ -80,11 +80,28 @@ deleted, so we keep a record of what was considered and when.
   `backend/tests/test_generated_project_runtime.py`; full suite 96 passed,
   no regressions.
 
-- [ ] **Self-referential relationships (e.g. `Employee.manager` → `Employee`).**
+- [x] **Self-referential relationships (e.g. `Employee.manager` → `Employee`).**
   Rejected outright by `loader.py` since 2026-09-09 (clear `ERDValidationError`
   at validate/generate time) instead of silently generating an unimportable
   project — real support needs `remote_side` in `models.py.jinja` plus
   deduplication in `translate.py`'s owned/m2m derivation.
+  Fixed 2026-09-09: many-to-one, one-to-one, and one-to-many self-reference are
+  now fully supported (`Employee.manager`/`manager_employees`,
+  `Category.children`/`children_category`, etc.) — `translate.py` appends two
+  distinct `_view`-tagged copies of a self-referential relationship (source and
+  target can't share one dict when they land on the same entity), forces
+  name-basis-derived attribute names to avoid the two views colliding, and
+  dedupes `owned_relationships`/`many_to_many_relationships` back down to the
+  single FK-owning view. `models.py.jinja` uses the `_view` tag (instead of the
+  now-ambiguous source-model-name comparison) to render exactly one FK column
+  and two distinct `relationship()` declarations, with `remote_side=[<pk>]` on
+  the FK-owning side. Self-referential **many-to-many** stays rejected — it
+  would collide on the association table's left/right FK column names and
+  needs `primaryjoin`/`secondaryjoin` to model a symmetric relationship
+  correctly, which is out of scope. Verified via a real SQLite round-trip test
+  in `test_generated_project_runtime.py` (create/read/filter/reject-bad-FK
+  through real HTTP, for both cardinalities) plus unit and generation-level
+  tests. Full suite: 106 passed.
 - [ ] **Row-level access control (RLS).** RBAC (role → action) already
   exists; RLS (does this user own *this* row) does not. Flagged by the user
   as "extremely important." To be designed after/alongside async support,

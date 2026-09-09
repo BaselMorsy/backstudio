@@ -55,14 +55,35 @@ entities:
         load_erd(bad)
 
 
-def test_self_referential_relationship_rejected(tmp_path):
-    """A relationship targeting its own entity would generate a duplicate FK column,
-    a duplicate relationship() and a duplicate keyword argument in the service/route
-    signatures (a SyntaxError) - reject it at validation time instead of emitting a
-    project that can't be imported.
+def test_self_referential_many_to_many_rejected(tmp_path):
+    """A self-referential many-to-many would collide on the association table's
+    left/right FK column names (both derive to the same "<entity>_id" with no
+    disambiguation) and needs primaryjoin/secondaryjoin to model correctly - reject
+    it at validation time rather than emitting a broken association table. Other
+    self-referential cardinalities (many-to-one, one-to-one, one-to-many) ARE
+    supported - see test_erd_translate.py's self-referential tests.
     """
     bad = tmp_path / "bad.yml"
     bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Person
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: friends, cardinality: many-to-many, target: Person}
+services:
+  - {name: social, entities: [Person]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="self-referential many-to-many"):
+        load_erd(bad)
+
+
+def test_self_referential_many_to_one_accepted(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
         """
 project: {name: Demo}
 database: {type: sqlite, database_name: d.db}
@@ -75,8 +96,44 @@ services:
   - {name: hr, entities: [Employee]}
 """
     )
-    with pytest.raises(ERDValidationError, match="targets itself"):
-        load_erd(bad)
+    erd = load_erd(ok)
+    assert erd.entities[0].relationships[0].target == "Employee"
+
+
+def test_self_referential_one_to_one_accepted(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Employee
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: buddy, cardinality: one-to-one, target: Employee}
+services:
+  - {name: hr, entities: [Employee]}
+"""
+    )
+    load_erd(ok)  # must not raise
+
+
+def test_self_referential_one_to_many_accepted(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Category
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: children, cardinality: one-to-many, target: Category}
+services:
+  - {name: catalog, entities: [Category]}
+"""
+    )
+    load_erd(ok)  # must not raise
 
 
 def test_rbac_without_auth_rejected(tmp_path):

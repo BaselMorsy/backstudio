@@ -1,0 +1,31 @@
+project:
+  name: SelfRefDemo
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: selfref.db
+
+entities:
+  - name: Employee
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+    relationships:
+      - name: manager
+        cardinality: many-to-one
+        target: Employee
+        nullable: true
+
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+    relationships:
+      - name: children
+        cardinality: one-to-many
+        target: Category
+
+services:
+  - name: org
+    entities: [Employee, Category]

@@ -687,3 +687,124 @@ def test_self_referential_relationships_round_trip_against_real_generated_app(tm
 
             bad_parent_resp = client.post("/categories", json={"label": "Orphan", "children_id": 999999})
             assert bad_parent_resp.status_code == 400, bad_parent_resp.text
+
+
+def test_async_mode_full_stack_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """async_shophub_mini.yml driven through real HTTP + a real (aiosqlite) DB - the
+    final proof that routes -> service -> repo -> DB compose correctly end to end in
+    async_mode, exactly mirroring what test_module_crud_round_trip_against_real_generated_app
+    already proves for the sync path. Uses TestClient as a context manager specifically
+    because that's what actually exercises server.py's lifespan startup/shutdown -
+    including the engine.dispose() call this plan's design work found was necessary to
+    avoid hanging the whole pytest process on exit, not just this one test.
+    """
+    erd = load_erd(f"{FIXTURES}/async_shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "async_full_stack_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # --- auth: register/login, bootstrap admin gets every role ---
+            register_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            assert set(register_resp.json()["roles"]) == {"admin", "customer"}
+
+            login_resp = client.post(
+                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            me_resp = client.get("/auth/me", headers=admin_headers)
+            assert me_resp.status_code == 200, me_resp.text
+            assert me_resp.json()["email"] == "admin@example.com"
+
+            # --- module CRUD through the async stack ---
+            cat_resp = client.post("/categories", json={"name": "Gadgets"}, headers=admin_headers)
+            assert cat_resp.status_code == 201, cat_resp.text
+            category_id = cat_resp.json()["id"]
+
+            prod_resp = client.post(
+                "/products",
+                json={"name": "Thing", "price": 1.0, "sku": "T1", "category_id": category_id},
+                headers=admin_headers,
+            )
+            assert prod_resp.status_code == 201, prod_resp.text
+            product_id = prod_resp.json()["id"]
+            assert prod_resp.json()["category_id"] == category_id
+
+            # FK validation returning 400 through the full async stack
+            bad_prod_resp = client.post(
+                "/products",
+                json={"name": "Bad", "price": 1.0, "sku": "T2", "category_id": 999999},
+                headers=admin_headers,
+            )
+            assert bad_prod_resp.status_code == 400, bad_prod_resp.text
+
+            # the owned-relationship filter query param
+            filtered_resp = client.get(f"/products?category_id={category_id}", headers=admin_headers)
+            assert filtered_resp.status_code == 200, filtered_resp.text
+            assert [p["name"] for p in filtered_resp.json()] == ["Thing"]
+
+            # update
+            update_resp = client.put(
+                f"/products/{product_id}", json={"name": "Renamed"}, headers=admin_headers
+            )
+            assert update_resp.status_code == 200, update_resp.text
+            assert update_resp.json()["name"] == "Renamed"
+
+            # cross-module FK (Order -> Product in a different module, and Order -> User)
+            user_id = register_resp.json()["id"]
+            order_resp = client.post(
+                "/orders",
+                json={
+                    "status": "pending",
+                    "total_amount": 1.0,
+                    "user_id": user_id,
+                    "product_id": product_id,
+                },
+                headers=admin_headers,
+            )
+            assert order_resp.status_code == 201, order_resp.text
+            assert order_resp.json()["product_id"] == product_id
+
+            # delete, then confirm actually gone (proves await db.delete(x) worked)
+            delete_resp = client.delete(f"/products/{product_id}", headers=admin_headers)
+            assert delete_resp.status_code == 204, delete_resp.text
+            gone_resp = client.get(f"/products/{product_id}", headers=admin_headers)
+            assert gone_resp.status_code == 404, gone_resp.text
+
+            # a role-less second user gets a real 403 on an RBAC-restricted action
+            second_register_resp = client.post(
+                "/auth/register", json={"email": "roleless@example.com", "password": "supersecret123"}
+            )
+            assert second_register_resp.status_code == 201, second_register_resp.text
+            assert second_register_resp.json()["roles"] == []
+            second_login_resp = client.post(
+                "/auth/login", json={"email": "roleless@example.com", "password": "supersecret123"}
+            )
+            second_headers = {"Authorization": f"Bearer {second_login_resp.json()['access_token']}"}
+            forbidden_resp = client.post(
+                "/categories", json={"name": "Should not be allowed"}, headers=second_headers
+            )
+            assert forbidden_resp.status_code == 403, forbidden_resp.text
+
+    # The `with TestClient(...)` block above has already exited by this point, which
+    # ran server.py's lifespan shutdown (await engine.dispose()). If that's missing or
+    # wrong, this test - or, worse, the whole pytest process at the very end of a full
+    # suite run - would hang here rather than fail cleanly. Reaching this line at all
+    # is part of what this test proves.

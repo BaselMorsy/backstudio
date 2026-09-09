@@ -7,6 +7,56 @@ deleted, so we keep a record of what was considered and when.
 
 ## Architectural (need their own brainstorm → spec → plan cycle)
 
+- [ ] **Relationships are invisible to the generated CRUD API.** Promoted
+  2026-09-09 from a "minor finding" after actually generating and
+  runtime-testing three patterns (many-to-one, many-to-many, and the
+  "association object" junction-entity pattern) — this is a real usability
+  gap, not just a documented scope limitation.
+  - **Confirmed working today, at the DB/model layer, for all three
+    patterns** (verified with live in-memory SQLite round-trips, not just
+    `ast.parse`):
+    - many-to-one/one-to-one: FK column + `relationship()` render correctly.
+    - many-to-many (`cardinality: many-to-many`): auto-generates a bare
+      SQLAlchemy Core `Table` (not a mapped entity) used as `secondary=`;
+      `post.tags.append(tag)` etc. works.
+    - **The junction-table pattern the user asked about** — declaring 3
+      ordinary entities (e.g. `Student`, `Course`, `Enrollment` with its own
+      `grade` field plus two `many-to-one` relationships) — works exactly
+      like it would hand-written in SQLAlchemy (the "association object"
+      pattern). `Enrollment(grade='A', student=s, course=c)` round-trips
+      correctly. This is the right way to model a many-to-many that needs
+      extra fields on the join (timestamps, a role, quantity, etc.) — plain
+      `cardinality: many-to-many` can't carry extra fields, since a bare
+      `secondary=` Core `Table` isn't a mapped class.
+  - **The actual gap:** `translate.py`'s `crud_entities` (what
+    `module_schemas.py.jinja`/`module_routes.py.jinja` render from) only
+    carries `entity.fields`, never `entity.relationships`. So every
+    generated `Create`/`Update`/`Response` schema — and therefore every
+    route, since routes just pass `payload.model_dump()` through — is
+    blind to relationships entirely, regardless of cardinality. Concretely:
+    you cannot set a `Post`'s `category` through the API, you cannot create
+    an `Enrollment` linked to a `Student`/`Course` through the API (no
+    `student_id`/`course_id` in `EnrollmentCreate`), and a many-to-many's
+    `tags`/`posts` never appear in any response. The DB layer is fully
+    wired; the generated HTTP API cannot touch any of it.
+  - **Known workaround** (verified working, no generator change needed):
+    manually re-declare the FK column as an ordinary field on the owning
+    entity (e.g. add `{name: student_id, type: integer}` to `Enrollment`'s
+    `fields:`, matching the relationship's auto-derived FK column name).
+    `models.py.jinja` already deduplicates this correctly (skips the plain
+    `Column()` when a relationship's FK column has the same name), and
+    since `crud_entities` fields = `entity.fields` verbatim, the FK becomes
+    a normal settable/readable schema field. Only gives the FK id, not
+    nested objects or many-to-many list fields, but makes the
+    association-object pattern usable via the API today.
+  - **Design direction for the real fix** (not committed to): likely
+    auto-add `<rel>_id` fields to `Create`/`Update` for every
+    many-to-one/one-to-one relationship an entity owns (so the workaround
+    isn't needed), and consider optional nested `Response` fields for the
+    read side. Needs a real design pass — how to avoid N+1 queries on read,
+    and whether many-to-many collections belong in the base entity schema
+    or a separate sub-resource endpoint (e.g. `POST /posts/{id}/tags`).
+
 - [ ] **Row-level access control (RLS).** RBAC (role → action) already
   exists; RLS (does this user own *this* row) does not. Flagged by the user
   as "extremely important." To be designed after/alongside async support,
@@ -62,9 +112,6 @@ deleted, so we keep a record of what was considered and when.
 
 ## Minor findings — original ERD-CLI final review
 
-- [ ] Generated CRUD schemas can't express relationships. Confirmed this
-  matches the original spec's documented scope — not a bug, a known
-  limitation worth revisiting if relationship-aware schemas become valuable.
 - [x] No test coverage (though manually confirmed working) for: all-actions
   -disabled entity, zero-entity ERD, auth-enabled/rbac-disabled generation,
   one-to-one relationship generation specifically, custom `table_name`,

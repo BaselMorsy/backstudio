@@ -270,7 +270,7 @@ class CodeGenerator:
         if state.get('auth_enabled'):
             ensure_directory(output_dir / "modules")
             (output_dir / "modules" / "__init__.py").touch()
-            auth_dir = output_dir / "modules" / state['auth_module_name']
+            auth_dir = output_dir / "modules" / state.get('auth_module_name', 'auth')
             ensure_directory(auth_dir)
             (auth_dir / "__init__.py").touch()
             self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))

@@ -33,7 +33,13 @@ class {{ entity.name }}Update(BaseModel):
 class {{ entity.name }}Response(BaseModel):
     """{{ entity.name }} as returned by the API."""
 {% for field in entity.fields %}
-    {{ field.name }}: {% if field.nullable and not field.primary_key %}Optional[{{ get_python_type(field.type) }}]{% else %}{{ get_python_type(field.type) }}{% endif %} = None
+{% if field.primary_key %}
+    {{ field.name }}: {{ get_python_type(field.type) }}
+{% elif field.nullable %}
+    {{ field.name }}: Optional[{{ get_python_type(field.type) }}] = None
+{% else %}
+    {{ field.name }}: {{ get_python_type(field.type) }} = None
+{% endif %}
 {% endfor %}
 
     class Config:

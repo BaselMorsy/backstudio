@@ -202,3 +202,85 @@ def test_many_to_many_response_validator_extracts_ids_from_orm_relationship(tmp_
 
     result = module.PostResponse.model_validate(FakePost())
     assert result.tag_ids == [1, 2]
+
+
+def test_repo_get_all_accepts_owned_relationship_filter_params(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # Product has many-to-one to Category
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    func_start = repo_src.index("def get_all_products(")
+    func_end = repo_src.index("\ndef ", func_start + 1)
+    func_src = repo_src[func_start:func_end]
+    assert "category_id: Optional[int] = None" in func_src
+    assert "if category_id is not None" in func_src
+    assert "Product.category_id == category_id" in func_src
+
+
+def test_repo_selectinload_used_for_many_to_many(tmp_path):
+    erd = load_erd(f"{FIXTURES}/many_to_many.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+    assert "from sqlalchemy.orm import Session, selectinload" in repo_src
+
+    get_all_start = repo_src.index("def get_all_posts(")
+    get_all_end = repo_src.index("\ndef ", get_all_start + 1)
+    assert "selectinload(Post.tags)" in repo_src[get_all_start:get_all_end]
+
+    get_by_id_start = repo_src.index("def get_post_by_id(")
+    get_by_id_end = repo_src.index("\ndef ", get_by_id_start + 1)
+    assert "selectinload(Post.tags)" in repo_src[get_by_id_start:get_by_id_end]
+
+
+def test_repo_filter_and_selectinload_work_against_a_real_db(tmp_path):
+    """Actually run the rendered repo functions against a real SQLite DB - the
+    strongest signal, matching the lesson learned earlier this session that
+    ast.parse alone doesn't catch behavioral bugs. Reuses
+    _GeneratedProjectImporter from test_generated_project_runtime.py (import it
+    from there rather than re-implementing sys.path/sys.modules handling here -
+    see that file's isolated_sys_path fixture docstring for why a naive purge
+    of every imported module is unsafe).
+    """
+    from backend.tests.test_generated_project_runtime import _GeneratedProjectImporter
+
+    erd = load_erd(f"{FIXTURES}/many_to_many.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        database_base = importlib.import_module("database.base")
+        database_models = importlib.import_module("database.models")
+        repo = importlib.import_module("database.repo")
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        engine = create_engine("sqlite:///:memory:")
+        database_base.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        db = Session()
+
+        tag = database_models.Tag(name="python")
+        db.add(tag)
+        db.commit()
+
+        post = repo.create_post(db, {"title": "Hello"})
+        post.tags.append(tag)
+        db.commit()
+
+        fetched = repo.get_post_by_id(db, post.id)
+        assert [t.name for t in fetched.tags] == ["python"]

@@ -1,7 +1,8 @@
 """{{ project.name }} - Database repository functions"""
 
+{% set has_any_m2m = (project.data_models|map(attribute='many_to_many_relationships')|map('length')|sum) > 0 %}
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session{% if has_any_m2m %}, selectinload{% endif +%}
 
 from .models import {% for model in project.data_models %}{{ model.name|pascal_case }}{{ ", " if not loop.last else "" }}{% endfor %}
 
@@ -20,11 +21,15 @@ def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
 
 def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
     """Get {{ model.name }} by ID"""
+    query = db.query({{ model.name|pascal_case }})
+{% for rel in model.many_to_many_relationships %}
+    query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
+{% endfor %}
     {% set pk_field = model.fields|selectattr('primary_key')|first %}
     {% if pk_field %}
-    return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id).first()
+    return query.filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id).first()
     {%- else %}
-    return db.query({{ model.name|pascal_case }}).filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id).first()
+    return query.filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id).first()
     {%- endif %}
 
 
@@ -38,9 +43,24 @@ def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: Session, {{ field.na
 {% endif %}
 {%- endfor %}
 
-def get_all_{{ model.plural_snake }}(db: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name|pascal_case }}]:
+def get_all_{{ model.plural_snake }}(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+{% for rel in model.owned_relationships %}
+    {{ rel.fk_column }}: Optional[int] = None,
+{% endfor %}
+) -> List[{{ model.name|pascal_case }}]:
     """Get all {{ model.name }}s with pagination"""
-    return db.query({{ model.name|pascal_case }}).offset(skip).limit(limit).all()
+    query = db.query({{ model.name|pascal_case }})
+{% for rel in model.many_to_many_relationships %}
+    query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
+{% endfor %}
+{% for rel in model.owned_relationships %}
+    if {{ rel.fk_column }} is not None:
+        query = query.filter({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
+{% endfor %}
+    return query.offset(skip).limit(limit).all()
 
 
 def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:

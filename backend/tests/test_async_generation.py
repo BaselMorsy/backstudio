@@ -467,6 +467,74 @@ def test_sync_auth_still_unchanged_when_async_mode_omitted(tmp_path):
     assert "async def me(" not in routes_src
 
 
+def test_async_alembic_env_uses_async_engine_and_run_sync(tmp_path):
+    erd = load_erd(f"{FIXTURES}/async_shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    env_src = (codebase_dir / "alembic" / "env.py").read_text(encoding="utf-8")
+    ast.parse(env_src)
+    assert "from sqlalchemy.ext.asyncio import async_engine_from_config" in env_src
+    assert "import asyncio" in env_src
+    assert "async def run_migrations_online() -> None:" in env_src
+    assert "await connection.run_sync(do_run_migrations)" in env_src
+    assert "asyncio.run(run_migrations_online())" in env_src
+    assert "engine_from_config(" not in env_src.replace("async_engine_from_config(", "")
+
+
+def test_sync_alembic_env_still_unchanged_when_async_mode_omitted(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    env_src = (codebase_dir / "alembic" / "env.py").read_text(encoding="utf-8")
+    assert "async_engine_from_config" not in env_src
+    assert "asyncio" not in env_src
+    assert "def run_migrations_online() -> None:" in env_src
+
+
+def test_async_alembic_autogenerate_runs_against_real_generated_project(tmp_path):
+    """Mirrors the existing sync-path test - this is the exact command that would
+    fail if the async-Alembic run_sync() pattern is subtly wrong, which the design
+    spec explicitly flagged as having 'a well-earned reputation for looking right
+    and failing at the asyncio.run()-inside-a-context boundary in practice.'
+    """
+    erd = load_erd(f"{FIXTURES}/async_shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "async_alembic_test.db"
+    env = {
+        **__import__("os").environ,
+        "DATABASE_URL": f"sqlite+aiosqlite:///{db_path.as_posix()}",
+        "JWT_SECRET": "test-only-secret-do-not-use-in-production",
+        "DEBUG": "True",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "revision", "--autogenerate", "-m", "test"],
+        cwd=str(codebase_dir),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+
+    versions_dir = codebase_dir / "alembic" / "versions"
+    migration_files = list(versions_dir.glob("*.py"))
+    assert len(migration_files) == 1, f"expected exactly one migration file, found {migration_files}"
+
+    migration_src = migration_files[0].read_text(encoding="utf-8")
+    assert "create_table('users'" in migration_src or 'create_table("users"' in migration_src
+
+
 def test_async_auth_register_and_login_actually_work(tmp_path):
     import asyncio
 

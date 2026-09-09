@@ -59,6 +59,20 @@ automatically for a plain `def` route today.
   `async def` with the same query rewrite as repo.py; `get_current_user`
   (already `async def` today) gets its internal `db.query(User)...` call
   rewritten the same way.
+- `auth/routes.py.jinja`: `register`/`login`/`refresh`/`me` become `async
+  def` with `await`ed service calls, matching `module_routes.py.jinja`.
+  `refresh` runs its own raw `db.query(User).filter(User.id ==
+  user_id).first()` (not routed through `auth/service.py.jinja` or
+  `repo.py`) — this needs the same `select()`/`execute()` rewrite in place.
+  (Found during plan-writing verification, not called out explicitly in the
+  original design conversation — the file list above was otherwise
+  complete.)
+- `server.py.jinja`: the `lifespan` context manager's startup calls
+  `init_db()` — becomes `await init_db()` once `init_db()` is `async def`
+  (§4). Its shutdown section (currently a `pass` placeholder, already
+  present today for exactly this purpose) must call
+  `await engine.dispose()` in async mode — see §4 for why this is not
+  optional cleanup but a correctness requirement.
 - `alembic/env.py.jinja`: async-aware migration running (§7), gated on the
   same `database.async_mode` flag.
 - `requirements.txt.jinja`: the correct async driver per `database.type`,
@@ -142,6 +156,22 @@ trigger SQLAlchemy's implicit-IO-on-attribute-access path, which raises
 under `AsyncSession` (no implicit greenlet-free IO is allowed) instead of
 transparently re-fetching the way sync `Session` would.
 
+**Engine disposal on shutdown is a correctness requirement, not
+optional cleanup.** Verified directly (a throwaway script using
+`create_async_engine("sqlite+aiosqlite:///:memory:")`): the async engine's
+underlying driver (`aiosqlite` specifically keeps a per-connection
+background thread) does not get cleanly torn down when the process's
+async work finishes — the script's own logic completes and prints
+everything expected, but the *process itself* never exits without an
+explicit `await engine.dispose()`. Left unaddressed, this would hang not
+just one test but the entire `pytest` process at the very end of a full
+suite run (after every individual test has already passed) — exactly the
+kind of failure that's silent until it lands on someone's CI. `server.py`'s
+`lifespan` context manager already has an empty shutdown section
+(`# Shutdown (if cleanup needed)\n    pass`) reserved for exactly this;
+async mode fills it with `await engine.dispose()` (importing `engine` from
+`database.base`).
+
 **Async drivers per database type** (added to `requirements.txt.jinja` only
 when `database.async_mode: true`):
 - `sqlite` → `aiosqlite` (already present in `requirements.txt.jinja`
@@ -185,13 +215,23 @@ but `db.commit()`/`db.refresh()` become `await`ed), `get_all_<plural>`
 fed through `await db.execute(...)`, unpacked via
 `.scalars().all()`), `update_<x>` and `delete_<x>` (both call the
 already-async `get_<x>_by_id` internally, so gain `await` at that call
-site plus on their own `commit()`/`refresh()`/`delete()`). `selectinload`
-for many-to-many relationships (from the relationship-CRUD-exposure work)
+site plus on their own `commit()`/`refresh()`). `selectinload` for
+many-to-many relationships (from the relationship-CRUD-exposure work)
 carries over unchanged in shape — it's a query-building option, not a
 sync/async-specific construct — just gets attached to a `select()` `stmt`
-instead of a `Query` object. `db.delete(x)` itself is a synchronous call in
-both APIs (only its associated `commit()` is async) — do not add a stray
-`await` there.
+instead of a `Query` object.
+
+**Correction from an earlier draft of this spec, caught by verification
+during plan-writing rather than assumed from API familiarity:**
+`AsyncSession.delete(x)` **is** a coroutine and **must** be awaited —
+unlike `db.add()`, which stays a plain synchronous call in both APIs.
+Verified directly: calling `db.delete(x)` without `await` returns a
+`coroutine` object whose body never runs (Python only raises a
+`RuntimeWarning` for an un-awaited coroutine, never an error), so the
+row silently fails to delete — exactly the class of bug this session has
+repeatedly found by actually running generated code rather than reading
+SQLAlchemy's API and assuming. `delete_<x>` in async mode is
+`await db.delete(<x>)` followed by `await db.commit()`.
 
 ## 6. Service, routes, auth — mechanical propagation
 
@@ -210,7 +250,20 @@ calls directly rather than going through `repo.py`). `get_current_user` is
 already declared `async def` in both branches today (a FastAPI-dependency
 convention, independent of this spec) — only its internal
 `db.query(User).filter(...).first()` needs the `select()`/`execute()`
-rewrite when `database.async_mode` is true.
+rewrite when `database.async_mode` is true. `register_user`'s bootstrap-role
+check also uses a query shape not yet covered above —
+`db.query(User).count() == 0` — whose async equivalent is
+`(await db.scalar(select(func.count()).select_from(User))) == 0`
+(`AsyncSession.scalar()` is a shorthand that executes a statement and
+unwraps the single scalar result in one call, avoiding a separate
+`.execute()` + `.scalar_one()` pair for this one-off case).
+
+`auth/routes.py.jinja`: `register`/`login`/`refresh`/`me` all become
+`async def`, with `await`ed calls into the (now-async) service methods.
+`refresh` additionally runs its own raw
+`db.query(User).filter(User.id == user_id).first()` (bypassing
+`auth/service.py.jinja` and `repo.py` entirely) — same
+`select()`/`execute()` rewrite applies there too.
 
 ## 7. Alembic migrations (`alembic/env.py.jinja`)
 

@@ -1,0 +1,27 @@
+project:
+  name: IdentityDemo
+  version: "1.0.0"
+  description: A minimal ERD renaming the auth module via a services entry
+
+database:
+  type: sqlite
+  database_name: identity_demo.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 60
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: identity
+    entities: [User]
+  - name: widgets
+    entities: [Widget]

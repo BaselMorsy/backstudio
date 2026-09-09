@@ -80,15 +80,31 @@ class _GeneratedProjectImporter:
 
 @pytest.fixture
 def isolated_sys_path() -> Iterator[None]:
+    """Restore sys.path after the test.
+
+    Deliberately does NOT also purge every module newly imported during the
+    test from sys.modules (an earlier version of this fixture did). That
+    blanket purge evicts third-party compiled-extension modules too -
+    `cryptography` (via python-jose) chief among them - and reimporting those
+    from a cleared sys.modules state does not give you a clean reload: the
+    Rust/C extension bindings underneath stay initialized process-wide, so
+    the freshly re-created Python-level classes (e.g.
+    `cryptography.hazmat.primitives.hashes.HashAlgorithm`) are no longer the
+    same objects other still-cached code compares against, and `isinstance`
+    checks that used to pass start failing (`jose.exceptions.JWSError:
+    Expected instance of hashes.HashAlgorithm`) - which only surfaces once a
+    second in-process test in the same session also drives a JWT-signing
+    code path. `_GeneratedProjectImporter` above already purges exactly the
+    generated project's own module names (on both __enter__ and __exit__),
+    which is what actually needs fresh reimporting between tests/projects;
+    third-party libraries are safe, and necessary, to leave warm in
+    sys.modules across tests.
+    """
     original_path = list(sys.path)
-    original_modules = set(sys.modules)
     try:
         yield
     finally:
         sys.path[:] = original_path
-        for mod_name in list(sys.modules):
-            if mod_name not in original_modules:
-                del sys.modules[mod_name]
 
 
 def test_register_login_me_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
@@ -178,6 +194,177 @@ def test_register_login_me_round_trip_against_real_generated_app(tmp_path, monke
             )
             assert second_resp.status_code == 201, second_resp.text
             assert second_resp.json()["roles"] == []
+
+
+def test_module_crud_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """Generate a project from shophub_mini.yml (auth + RBAC + a multi-entity
+    `catalog` module), stand up the real app via TestClient, and drive a full
+    CRUD round trip through the module-singleton service/routes code path that
+    (before this test) only ever had string/ast.parse coverage - never actually
+    ran: POST -> GET by id -> PUT -> GET list -> DELETE -> GET (404).
+
+    Also confirms a role-less second user gets a real 403 (not just "some
+    non-2xx code") from an RBAC-restricted action, exercising the module
+    router's baked-in `Depends(require_roles(...))`.
+    """
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "crud_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # Bootstrap admin: first user registered gets every declared role
+            # (shophub_mini.yml declares roles: [admin, customer]).
+            register_resp = client.post(
+                "/auth/register",
+                json={"email": "admin@example.com", "password": "supersecret123"},
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            assert set(register_resp.json()["roles"]) == {"admin", "customer"}
+
+            login_resp = client.post(
+                "/auth/login",
+                json={"email": "admin@example.com", "password": "supersecret123"},
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            # --- create ---
+            create_resp = client.post(
+                "/categories", json={"name": "Books"}, headers=admin_headers
+            )
+            assert create_resp.status_code == 201, create_resp.text
+            category = create_resp.json()
+            assert category["name"] == "Books"
+            category_id = category["id"]
+            assert isinstance(category_id, int)
+
+            # --- read by id ---
+            get_resp = client.get(f"/categories/{category_id}", headers=admin_headers)
+            assert get_resp.status_code == 200, get_resp.text
+            assert get_resp.json() == {"id": category_id, "name": "Books"}
+
+            # --- update ---
+            update_resp = client.put(
+                f"/categories/{category_id}",
+                json={"name": "Fiction"},
+                headers=admin_headers,
+            )
+            assert update_resp.status_code == 200, update_resp.text
+            assert update_resp.json()["name"] == "Fiction"
+
+            # --- list, confirm the update is reflected ---
+            list_resp = client.get("/categories", headers=admin_headers)
+            assert list_resp.status_code == 200, list_resp.text
+            listed = list_resp.json()
+            assert any(item["id"] == category_id and item["name"] == "Fiction" for item in listed)
+
+            # --- delete ---
+            delete_resp = client.delete(f"/categories/{category_id}", headers=admin_headers)
+            assert delete_resp.status_code == 204, delete_resp.text
+
+            # --- confirm gone ---
+            gone_resp = client.get(f"/categories/{category_id}", headers=admin_headers)
+            assert gone_resp.status_code == 404, gone_resp.text
+
+            # --- a role-less second user gets 403 on an RBAC-restricted action ---
+            second_register_resp = client.post(
+                "/auth/register",
+                json={"email": "roleless@example.com", "password": "supersecret123"},
+            )
+            assert second_register_resp.status_code == 201, second_register_resp.text
+            assert second_register_resp.json()["roles"] == []
+
+            second_login_resp = client.post(
+                "/auth/login",
+                json={"email": "roleless@example.com", "password": "supersecret123"},
+            )
+            assert second_login_resp.status_code == 200, second_login_resp.text
+            second_headers = {
+                "Authorization": f"Bearer {second_login_resp.json()['access_token']}"
+            }
+
+            forbidden_resp = client.post(
+                "/categories", json={"name": "Should not be allowed"}, headers=second_headers
+            )
+            assert forbidden_resp.status_code == 403, forbidden_resp.text
+
+
+def test_renamed_auth_module_serves_over_real_http_and_old_auth_path_is_gone(
+    tmp_path, monkeypatch, isolated_sys_path
+):
+    """Generate a project whose auth service is renamed via a `services:` entry
+    ({name: identity, entities: [User]}), stand up the real app, and confirm
+    the 3-way name sync between rbac.py's import, server.py's route prefix,
+    and service.py's OAuth2PasswordBearer(tokenUrl=...) actually works over
+    real HTTP - and that the default /auth/* paths no longer exist.
+    """
+    erd = load_erd(f"{FIXTURES}/renamed_auth.yml")
+    state = translate(erd)
+    assert state["auth_module_name"] == "identity"
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    # Sanity-check on disk before even importing: the auth module was written
+    # under modules/identity/, not modules/auth/.
+    assert (codebase_dir / "modules" / "identity" / "routes.py").exists()
+    assert not (codebase_dir / "modules" / "auth").exists()
+
+    db_path = tmp_path / "renamed_auth_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            register_resp = client.post(
+                "/identity/register",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            assert register_resp.json()["email"] == "alice@example.com"
+
+            login_resp = client.post(
+                "/identity/login",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            access_token = login_resp.json()["access_token"]
+
+            me_resp = client.get(
+                "/identity/me", headers={"Authorization": f"Bearer {access_token}"}
+            )
+            assert me_resp.status_code == 200, me_resp.text
+            assert me_resp.json()["email"] == "alice@example.com"
+
+            # The old default /auth/* paths must not exist at all.
+            assert client.post(
+                "/auth/register", json={"email": "bob@example.com", "password": "supersecret123"}
+            ).status_code == 404
+            assert client.post(
+                "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
+            ).status_code == 404
+            assert client.get(
+                "/auth/me", headers={"Authorization": f"Bearer {access_token}"}
+            ).status_code == 404
 
 
 def test_alembic_autogenerate_runs_against_real_generated_project(tmp_path):

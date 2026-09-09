@@ -266,9 +266,11 @@ class CodeGenerator:
                 self._render_template("Python/service/module_routes.py.jinja", module_context)
             )
 
-        # Auth service (JWT register/login/refresh/me)
+        # Auth service (JWT register/login/refresh/me), generated as a module
         if state.get('auth_enabled'):
-            auth_dir = output_dir / "auth"
+            ensure_directory(output_dir / "modules")
+            (output_dir / "modules" / "__init__.py").touch()
+            auth_dir = output_dir / "modules" / state['auth_module_name']
             ensure_directory(auth_dir)
             (auth_dir / "__init__.py").touch()
             self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))

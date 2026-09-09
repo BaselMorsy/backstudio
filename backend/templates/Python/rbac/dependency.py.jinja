@@ -4,14 +4,16 @@ from typing import Callable, List
 
 from fastapi import Depends, HTTPException, status
 
-from auth.service import get_current_user
+from modules.{{ project.auth_module_name }}.service import get_{{ project.auth_module_name }}_service
 from database.models import User
+
+_auth_service = get_{{ project.auth_module_name }}_service()
 
 
 def require_roles(*roles: str) -> Callable:
     """Build a FastAPI dependency requiring the current user to have at least one of `roles`."""
 
-    async def dependency(current_user: User = Depends(get_current_user)) -> User:
+    async def dependency(current_user: User = Depends(_auth_service.get_current_user)) -> User:
         user_roles: List[str] = current_user.roles or []
         if not set(user_roles) & set(roles):
             raise HTTPException(

@@ -19,7 +19,7 @@ from modules.{{ module.snake_name }}.routes import router as {{ module.snake_nam
 {% endfor %}
 {% endif %}
 {% if project.auth_enabled %}
-from auth.routes import router as auth_router
+from modules.{{ project.auth_module_name }}.routes import router as auth_router
 {% endif %}
 
 # Lifespan context manager for startup/shutdown events
@@ -82,7 +82,7 @@ app.include_router({{ module.snake_name }}_router)
 {% endfor %}
 {% endif %}
 {% if project.auth_enabled %}
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
+app.include_router(auth_router, prefix="/{{ project.auth_module_name }}", tags=["{{ project.auth_module_name }}"])
 {% endif %}
 
 @app.get("/")

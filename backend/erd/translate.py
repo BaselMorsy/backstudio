@@ -161,6 +161,44 @@ def _validate_relationship_uniqueness(entity_name: str, rels: List[Dict[str, Any
             seen_fks[column] = rel_dict["name"]
 
 
+def _owned_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Relationships where `entity_name` owns the FK column - regardless of which
+    cardinality keyword declared it (a one-to-many declared from the parent side and
+    the equivalent many-to-one declared from the child side both normalize to the
+    same foreign_key.model in _build_relationship, so this check covers both).
+    """
+    owned: List[Dict[str, Any]] = []
+    for rel in rels:
+        fk = rel.get("foreign_key")
+        if not fk or fk["model"] != entity_name:
+            continue
+        is_source = rel["source"]["model"] == entity_name
+        other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
+        owned.append({
+            "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
+            "fk_column": fk["column"],
+            "fk_nullable": fk["nullable"],
+            "target_model": other_model,
+            "target_snake": _snake_case(other_model),
+        })
+    return owned
+
+
+def _many_to_many_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    m2m: List[Dict[str, Any]] = []
+    for rel in rels:
+        if rel["cardinality"] != "many-to-many":
+            continue
+        is_source = rel["source"]["model"] == entity_name
+        other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
+        m2m.append({
+            "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
+            "target_model": other_model,
+            "target_plural_snake": _pluralize(other_model),
+        })
+    return m2m
+
+
 def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
     declared = next((e for e in erd.entities if e.name == "User"), None)
     fields = [dict(f) for f in AUTH_USER_FIELDS]
@@ -172,6 +210,8 @@ def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
         "plural_snake": _pluralize("User"),
         "fields": fields,
         "relationships": [],
+        "owned_relationships": [],
+        "many_to_many_relationships": [],
     }
 
 
@@ -243,6 +283,10 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
     for model_name, model in data_models.items():
         _validate_relationship_uniqueness(model_name, model["relationships"])
 
+    for model in data_models.values():
+        model["owned_relationships"] = _owned_relationships_for(model["name"], model["relationships"])
+        model["many_to_many_relationships"] = _many_to_many_relationships_for(model["name"], model["relationships"])
+
     crud_entities: List[Dict[str, Any]] = []
     for entity in entities:
         plural_snake = _pluralize(entity.name)
@@ -255,6 +299,8 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "enabled_actions": entity.endpoints.enabled,
             "rbac": _resolve_rbac(erd, entity),
             "fields": [f.model_dump(mode='json') for f in entity.fields],
+            "owned_relationships": data_models[entity.name]["owned_relationships"],
+            "many_to_many_relationships": data_models[entity.name]["many_to_many_relationships"],
         })
 
     modules = _resolve_modules(erd, crud_entities)

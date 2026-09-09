@@ -550,3 +550,144 @@ def test_translate_auth_user_fields_have_defaults():
             ast.parse(models_src)
         except SyntaxError as e:
             raise AssertionError(f"Generated models.py has syntax error: {e}")
+
+
+def test_owned_relationships_many_to_one():
+    """Post declares many-to-one to Category: Post owns the FK, Category doesn't."""
+    erd = ERDConfig(
+        project=ProjectMeta(name="Blog", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="blog.db"),
+        entities=[
+            EntitySpec(
+                name="Category",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+            EntitySpec(
+                name="Post",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="category", cardinality="many-to-one", target="Category")
+                ],
+            ),
+        ],
+        services=[ServiceDecl(name="content", entities=["Category", "Post"])],
+    )
+    state = translate(erd)
+
+    category = next(m for m in state["data_models"] if m["name"] == "Category")
+    post = next(m for m in state["data_models"] if m["name"] == "Post")
+    assert category["owned_relationships"] == []
+    assert post["owned_relationships"] == [
+        {
+            "attribute": "category",
+            "fk_column": "category_id",
+            "fk_nullable": True,
+            "target_model": "Category",
+            "target_snake": "category",
+        }
+    ]
+    assert category["many_to_many_relationships"] == []
+    assert post["many_to_many_relationships"] == []
+
+    # crud_entities carry the identical derived lists
+    post_entity = next(e for e in state["modules"][0]["entities"] if e["name"] == "Post")
+    assert post_entity["owned_relationships"] == post["owned_relationships"]
+
+
+def test_owned_relationships_one_to_many_equivalent_to_many_to_one():
+    """Author declares one-to-many to Book: per translate.py's existing normalization
+    the FK lives on Book (the target), so Book - not Author - is the owning side.
+    This must produce the identical shape test_owned_relationships_many_to_one gets
+    from declaring the relationship the other way around.
+    """
+    erd = ERDConfig(
+        project=ProjectMeta(name="Library", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="library.db"),
+        entities=[
+            EntitySpec(
+                name="Author",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="author_books", cardinality="one-to-many", target="Book")
+                ],
+            ),
+            EntitySpec(
+                name="Book",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+        ],
+        services=[ServiceDecl(name="library", entities=["Author", "Book"])],
+    )
+    state = translate(erd)
+
+    author = next(m for m in state["data_models"] if m["name"] == "Author")
+    book = next(m for m in state["data_models"] if m["name"] == "Book")
+    assert author["owned_relationships"] == []
+    assert book["owned_relationships"] == [
+        {
+            "attribute": "author",
+            "fk_column": "author_id",
+            "fk_nullable": True,
+            "target_model": "Author",
+            "target_snake": "author",
+        }
+    ]
+
+
+def test_owned_relationships_required_fk_not_nullable():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Blog", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="blog.db"),
+        entities=[
+            EntitySpec(
+                name="Category",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+            EntitySpec(
+                name="Post",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(
+                        name="category", cardinality="many-to-one", target="Category", nullable=False
+                    )
+                ],
+            ),
+        ],
+        services=[ServiceDecl(name="content", entities=["Category", "Post"])],
+    )
+    state = translate(erd)
+    post = next(m for m in state["data_models"] if m["name"] == "Post")
+    assert post["owned_relationships"][0]["fk_nullable"] is False
+
+
+def test_many_to_many_relationships_both_sides():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Blog", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="blog.db"),
+        entities=[
+            EntitySpec(
+                name="Post",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[
+                    RelationshipDecl(name="tags", cardinality="many-to-many", target="Tag")
+                ],
+            ),
+            EntitySpec(
+                name="Tag",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            ),
+        ],
+        services=[ServiceDecl(name="content", entities=["Post", "Tag"])],
+    )
+    state = translate(erd)
+
+    post = next(m for m in state["data_models"] if m["name"] == "Post")
+    tag = next(m for m in state["data_models"] if m["name"] == "Tag")
+
+    assert post["owned_relationships"] == []
+    assert post["many_to_many_relationships"] == [
+        {"attribute": "tags", "target_model": "Tag", "target_plural_snake": "tags"}
+    ]
+    assert tag["many_to_many_relationships"] == [
+        {"attribute": "posts", "target_model": "Post", "target_plural_snake": "posts"}
+    ]

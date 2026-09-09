@@ -485,10 +485,12 @@ hit with `curl` against a real running server — see the next section):
 
 >>> POST /posts {"title": "Hello, BackStudio", "body": "Generated from an ERD.",
                  "published": true, "category_id": 1}  -> 201
-{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true}
+{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true,
+ "category_id": 1}
 
 >>> GET /posts  (with token) -> 200
-[{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true}]
+[{"id": 1, "title": "Hello, BackStudio", "body": "Generated from an ERD.", "published": true,
+  "category_id": 1}]
 
 >>> GET /posts  (no token) -> 401
 {"detail": "Not authenticated"}

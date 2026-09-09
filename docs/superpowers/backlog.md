@@ -7,7 +7,7 @@ deleted, so we keep a record of what was considered and when.
 
 ## Architectural (need their own brainstorm → spec → plan cycle)
 
-- [ ] **Relationships are invisible to the generated CRUD API.** Promoted
+- [x] **Relationships are invisible to the generated CRUD API.** Promoted
   2026-09-09 from a "minor finding" after actually generating and
   runtime-testing three patterns (many-to-one, many-to-many, and the
   "association object" junction-entity pattern) — this is a real usability
@@ -56,6 +56,29 @@ deleted, so we keep a record of what was considered and when.
     read side. Needs a real design pass — how to avoid N+1 queries on read,
     and whether many-to-many collections belong in the base entity schema
     or a separate sub-resource endpoint (e.g. `POST /posts/{id}/tags`).
+  Fixed 2026-09-09: designed and implemented per
+  `docs/superpowers/specs/2026-09-09-relationship-crud-exposure-design.md`
+  and `docs/superpowers/plans/2026-09-09-relationship-crud-exposure.md`.
+  `backend/erd/translate.py` now derives `owned_relationships` (every
+  many-to-one/one-to-one, plus one-to-many from the FK-owning side) and
+  `many_to_many_relationships` per entity. Four templates consume them:
+  `module_schemas.py.jinja` adds `<rel>_id` fields to `Create`/`Update`/
+  `Response` for owned relationships and a read-only `<target>_ids: List[int]`
+  field (via a `model_validator`) to `Response` for many-to-many;
+  `repo.py.jinja` adds an optional FK-filter kwarg to `get_all_<plural>` and
+  uses `selectinload` for many-to-many reads to avoid N+1 queries;
+  `module_service.py.jinja` validates a given FK id exists before
+  create/update (raises `ValueError` otherwise) and threads the filter
+  through `list_<x>`; `module_routes.py.jinja` returns HTTP 400 on that
+  `ValueError` and exposes the FK filter as an optional query param (e.g.
+  `GET /products?category_id=5`). You can now set/validate FKs and read
+  many-to-many id lists through the generated HTTP API — none of that was
+  possible before. Still explicitly out of scope: many-to-many writes
+  (`tag_ids` stays read-only), nested full-object responses (e.g.
+  `category: CategoryResponse`), and nested one-to-many collections (use the
+  `?category_id=` filter instead). Real HTTP+DB round-trip tests added in
+  `backend/tests/test_generated_project_runtime.py`; full suite 96 passed,
+  no regressions.
 
 - [ ] **Row-level access control (RLS).** RBAC (role → action) already
   exists; RLS (does this user own *this* row) does not. Flagged by the user

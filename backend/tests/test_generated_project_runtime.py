@@ -405,3 +405,218 @@ def test_alembic_autogenerate_runs_against_real_generated_project(tmp_path):
     migration_src = migration_files[0].read_text(encoding="utf-8")
     assert "create_table('users'" in migration_src or 'create_table("users"' in migration_src
     assert "create_table('categories'" in migration_src or 'create_table("categories"' in migration_src
+
+
+def test_owned_relationship_fk_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """valid_full.yml: Product has many-to-one to Category. Covers the FK
+    exposure + validation + filter query param all the way through real HTTP.
+
+    Unlike the brief's original description, valid_full.yml actually has
+    auth+RBAC enabled (rbac.default_permissions gates create/list on every
+    entity, including Category/Product, which don't override it), so this
+    still needs a JWT_SECRET and an authenticated admin bearer token for
+    every write and list call - same bootstrap-admin pattern as the
+    shophub_mini.yml tests above.
+    """
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "fk_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # Bootstrap admin: first user registered gets every declared role
+            # (valid_full.yml declares roles: [admin, editor, viewer]).
+            register_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            assert set(register_resp.json()["roles"]) == {"admin", "editor", "viewer"}
+
+            login_resp = client.post(
+                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            cat_resp = client.post("/categories", json={"name": "Electronics"}, headers=admin_headers)
+            assert cat_resp.status_code == 201, cat_resp.text
+            category_id = cat_resp.json()["id"]
+
+            # valid FK: succeeds, response includes category_id
+            ok_resp = client.post(
+                "/products",
+                json={"name": "Widget", "price": 9.99, "sku": "W1", "category_id": category_id},
+                headers=admin_headers,
+            )
+            assert ok_resp.status_code == 201, ok_resp.text
+            assert ok_resp.json()["category_id"] == category_id
+
+            # invalid FK: 400, not a raw 500
+            bad_resp = client.post(
+                "/products",
+                json={"name": "Gadget", "price": 5.0, "sku": "G1", "category_id": 999999},
+                headers=admin_headers,
+            )
+            assert bad_resp.status_code == 400, bad_resp.text
+
+            # a second category + product, to prove the filter actually filters
+            cat2_resp = client.post("/categories", json={"name": "Books"}, headers=admin_headers)
+            assert cat2_resp.status_code == 201, cat2_resp.text
+            category2_id = cat2_resp.json()["id"]
+            second_product_resp = client.post(
+                "/products",
+                json={"name": "Novel", "price": 12.0, "sku": "N1", "category_id": category2_id},
+                headers=admin_headers,
+            )
+            assert second_product_resp.status_code == 201, second_product_resp.text
+
+            filtered_resp = client.get(f"/products?category_id={category_id}", headers=admin_headers)
+            assert filtered_resp.status_code == 200, filtered_resp.text
+            names = [p["name"] for p in filtered_resp.json()]
+            assert names == ["Widget"]
+
+
+def test_many_to_many_id_list_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """many_to_many.yml: Post<->Tag. No auth block in the fixture, so
+    auth/rbac are both disabled - no JWT_SECRET needed.
+    """
+    erd = load_erd(f"{FIXTURES}/many_to_many.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "m2m_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        database_base = importlib.import_module("database.base")
+        database_models = importlib.import_module("database.models")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            post_resp = client.post("/posts", json={"title": "Hello"})
+            assert post_resp.status_code == 201, post_resp.text
+            post_id = post_resp.json()["id"]
+            assert post_resp.json()["tag_ids"] == []
+
+            tag1_resp = client.post("/tags", json={"name": "python"})
+            assert tag1_resp.status_code == 201, tag1_resp.text
+            tag2_resp = client.post("/tags", json={"name": "fastapi"})
+            assert tag2_resp.status_code == 201, tag2_resp.text
+            tag1_id, tag2_id = tag1_resp.json()["id"], tag2_resp.json()["id"]
+
+            # link tags directly via the ORM - there is no write endpoint for
+            # many-to-many (out of scope per spec)
+            db = database_base.SessionLocal()
+            try:
+                post_obj = db.query(database_models.Post).filter(database_models.Post.id == post_id).first()
+                tag_objs = (
+                    db.query(database_models.Tag)
+                    .filter(database_models.Tag.id.in_([tag1_id, tag2_id]))
+                    .all()
+                )
+                post_obj.tags.extend(tag_objs)
+                db.commit()
+            finally:
+                db.close()
+
+            get_resp = client.get(f"/posts/{post_id}")
+            assert get_resp.status_code == 200, get_resp.text
+            assert sorted(get_resp.json()["tag_ids"]) == sorted([tag1_id, tag2_id])
+
+            list_resp = client.get("/posts")
+            assert list_resp.status_code == 200, list_resp.text
+            listed_post = next(p for p in list_resp.json() if p["id"] == post_id)
+            assert sorted(listed_post["tag_ids"]) == sorted([tag1_id, tag2_id])
+
+
+def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path, monkeypatch, isolated_sys_path):
+    """shophub_mini.yml: Order (in the 'ordering' module) has many-to-one to Product
+    (in 'catalog') and to User (the auth entity) - proves FK validation works when
+    the target's CRUD lives in a different module, and when the target is the
+    auth-managed User entity, both via the one shared repo.py.
+    """
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "cross_module_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            register_resp = client.post(
+                "/auth/register", json={"email": "a@example.com", "password": "supersecret123"}
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            user_id = register_resp.json()["id"]
+
+            login_resp = client.post(
+                "/auth/login", json={"email": "a@example.com", "password": "supersecret123"}
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            cat_resp = client.post("/categories", json={"name": "Gadgets"}, headers=admin_headers)
+            assert cat_resp.status_code == 201, cat_resp.text
+            category_id = cat_resp.json()["id"]
+
+            prod_resp = client.post(
+                "/products",
+                json={"name": "Thing", "price": 1.0, "sku": "T1", "category_id": category_id},
+                headers=admin_headers,
+            )
+            assert prod_resp.status_code == 201, prod_resp.text
+            product_id = prod_resp.json()["id"]
+
+            ok_resp = client.post(
+                "/orders",
+                json={
+                    "status": "pending",
+                    "total_amount": 1.0,
+                    "user_id": user_id,
+                    "product_id": product_id,
+                },
+                headers=admin_headers,
+            )
+            assert ok_resp.status_code == 201, ok_resp.text
+            assert ok_resp.json()["user_id"] == user_id
+            assert ok_resp.json()["product_id"] == product_id
+
+            bad_resp = client.post(
+                "/orders",
+                json={
+                    "status": "pending",
+                    "total_amount": 1.0,
+                    "user_id": user_id,
+                    "product_id": 999999,
+                },
+                headers=admin_headers,
+            )
+            assert bad_resp.status_code == 400, bad_resp.text

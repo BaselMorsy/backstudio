@@ -366,3 +366,42 @@ def test_service_list_accepts_owned_relationship_filter(tmp_path):
     list_src = service_src[list_start:list_end]
     assert "category_id: Optional[int] = None" in list_src
     assert "category_id=category_id" in list_src
+
+
+def test_routes_map_valueerror_to_400_only_when_entity_has_owned_relationships(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")  # Product owns a FK, Category doesn't
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "catalog" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    product_create_start = routes_src.index("def create_product_route(")
+    product_create_end = routes_src.index("\n@router", product_create_start)
+    product_create_src = routes_src[product_create_start:product_create_end]
+    assert "except ValueError as exc:" in product_create_src
+    assert "status.HTTP_400_BAD_REQUEST" in product_create_src
+
+    category_create_start = routes_src.index("def create_category_route(")
+    category_create_end = routes_src.index("\n@router", category_create_start)
+    category_create_src = routes_src[category_create_start:category_create_end]
+    assert "except ValueError" not in category_create_src
+
+
+def test_list_route_gets_owned_relationship_query_param(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "catalog" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    list_start = routes_src.index("def list_product_route(")
+    list_end = routes_src.index("\n@router", list_start)
+    list_src = routes_src[list_start:list_end]
+    assert "category_id: Optional[int] = Query(None)" in list_src
+    assert "category_id=category_id" in list_src

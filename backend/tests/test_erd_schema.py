@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.erd.schema import ERDConfig, ALL_ACTIONS
+from backend.erd.schema import ERDConfig, ALL_ACTIONS, EntitySpec, RelationshipDecl, RLSIdentitySource, RLSSpec
 
 
 MINIMAL = {
@@ -84,3 +84,102 @@ def test_database_async_mode_can_be_enabled():
     from backend.erd.schema import DatabaseSpec
     spec = DatabaseSpec(type="sqlite", database_name="d.db", async_mode=True)
     assert spec.async_mode is True
+
+
+def test_relationship_owner_and_cascades_ownership_default_false():
+    rel = RelationshipDecl(name="user", cardinality="many-to-one", target="User")
+    assert rel.owner is False
+    assert rel.cascades_ownership is False
+
+
+def test_relationship_owner_true_accepted_on_many_to_one():
+    rel = RelationshipDecl(name="user", cardinality="many-to-one", target="User", owner=True)
+    assert rel.owner is True
+
+
+def test_relationship_owner_true_rejected_on_one_to_many():
+    with pytest.raises(ValidationError):
+        RelationshipDecl(name="items", cardinality="one-to-many", target="Item", owner=True)
+
+
+def test_relationship_owner_true_rejected_on_many_to_many():
+    with pytest.raises(ValidationError):
+        RelationshipDecl(name="tags", cardinality="many-to-many", target="Tag", owner=True)
+
+
+def test_relationship_cascades_ownership_true_rejected_on_one_to_one():
+    with pytest.raises(ValidationError):
+        RelationshipDecl(name="profile", cardinality="one-to-one", target="Profile", cascades_ownership=True)
+
+
+def test_relationship_cannot_be_both_owner_and_cascades_ownership():
+    with pytest.raises(ValidationError):
+        RelationshipDecl(
+            name="user", cardinality="many-to-one", target="User", owner=True, cascades_ownership=True
+        )
+
+
+def test_entity_at_most_one_owner_relationship():
+    bad = dict(MINIMAL)
+    bad["entities"] = [
+        {
+            "name": "Order",
+            "fields": [{"name": "id", "type": "integer", "primary_key": True}],
+            "relationships": [
+                {"name": "user", "cardinality": "many-to-one", "target": "User", "owner": True},
+                {"name": "agency", "cardinality": "many-to-one", "target": "Agency", "owner": True},
+            ],
+        }
+    ]
+    with pytest.raises(ValidationError):
+        ERDConfig(**bad)
+
+
+def test_entity_at_most_one_cascades_ownership_relationship():
+    bad = dict(MINIMAL)
+    bad["entities"] = [
+        {
+            "name": "OrderItem",
+            "fields": [{"name": "id", "type": "integer", "primary_key": True}],
+            "relationships": [
+                {"name": "order", "cardinality": "many-to-one", "target": "Order", "cascades_ownership": True},
+                {"name": "batch", "cardinality": "many-to-one", "target": "Batch", "cascades_ownership": True},
+            ],
+        }
+    ]
+    with pytest.raises(ValidationError):
+        ERDConfig(**bad)
+
+
+def test_rls_identity_source_header_requires_header_name():
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="header")
+
+
+def test_rls_identity_source_header_rejects_authorization_case_insensitive():
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="header", header_name="authorization")
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="header", header_name="Authorization")
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="header", header_name="AUTHORIZATION")
+
+
+def test_rls_identity_source_header_accepts_other_names():
+    src = RLSIdentitySource(type="header", header_name="X-Tenant-Id")
+    assert src.header_name == "X-Tenant-Id"
+
+
+def test_rls_identity_source_auth_user_does_not_require_header_name():
+    src = RLSIdentitySource(type="auth_user")
+    assert src.header_name is None
+
+
+def test_rls_spec_bypass_roles_defaults_empty():
+    spec = RLSSpec(identity_source=RLSIdentitySource(type="auth_user"))
+    assert spec.bypass_roles == []
+
+
+def test_entity_rls_defaults_none():
+    entity = EntitySpec(name="Widget", fields=[])
+    assert entity.rls is None

@@ -1,9 +1,9 @@
 """Pydantic schema for the YAML ERD configuration consumed by the backstudio CLI."""
 
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.schemas.data import Cardinality, LazyStrategy, ModelField
 
@@ -62,6 +62,32 @@ class RBACSpec(BaseModel):
         return v
 
 
+class RLSIdentitySource(BaseModel):
+    type: Literal["auth_user", "header"]
+    header_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def header_name_required_and_valid_for_header_type(self) -> "RLSIdentitySource":
+        if self.type == "header":
+            if not self.header_name:
+                raise ValueError(
+                    "rls.identity_source: type 'header' requires 'header_name' to be set "
+                    "(e.g. 'X-Tenant-Id')"
+                )
+            if self.header_name.strip().lower() == "authorization":
+                raise ValueError(
+                    "rls.identity_source.header_name: must not be 'Authorization' (case-insensitive) "
+                    "— this codebase's generated auth already relies on that header for the "
+                    "'Bearer <token>' JWT scheme"
+                )
+        return self
+
+
+class RLSSpec(BaseModel):
+    identity_source: RLSIdentitySource
+    bypass_roles: List[str] = Field(default_factory=list)
+
+
 class RelationshipDecl(BaseModel):
     """A relationship declared from one entity to another.
 
@@ -79,6 +105,25 @@ class RelationshipDecl(BaseModel):
     lazy: Optional[LazyStrategy] = None
     cascade: Optional[str] = None
     association_table: Optional[str] = None
+    owner: bool = False
+    cascades_ownership: bool = False
+
+    @model_validator(mode="after")
+    def owner_and_cascades_ownership_are_valid(self) -> "RelationshipDecl":
+        if self.owner and self.cascades_ownership:
+            raise ValueError(
+                f"relationship '{self.name}': cannot set both 'owner: true' and "
+                "'cascades_ownership: true' — a relationship either IS the ownership column "
+                "(owner) or passes ownership through from its target (cascades_ownership), never both."
+            )
+        if (self.owner or self.cascades_ownership) and self.cardinality != Cardinality.MANY_TO_ONE:
+            flag = "owner" if self.owner else "cascades_ownership"
+            raise ValueError(
+                f"relationship '{self.name}': '{flag}: true' is only valid on a many-to-one "
+                f"relationship (got cardinality '{self.cardinality.value}') — a row can have "
+                "exactly one owner, which one-to-many/one-to-one/many-to-many don't resolve to."
+            )
+        return self
 
 
 class ServiceDecl(BaseModel):
@@ -127,6 +172,24 @@ class EntitySpec(BaseModel):
     fields: List[ModelField] = Field(default_factory=list)
     relationships: List[RelationshipDecl] = Field(default_factory=list)
     endpoints: EndpointSpec = Field(default_factory=EndpointSpec)
+    rls: Optional[RLSSpec] = None
+
+    @model_validator(mode="after")
+    def at_most_one_owner_and_one_cascades_ownership_relationship(self) -> "EntitySpec":
+        owner_rels = [r.name for r in self.relationships if r.owner]
+        cascade_rels = [r.name for r in self.relationships if r.cascades_ownership]
+        if len(owner_rels) > 1:
+            raise ValueError(
+                f"entity '{self.name}': more than one relationship has 'owner: true' "
+                f"({', '.join(owner_rels)}) — an entity can have exactly one ownership column."
+            )
+        if len(cascade_rels) > 1:
+            raise ValueError(
+                f"entity '{self.name}': more than one relationship has 'cascades_ownership: true' "
+                f"({', '.join(cascade_rels)}) — an entity can inherit ownership through exactly "
+                "one path."
+            )
+        return self
 
 
 class ERDConfig(BaseModel):

@@ -1539,3 +1539,84 @@ def test_full_forgot_reset_password_flow_over_http(tmp_path, monkeypatch, isolat
             # a genuinely nonexistent email gets the identical generic response (already covered
             # by test_forgot_password_and_resend_verification_are_enumeration_safe in Task 6, not
             # re-asserted here to avoid duplicating that test's exact purpose)
+
+
+def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    """auth_expansion_async_full.yml driven through real HTTP + a real aiosqlite
+    DB - proves admin_approval gating, admin endpoints, and forgot/reset
+    password all compose correctly through the full async stack, mirroring
+    what the sync-path tests in Tasks 6-7 already proved individually.
+    """
+    erd = load_erd(f"{FIXTURES}/auth_expansion_async_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "auth_expansion_async_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+        import sqlite3
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert admin_resp.status_code == 201, admin_resp.text
+            admin_id = admin_resp.json()["id"]
+
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET is_approved = 1 WHERE id = ?", (admin_id,))
+            conn.commit()
+            conn.close()
+
+            admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert admin_login.status_code == 200, admin_login.text
+            admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+            # admin_approval flow
+            pending_resp = client.post("/auth/register", json={"email": "pending@example.com", "password": "supersecret123"})
+            pending_id = pending_resp.json()["id"]
+            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}).status_code == 401
+
+            # DEVIATION FROM BRIEF (documented per the Task-6/Task-7 precedent - see
+            # test_admin_user_management_403_then_200_round_trip and
+            # test_full_admin_approval_flow_over_http above, which independently found
+            # and fixed the identical issue): the admin routes live on the same
+            # `router = APIRouter()` as /register, /login, /me in auth/routes.py.jinja,
+            # and server.py.jinja mounts that whole router under the /auth prefix - so
+            # these routes are only ever reachable as /auth/users/{id}/approve and
+            # /auth/users in a real generated app, never bare /users/... . Prefixed
+            # both call sites with /auth to match real generated behavior (brief's
+            # literal text has the bare paths).
+            approve_resp = client.post(f"/auth/users/{pending_id}/approve", headers=admin_headers)
+            assert approve_resp.status_code == 200, approve_resp.text
+
+            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}).status_code == 200
+
+            # admin endpoints
+            list_resp = client.get("/auth/users", headers=admin_headers)
+            assert list_resp.status_code == 200
+            assert {u["id"] for u in list_resp.json()} >= {admin_id, pending_id}
+
+            # forgot/reset password
+            forgot_resp = client.post("/auth/forgot-password", json={"email": "pending@example.com"})
+            assert forgot_resp.status_code == 200
+            captured = capfd.readouterr()
+            match = re.search(r"Your password reset token: (\S+)", captured.out)
+            assert match
+            token = match.group(1)
+            reset_resp = client.post("/auth/reset-password", json={"token": token, "new_password": "brandnewpass1"})
+            assert reset_resp.status_code == 200, reset_resp.text
+            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "brandnewpass1"}).status_code == 200
+
+    # `with TestClient(...)` has already exited here, running the async lifespan
+    # shutdown (await engine.dispose()) - reaching this line without a hang is
+    # itself part of what this test proves, per the established precedent from
+    # the async-support and RLS plans.

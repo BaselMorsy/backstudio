@@ -255,7 +255,7 @@ deleted, so we keep a record of what was considered and when.
 
 ## Repo cleanup — CLI-only (requested 2026-09-09, do last)
 
-- [ ] **Strip the repo down to just the CLI tool.** The repo started as a
+- [x] **Strip the repo down to just the CLI tool.** The repo started as a
   UI-driven backend generator and was pivoted to an ERD-driven CLI this
   session, but the old UI-serving subsystem was never removed — it still
   exists alongside the CLI and the two share some templates/state shape
@@ -283,3 +283,27 @@ deleted, so we keep a record of what was considered and when.
     this repo at all (only the `.gitignore.jinja` template for *generated*
     projects), so `backend/**/__pycache__/`, `venv/`, `workspace/` show up as
     untracked noise in every `git status`. Add one as part of this cleanup.
+  Fixed 2026-09-10: implemented per
+  `docs/superpowers/plans/2026-09-10-repo-restructure-and-docs.md` and
+  `docs/superpowers/specs/2026-09-10-repo-restructure-and-docs-design.md`.
+  The shipped scope is larger than this item originally described. As
+  originally scoped: `frontend/`, `mcp_server/`, `backend/api/` (`routes.py`),
+  `backend/main.py`, `backend/services/project_service.py`, and the old UI
+  dev-server scripts (`setup.bat`/`.sh`, `start.bat`/`.sh`, `stop.bat`/`.sh`)
+  are gone, along with the dead `code_generator.py` `state.get('services', [])`
+  branch and the `service.py.jinja`/`schemas.py.jinja`/`routes.py.jinja`
+  templates it used; `README.md.jinja` no longer renders `project.services`
+  blocks; root `.gitignore` was added (now including `site/`, appended ahead
+  of this task's own `mkdocs build --strict` run). Beyond that original
+  scope, the plan also **renamed `backend/` to `app/`** repo-wide — not
+  anticipated by this item's original text — and added a full `docs-site/`
+  mkdocs documentation site (Home, Getting Started, ERD Reference, Features,
+  Architecture, CLI Reference) plus a rewritten front-door `README.md` —
+  neither of which was part of this item's original text either. Final
+  verification: `mkdocs build --strict` exits 0 with zero warnings/errors; a
+  repo-wide grep sweep for `backend\.`, `backend/`, and
+  `frontend`/`mcp_server`/`project_service`/`ProjectService` turned up zero
+  live matches — remaining hits are only third-party `.venv` package
+  internals and historical planning docs/task traces that predate the rename
+  and document it as it happened, not live references. Full suite: 252
+  passed.

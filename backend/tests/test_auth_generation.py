@@ -64,7 +64,7 @@ def test_renamed_auth_service_uses_its_own_name(tmp_path):
     from backend.erd.schema import (
         ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl,
     )
-    from backend.schemas.data import ModelField, FieldType
+    from backend.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="Demo", version="1.0.0"),

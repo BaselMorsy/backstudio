@@ -681,7 +681,7 @@ def test_entity_with_only_rls_owner_field_gets_pass_not_empty_create(tmp_path):
     `user_id` field that should have been dropped.
     """
     from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, RLSSpec, RLSIdentitySource, ServiceDecl, AuthSpec
-    from backend.schemas.data import ModelField, FieldType
+    from backend.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="RlsPassCheck", version="1.0.0"),

@@ -12,8 +12,9 @@ from backend.erd.schema import (
     EndpointSpec,
     AuthSpec,
     ServiceDecl,
+    ModelField,
+    FieldType,
 )
-from backend.schemas.data import ModelField, FieldType
 
 FIXTURES = "backend/tests/fixtures/erd"
 
@@ -400,7 +401,7 @@ def test_translate_relationship_enums_to_strings():
     of "selectin"), breaking SQLAlchemy relationship() call generation.
     The fix is to use .value to extract the string representation.
     """
-    from backend.schemas.data import LazyStrategy
+    from backend.erd.schema import LazyStrategy
 
     # Create an ERDConfig with a relationship that has lazy set
     erd = ERDConfig(
@@ -1049,8 +1050,7 @@ def test_translate_threads_jwt_lifetimes_into_security_config():
 
 
 def test_translate_custom_jwt_lifetimes_flow_through():
-    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl
-    from backend.schemas.data import ModelField, FieldType
+    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl, ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="CustomLifetimes", version="1.0.0"),

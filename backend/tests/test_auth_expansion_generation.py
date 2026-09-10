@@ -547,7 +547,7 @@ def test_admin_approval_mode_approve_route_present(tmp_path):
 
 def test_open_mode_no_rbac_has_only_forgot_reset(tmp_path):
     from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl
-    from backend.schemas.data import ModelField, FieldType
+    from backend.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="OpenNoRbac", version="1.0.0"),

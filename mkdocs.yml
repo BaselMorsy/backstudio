@@ -1,0 +1,55 @@
+site_name: BackStudio
+site_description: Generate FastAPI backend projects from a single ERD YAML file
+docs_dir: docs-site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick start: getting-started/quick-start.md
+  - ERD Reference:
+      - Schema overview: erd-reference/overview.md
+      - Full field reference: erd-reference/fields.md
+  - Features:
+      - Auth: features/auth.md
+      - RBAC: features/rbac.md
+      - Row-Level Security: features/rls.md
+      - Async database support: features/async.md
+  - Architecture:
+      - Pipeline overview: architecture/pipeline.md
+      - Template system: architecture/templates.md
+      - Adding a new feature: architecture/extending.md
+  - CLI Reference: cli-reference.md

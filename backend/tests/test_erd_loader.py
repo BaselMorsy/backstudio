@@ -508,3 +508,71 @@ services:
     )
     with pytest.raises(ERDValidationError, match="does not lead to"):
         load_erd(bad)
+
+
+def test_cascades_ownership_chain_single_hop_success(tmp_path):
+    """OrderItem cascades_ownership through 'order' to Order, which has owner: true
+    targeting User (with auth enabled and RLS declared). The chain is structurally valid
+    and must not raise.
+    """
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source: {type: auth_user}
+  - name: OrderItem
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: order, cardinality: many-to-one, target: Order, cascades_ownership: true}
+services:
+  - {name: orders, entities: [Order]}
+  - {name: order_items, entities: [OrderItem]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert erd.entities[0].name == "Order"
+    assert erd.entities[1].name == "OrderItem"
+
+
+def test_cascades_ownership_chain_two_hop_success(tmp_path):
+    """OrderLineDiscount cascades_ownership -> OrderItem, which cascades_ownership -> Order,
+    which has owner: true targeting User. The 2-hop chain is structurally valid and must not raise.
+    """
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source: {type: auth_user}
+  - name: OrderItem
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: order, cardinality: many-to-one, target: Order, cascades_ownership: true}
+  - name: OrderLineDiscount
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: order_item, cardinality: many-to-one, target: OrderItem, cascades_ownership: true}
+services:
+  - {name: orders, entities: [Order]}
+  - {name: order_items, entities: [OrderItem]}
+  - {name: discounts, entities: [OrderLineDiscount]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert len(erd.entities) == 3
+    assert erd.entities[2].name == "OrderLineDiscount"

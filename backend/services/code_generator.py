@@ -220,30 +220,6 @@ class CodeGenerator:
             self._render_template("Python/database/repo.py.jinja", context)
         )
 
-        # Generate service directories
-        for service in state.get('services', []):
-            # Get full service data from services dict
-            service_name = service if isinstance(service, str) else service.get('name', service.get('id'))
-            service_dir = output_dir / self._to_snake_case(service_name)
-            ensure_directory(service_dir)
-            (service_dir / "__init__.py").touch()
-
-            # Service context
-            service_context = {'project': state, 'service': service}
-
-            self._write_file(
-                service_dir / "service.py",
-                self._render_template("Python/service/service.py.jinja", service_context)
-            )
-            self._write_file(
-                service_dir / "schemas.py",
-                self._render_template("Python/service/schemas.py.jinja", service_context)
-            )
-            self._write_file(
-                service_dir / "routes.py",
-                self._render_template("Python/service/routes.py.jinja", service_context)
-            )
-
         # Generate one directory per service/module from an ERD
         if state.get('modules'):
             modules_dir = output_dir / "modules"

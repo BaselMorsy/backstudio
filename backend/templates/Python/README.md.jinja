@@ -34,14 +34,6 @@ This project was automatically generated from your specifications. The code is d
 │   │   └── routes.py        # register/login/refresh/me endpoints
 {% endif %}
 {% endif %}
-{% if project.services %}
-{% for service in project.services %}
-├── {{ service.name|snake_case }}/
-│   ├── service.py           # Business logic
-│   ├── schemas.py           # Pydantic schemas
-│   └── routes.py            # API endpoints
-{% endfor %}
-{% endif %}
 {% if project.rbac_enabled %}
 ├── rbac.py                  # Role-based access control dependency
 {% endif %}
@@ -183,27 +175,7 @@ Enabled actions: {{ entity.enabled_actions|join(', ') if entity.enabled_actions 
 JWT-based authentication: register, login, refresh, and `me` endpoints. See the
 Implementation Guide below to customize it.
 {% endif %}
-{% if project.services %}
-{% for service in project.services %}
-### {{ service.name }}
-
-{{ service.description or 'No description' }}
-
-**Base Path:** `/api/{{ service.name|kebab_case }}`
-
-{% if service.endpoints %}
-#### Endpoints
-
-{% for endpoint in service.endpoints %}
-- `{{ endpoint.method }} {{ endpoint.path }}` - {{ endpoint.description or endpoint.function_name }}
-{% endfor %}
-{% else %}
-No endpoints configured yet.
-{% endif %}
-
-{% endfor %}
-{% endif %}
-{% if not project.modules and not project.services and not project.auth_enabled %}
+{% if not project.modules and not project.auth_enabled %}
 No modules or services defined.
 {% endif %}
 
@@ -245,22 +217,6 @@ and `modules/{{ module.snake_name }}/routes.py`.
 
 Edit `modules/{{ project.auth_module_name }}/service.py` to customize registration, login,
 token refresh, and `get_current_user`.
-{% endif %}
-{% if project.services %}
-{% for service in project.services %}
-### {{ service.name }}
-
-Edit `{{ service.name|snake_case }}/service.py` and implement:
-
-{% if service.functions %}
-{% for func in service.functions %}
-- `{{ func.name }}()` - {{ func.description or 'TODO: Add description' }}
-{% endfor %}
-{% else %}
-No functions defined yet.
-{% endif %}
-
-{% endfor %}
 {% endif %}
 
 ## 🔄 Database Migrations

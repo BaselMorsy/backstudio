@@ -495,7 +495,6 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "checksum": "",
         "data_models": list(data_models.values()),
         "relationships": relationships,
-        "services": [],
         "middlewares": [],
         "dependencies": [],
         "database_config": erd.database.model_dump(mode='json'),

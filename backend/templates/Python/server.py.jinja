@@ -8,11 +8,6 @@ from database.base import {% if project.database_config.async_mode %}engine, {% 
 {% if project.middlewares %}
 from middleware import {% for mw in project.middlewares %}{{ mw.name|snake_case }}{{ ", " if not loop.last else "" }}{% endfor %}
 {% endif %}
-{% if project.services %}
-{% for service in project.services %}
-from {{ service.name|snake_case }}.routes import router as {{ service.name|snake_case }}_router
-{% endfor %}
-{% endif %}
 {% if project.modules %}
 {% for module in project.modules %}
 from modules.{{ module.snake_name }}.routes import router as {{ module.snake_name }}_router
@@ -72,14 +67,6 @@ app.add_middleware({{ mw.name|pascal_case }})
 {% endif %}
 
 # Include routers
-{% if project.services %}
-{% for service in project.services %}
-app.include_router(
-    {{ service.name|snake_case }}_router,
-    prefix="/api/{{ service.name|kebab_case }}"
-)
-{% endfor %}
-{% endif %}
 {% if project.modules %}
 {% for module in project.modules %}
 app.include_router({{ module.snake_name }}_router)

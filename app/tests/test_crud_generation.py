@@ -1,10 +1,10 @@
 import ast
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_generates_module_schemas_and_routes_for_every_entity_in_the_service(tmp_path):
@@ -291,7 +291,7 @@ def test_repo_filter_and_selectinload_work_against_a_real_db(tmp_path):
     see that file's isolated_sys_path fixture docstring for why a naive purge
     of every imported module is unsafe).
     """
-    from backend.tests.test_generated_project_runtime import _GeneratedProjectImporter
+    from app.tests.test_generated_project_runtime import _GeneratedProjectImporter
 
     erd = load_erd(f"{FIXTURES}/many_to_many.yml")
     state = translate(erd)
@@ -360,7 +360,7 @@ def test_service_create_and_update_actually_reject_bad_fk_at_runtime(tmp_path, m
     handles this the same way (monkeypatch.setenv("JWT_SECRET", ...)) for every
     test that imports a generated project with auth enabled.
     """
-    from backend.tests.test_generated_project_runtime import _GeneratedProjectImporter
+    from app.tests.test_generated_project_runtime import _GeneratedProjectImporter
 
     monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
 

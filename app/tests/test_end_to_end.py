@@ -3,11 +3,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def _assert_all_python_files_parse(root: Path) -> None:

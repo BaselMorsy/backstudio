@@ -6,7 +6,7 @@ from typing import Dict, List, Union
 import yaml
 from pydantic import ValidationError
 
-from backend.erd.schema import ERDConfig
+from app.erd.schema import ERDConfig
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 MODE_GATED_RESERVED_USER_FIELDS = {

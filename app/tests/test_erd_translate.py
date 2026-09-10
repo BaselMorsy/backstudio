@@ -1,9 +1,9 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.erd.loader import load_erd, ERDValidationError
-from backend.erd.translate import translate
-from backend.erd.schema import (
+from app.erd.loader import load_erd, ERDValidationError
+from app.erd.translate import translate
+from app.erd.schema import (
     ERDConfig,
     ProjectMeta,
     DatabaseSpec,
@@ -16,7 +16,7 @@ from backend.erd.schema import (
     FieldType,
 )
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_translate_minimal():
@@ -305,7 +305,7 @@ def test_translate_two_relationships_to_same_target_stay_distinct():
     import tempfile
     import ast as ast_module
 
-    from backend.services.code_generator import CodeGenerator
+    from app.services.code_generator import CodeGenerator
 
     with tempfile.TemporaryDirectory() as tmp:
         gen = CodeGenerator(output_dir=tmp)
@@ -320,7 +320,7 @@ def test_translate_ambiguous_relationship_names_raise_clear_error():
     """If both relationships were given the SAME explicit attribute name, translation
     must fail loudly instead of silently letting one clobber the other.
     """
-    from backend.erd.loader import ERDValidationError
+    from app.erd.loader import ERDValidationError
 
     erd = ERDConfig(
         project=ProjectMeta(name="Messenger", version="1.0.0"),
@@ -401,7 +401,7 @@ def test_translate_relationship_enums_to_strings():
     of "selectin"), breaking SQLAlchemy relationship() call generation.
     The fix is to use .value to extract the string representation.
     """
-    from backend.erd.schema import LazyStrategy
+    from app.erd.schema import LazyStrategy
 
     # Create an ERDConfig with a relationship that has lazy set
     erd = ERDConfig(
@@ -536,7 +536,7 @@ def test_translate_auth_user_fields_have_defaults():
         )
 
     # Render models.py and verify syntax is valid
-    from backend.services.code_generator import CodeGenerator
+    from app.services.code_generator import CodeGenerator
     import tempfile, ast
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -1050,7 +1050,7 @@ def test_translate_threads_jwt_lifetimes_into_security_config():
 
 
 def test_translate_custom_jwt_lifetimes_flow_through():
-    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl, ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="CustomLifetimes", version="1.0.0"),

@@ -1,7 +1,7 @@
-from backend.erd.loader import load_erd
-from backend.erd.visualize import render_html, render_mermaid
+from app.erd.loader import load_erd
+from app.erd.visualize import render_html, render_mermaid
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_render_mermaid_includes_entities_and_relationship():

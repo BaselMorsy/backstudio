@@ -1,10 +1,10 @@
 import ast
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_email_dot_py_generated_whenever_auth_enabled(tmp_path):
@@ -546,8 +546,8 @@ def test_admin_approval_mode_approve_route_present(tmp_path):
 
 
 def test_open_mode_no_rbac_has_only_forgot_reset(tmp_path):
-    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl
-    from backend.erd.schema import ModelField, FieldType
+    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl
+    from app.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="OpenNoRbac", version="1.0.0"),

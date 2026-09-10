@@ -1,4 +1,4 @@
-# backend/tests/test_generated_project_runtime.py
+# app/tests/test_generated_project_runtime.py
 """End-to-end runtime tests: actually import and execute generated code.
 
 Every other test in this suite renders templates and checks the resulting
@@ -22,11 +22,11 @@ from typing import Iterator, Set
 
 import pytest
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def _top_level_module_names(codebase_dir: Path) -> Set[str]:

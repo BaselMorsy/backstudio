@@ -3,7 +3,7 @@
 from html import escape
 from typing import List
 
-from backend.erd.schema import ERDConfig, ModelField
+from app.erd.schema import ERDConfig, ModelField
 
 _MERMAID_TYPE_MAP = {
     "string": "string", "integer": "int", "float": "float", "boolean": "bool",

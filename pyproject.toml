@@ -9,7 +9,6 @@ dependencies = [
     "pydantic==2.5.0",
     "pydantic-settings==2.1.0",
     "jinja2==3.1.2",
-    "python-multipart==0.0.6",
     "typer==0.9.0",
     "click>=8.1,<8.2",
     "pyyaml==6.0.1",
@@ -18,7 +17,7 @@ dependencies = [
     # bcrypt.__about__), which breaks hash_password() at runtime. Generated
     # projects' requirements.txt already pins this; pin it here too so the
     # dev/test environment matches (needed by
-    # backend/tests/test_generated_project_runtime.py, which actually hashes
+    # app/tests/test_generated_project_runtime.py, which actually hashes
     # a password through the generated auth service).
     "bcrypt==4.0.1",
     "python-jose[cryptography]==3.3.0",
@@ -26,25 +25,27 @@ dependencies = [
     "sqlalchemy==2.0.23",
     # Pinned explicitly (also in generated projects' requirements.txt): generated
     # config.py calls load_dotenv() directly so a project's own .env file actually
-    # takes effect (see backend/templates/Python/config.py.jinja); needed here too
-    # since backend/tests/test_generated_project_runtime.py imports and runs
+    # takes effect (see app/templates/Python/config.py.jinja); needed here too
+    # since app/tests/test_generated_project_runtime.py imports and runs
     # generated code against this repo's own venv rather than a fresh install.
     "python-dotenv==1.2.1",
 ]
 
 [project.scripts]
-backstudio = "backend.cli.main:app"
+backstudio = "app.cli.main:app"
 
 [project.optional-dependencies]
 dev = [
     "pytest==7.4.3",
     "pytest-asyncio==0.21.1",
     "httpx==0.25.2",
-    # Needed at test time only: backend/tests/test_generated_project_runtime.py
+    # Needed at test time only: app/tests/test_generated_project_runtime.py
     # actually imports and runs a generated project, whose auth/schemas.py
     # uses pydantic's EmailStr (requires the separate email-validator package).
     "email-validator==2.1.1",
     "aiosqlite>=0.22.1",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
 ]
 
 [build-system]
@@ -52,7 +53,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend"]
+packages = ["app"]
 
 [dependency-groups]
 dev = [
@@ -61,4 +62,6 @@ dev = [
     "httpx>=0.25.2",
     "email-validator>=2.1.1",
     "aiosqlite>=0.22.1",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
 ]

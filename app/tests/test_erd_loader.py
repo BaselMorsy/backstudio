@@ -1,8 +1,8 @@
 import pytest
 
-from backend.erd.loader import ERDValidationError, load_erd
+from app.erd.loader import ERDValidationError, load_erd
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_loads_minimal_valid_erd():

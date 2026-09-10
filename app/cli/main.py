@@ -9,10 +9,10 @@ from pathlib import Path
 
 import typer
 
-from backend.erd.loader import ERDValidationError, load_erd
-from backend.erd.translate import translate
-from backend.erd.visualize import render_html
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import ERDValidationError, load_erd
+from app.erd.translate import translate
+from app.erd.visualize import render_html
+from app.services.code_generator import CodeGenerator
 
 app = typer.Typer(name="backstudio", help="Generate FastAPI backends from a YAML ERD.")
 

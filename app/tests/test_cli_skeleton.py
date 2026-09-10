@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from backend.cli.main import app
+from app.cli.main import app
 
 runner = CliRunner()
 

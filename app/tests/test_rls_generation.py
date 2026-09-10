@@ -1,10 +1,10 @@
 import ast
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_root_owned_repo_functions_gain_owner_id_and_where(tmp_path):
@@ -680,8 +680,8 @@ def test_entity_with_only_rls_owner_field_gets_pass_not_empty_create(tmp_path):
     empty class body, which ast.parse below would catch) or wrongly including a
     `user_id` field that should have been dropped.
     """
-    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, RLSSpec, RLSIdentitySource, ServiceDecl, AuthSpec
-    from backend.erd.schema import ModelField, FieldType
+    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, RLSSpec, RLSIdentitySource, ServiceDecl, AuthSpec
+    from app.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="RlsPassCheck", version="1.0.0"),

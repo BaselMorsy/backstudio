@@ -1,10 +1,10 @@
 import ast
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_generates_auth_module_when_enabled(tmp_path):
@@ -61,10 +61,10 @@ def test_no_auth_module_when_disabled(tmp_path):
 
 
 def test_renamed_auth_service_uses_its_own_name(tmp_path):
-    from backend.erd.schema import (
+    from app.erd.schema import (
         ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl,
     )
-    from backend.erd.schema import ModelField, FieldType
+    from app.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="Demo", version="1.0.0"),

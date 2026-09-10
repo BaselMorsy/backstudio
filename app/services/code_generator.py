@@ -3,10 +3,12 @@
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
-from backend.utils.file_ops import ensure_directory, create_zip_archive
+from app.utils.file_ops import ensure_directory, create_zip_archive
+
+_DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 
 class CodeGenerator:
@@ -17,7 +19,7 @@ class CodeGenerator:
     Same specs always produce the same codebase with matching checksum.
     """
 
-    def __init__(self, templates_dir: str = "backend/templates", output_dir: str = "workspace"):
+    def __init__(self, templates_dir: Optional[str] = None, output_dir: str = "workspace"):
         """
         Initialize code generator with template and output directories.
 
@@ -25,7 +27,7 @@ class CodeGenerator:
             templates_dir: Directory containing Jinja2 templates
             output_dir: Base directory for generated projects
         """
-        self.templates_dir = Path(templates_dir)
+        self.templates_dir = Path(templates_dir) if templates_dir is not None else _DEFAULT_TEMPLATES_DIR
         self.output_dir = Path(output_dir)
 
         ensure_directory(self.output_dir)
@@ -45,7 +47,7 @@ class CodeGenerator:
     def _register_filters(self) -> None:
         """Register custom Jinja2 filters for code generation"""
 
-        # Must stay identical to `_snake_case` in backend/erd/translate.py - templates
+        # Must stay identical to `_snake_case` in app/erd/translate.py - templates
         # mix the two (e.g. repo.get_<target_snake>_by_id names come from translate.py
         # while sibling names come from this filter), so drift breaks generated code.
         def to_snake_case(text: str) -> str:

@@ -1,11 +1,11 @@
-# backend/tests/test_server_wiring.py
+# app/tests/test_server_wiring.py
 import ast
 
-from backend.erd.loader import load_erd
-from backend.erd.translate import translate
-from backend.services.code_generator import CodeGenerator
+from app.erd.loader import load_erd
+from app.erd.translate import translate
+from app.services.code_generator import CodeGenerator
 
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_server_imports_and_mounts_module_and_auth_routers(tmp_path):

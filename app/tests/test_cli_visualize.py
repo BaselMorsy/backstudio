@@ -1,9 +1,9 @@
 from typer.testing import CliRunner
 
-from backend.cli.main import app
+from app.cli.main import app
 
 runner = CliRunner()
-FIXTURES = "backend/tests/fixtures/erd"
+FIXTURES = "app/tests/fixtures/erd"
 
 
 def test_visualize_writes_html_file(tmp_path, monkeypatch):

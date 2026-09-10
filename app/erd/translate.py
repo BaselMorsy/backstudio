@@ -4,8 +4,8 @@ import re
 from collections import Counter
 from typing import Any, Dict, List
 
-from backend.erd.loader import ERDValidationError
-from backend.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
+from app.erd.loader import ERDValidationError
+from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
 
 AUTH_USER_FIELDS: List[Dict[str, Any]] = [
     {"name": "id", "type": "integer", "primary_key": True, "nullable": False, "default": None},
@@ -19,7 +19,7 @@ AUTH_USER_FIELDS: List[Dict[str, Any]] = [
 
 
 def _snake_case(text: str) -> str:
-    # Must stay identical to `to_snake_case` in backend/services/code_generator.py
+    # Must stay identical to `to_snake_case` in app/services/code_generator.py
     # (the Jinja `snake_case` filter) - module_service.py.jinja calls
     # repo.get_<target_snake>_by_id using THIS function's output, so any drift
     # between the two would generate a call to a repo function that doesn't exist.

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.erd.schema import ERDConfig, ALL_ACTIONS, EntitySpec, RelationshipDecl, RLSIdentitySource, RLSSpec
+from app.erd.schema import ERDConfig, ALL_ACTIONS, EntitySpec, RelationshipDecl, RLSIdentitySource, RLSSpec
 
 
 MINIMAL = {
@@ -75,13 +75,13 @@ def test_uppercase_service_name_rejected():
 
 
 def test_database_async_mode_defaults_to_false():
-    from backend.erd.schema import DatabaseSpec
+    from app.erd.schema import DatabaseSpec
     spec = DatabaseSpec(type="sqlite", database_name="d.db")
     assert spec.async_mode is False
 
 
 def test_database_async_mode_can_be_enabled():
-    from backend.erd.schema import DatabaseSpec
+    from app.erd.schema import DatabaseSpec
     spec = DatabaseSpec(type="sqlite", database_name="d.db", async_mode=True)
     assert spec.async_mode is True
 
@@ -186,7 +186,7 @@ def test_entity_rls_defaults_none():
 
 
 def test_jwt_spec_new_lifetime_fields_have_correct_defaults():
-    from backend.erd.schema import JWTSpec
+    from app.erd.schema import JWTSpec
     jwt = JWTSpec()
     assert jwt.expiration_minutes == 30
     assert jwt.refresh_token_expiration_minutes == 10080
@@ -195,7 +195,7 @@ def test_jwt_spec_new_lifetime_fields_have_correct_defaults():
 
 
 def test_jwt_spec_new_lifetime_fields_are_overridable():
-    from backend.erd.schema import JWTSpec
+    from app.erd.schema import JWTSpec
     jwt = JWTSpec(
         refresh_token_expiration_minutes=5,
         email_verification_expiration_minutes=10,
@@ -207,24 +207,24 @@ def test_jwt_spec_new_lifetime_fields_are_overridable():
 
 
 def test_registration_spec_defaults_to_open():
-    from backend.erd.schema import RegistrationSpec
+    from app.erd.schema import RegistrationSpec
     reg = RegistrationSpec()
     assert reg.mode == "open"
 
 
 def test_registration_spec_accepts_valid_modes():
-    from backend.erd.schema import RegistrationSpec
+    from app.erd.schema import RegistrationSpec
     assert RegistrationSpec(mode="email_verification").mode == "email_verification"
     assert RegistrationSpec(mode="admin_approval").mode == "admin_approval"
 
 
 def test_registration_spec_rejects_unknown_mode():
-    from backend.erd.schema import RegistrationSpec
+    from app.erd.schema import RegistrationSpec
     with pytest.raises(ValidationError):
         RegistrationSpec(mode="invite_only")
 
 
 def test_auth_spec_registration_defaults_to_open_mode():
-    from backend.erd.schema import AuthSpec
+    from app.erd.schema import AuthSpec
     auth = AuthSpec(enabled=True)
     assert auth.registration.mode == "open"

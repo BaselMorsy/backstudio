@@ -1385,3 +1385,157 @@ def test_forgot_password_and_resend_verification_are_enumeration_safe(tmp_path, 
             fake_resend = client.post("/auth/resend-verification", json={"email": "nobody@example.com"})
             assert real_resend.status_code == fake_resend.status_code == 200
             assert real_resend.json() == fake_resend.json()
+
+
+def test_full_email_verification_flow_over_http(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "email_verif_http_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            register_resp = client.post("/auth/register", json={"email": "eve@example.com", "password": "supersecret123"})
+            assert register_resp.status_code == 201, register_resp.text
+
+            login_resp = client.post("/auth/login", json={"email": "eve@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 401, login_resp.text  # unverified
+
+            captured = capfd.readouterr()
+            match = re.search(r"Your verification token: (\S+)", captured.out)
+            assert match, f"no verification token found in captured stdout: {captured.out}"
+            token = match.group(1)
+
+            verify_resp = client.post("/auth/verify-email", json={"token": token})
+            assert verify_resp.status_code == 200, verify_resp.text
+
+            login_resp2 = client.post("/auth/login", json={"email": "eve@example.com", "password": "supersecret123"})
+            assert login_resp2.status_code == 200, login_resp2.text
+
+            bad_verify_resp = client.post("/auth/verify-email", json={"token": "garbage"})
+            assert bad_verify_resp.status_code == 400
+
+
+def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/auth_admin_approval.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "admin_approval_http_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap gets every role AND is auto-approved? see below
+            admin_id = admin_resp.json()["id"]
+
+            # the bootstrap admin (first user) still needs approval like anyone else under
+            # admin_approval mode - registration and role-bootstrap are orthogonal to approval
+            login_before = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert login_before.status_code == 401, login_before.text
+
+            # approve the admin directly via the DB (no bootstrap approval mechanism exists -
+            # this mirrors how other tests in this suite grant a role via direct SQL when no
+            # endpoint yet exists to do it through the API)
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET is_approved = 1 WHERE id = ?", (admin_id,))
+            conn.commit()
+            conn.close()
+
+            admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert admin_login.status_code == 200, admin_login.text
+            admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+            pending_resp = client.post("/auth/register", json={"email": "pending@example.com", "password": "supersecret123"})
+            assert pending_resp.status_code == 201, pending_resp.text
+            pending_id = pending_resp.json()["id"]
+            assert pending_resp.json()["is_approved"] is False
+
+            pending_login = client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"})
+            assert pending_login.status_code == 401, pending_login.text
+
+            # DEVIATION FROM BRIEF (documented per the task-6 precedent in
+            # test_admin_user_management_403_then_200_round_trip above, which found and
+            # fixed the identical issue): the admin routes live on the same
+            # `router = APIRouter()` as /register, /login, /me in auth/routes.py.jinja, and
+            # server.py.jinja mounts that whole router under the /auth prefix - so this
+            # route is only ever reachable as /auth/users/{id}/approve in a real generated
+            # app, never bare /users/{id}/approve. Prefixed with /auth to match real
+            # generated behavior (brief's literal text has the bare path).
+            approve_resp = client.post(f"/auth/users/{pending_id}/approve", headers=admin_headers)
+            assert approve_resp.status_code == 200, approve_resp.text
+            assert approve_resp.json()["is_approved"] is True
+
+            pending_login2 = client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"})
+            assert pending_login2.status_code == 200, pending_login2.text
+
+
+def test_full_forgot_reset_password_flow_over_http(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "forgot_reset_http_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "frank@example.com", "password": "originalpass1"})
+
+            forgot_resp = client.post("/auth/forgot-password", json={"email": "frank@example.com"})
+            assert forgot_resp.status_code == 200, forgot_resp.text
+
+            captured = capfd.readouterr()
+            match = re.search(r"Your password reset token: (\S+)", captured.out)
+            assert match, f"no reset token found in captured stdout: {captured.out}"
+            token = match.group(1)
+
+            reset_resp = client.post("/auth/reset-password", json={"token": token, "new_password": "newpassword2"})
+            assert reset_resp.status_code == 200, reset_resp.text
+
+            old_login = client.post("/auth/login", json={"email": "frank@example.com", "password": "originalpass1"})
+            assert old_login.status_code == 401
+
+            new_login = client.post("/auth/login", json={"email": "frank@example.com", "password": "newpassword2"})
+            assert new_login.status_code == 200
+
+            # reusing the SAME token a second time must fail - the single-use proof, now at the HTTP layer
+            reuse_resp = client.post("/auth/reset-password", json={"token": token, "new_password": "thirdpassword3"})
+            assert reuse_resp.status_code == 400, reuse_resp.text
+
+            # a genuinely nonexistent email gets the identical generic response (already covered
+            # by test_forgot_password_and_resend_verification_are_enumeration_safe in Task 6, not
+            # re-asserted here to avoid duplicating that test's exact purpose)

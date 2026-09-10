@@ -2,7 +2,7 @@
 name = "backstudio"
 version = "0.1.0"
 description = "BackStudio - The Ultimate Backend Code Generator"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi==0.104.1",
     "uvicorn[standard]==0.24.0",
@@ -23,6 +23,15 @@ dependencies = [
     "python-jose[cryptography]==3.3.0",
     "alembic==1.13.0",
     "sqlalchemy==2.0.23",
+    # Pinned explicitly rather than left to SQLAlchemy's own platform-gated dependency
+    # marker: verified that marker (platform_machine == 'AMD64'/'aarch64'/'x86_64'/...)
+    # doesn't match on Windows-on-ARM64 hosts running an x64-emulated Python 3.12
+    # interpreter, because Python's own platform.machine() reports differently between
+    # 3.11 and 3.12 builds on that exact host/architecture combination — greenlet
+    # silently didn't install, breaking every async-mode test at runtime with
+    # "the greenlet library is required to use this function." Declaring it directly
+    # removes the dependency on that marker matching correctly across platforms/versions.
+    "greenlet==3.5.5",
     # Pinned explicitly (also in generated projects' requirements.txt): generated
     # config.py calls load_dotenv() directly so a project's own .env file actually
     # takes effect (see app/templates/Python/config.py.jinja); needed here too

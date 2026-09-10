@@ -2,11 +2,14 @@
 
 ## Requirements
 
-- **Python 3.11** — the project's `pyproject.toml` pins
-  `requires-python = ">=3.11,<3.12"`, so Python 3.12+ is not currently supported.
+- **Python 3.11 or 3.12** — the project's `pyproject.toml` pins
+  `requires-python = ">=3.11,<3.13"`; Python 3.13+ isn't supported yet (`pydantic-core`'s pinned
+  version has no prebuilt wheel for 3.13, which would need a Rust toolchain to build from
+  source). The `.python-version` file pins 3.11 as the primary/tested development interpreter,
+  but 3.12 is also verified working.
 - **[uv](https://docs.astral.sh/uv/)** — used to manage the virtual environment and
-  dependencies. `uv` will provision a matching Python 3.11 interpreter for you if you
-  don't already have one on your PATH.
+  dependencies. `uv` will provision a matching Python interpreter for you if you don't already
+  have one on your PATH.
 
 ## Install from a fresh clone
 

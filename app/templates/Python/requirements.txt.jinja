@@ -16,6 +16,7 @@ python-dotenv==1.2.1
 sqlalchemy==2.0.23
 {% if project.database_config.async_mode %}
 asyncpg==0.29.0
+greenlet==3.5.5
 {% else %}
 psycopg2-binary==2.9.9
 {% endif %}
@@ -24,6 +25,7 @@ alembic==1.13.0
 sqlalchemy==2.0.23
 {% if project.database_config.async_mode %}
 aiomysql==0.2.0
+greenlet==3.5.5
 {% else %}
 pymysql==1.1.0
 cryptography==41.0.7
@@ -33,6 +35,7 @@ alembic==1.13.0
 sqlalchemy==2.0.23
 {% if project.database_config.async_mode %}
 aiosqlite==0.19.0
+greenlet==3.5.5
 {% endif %}
 alembic==1.13.0
 {% elif project.database_config.type == 'mongodb' %}

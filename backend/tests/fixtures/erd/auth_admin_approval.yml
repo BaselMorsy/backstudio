@@ -1,0 +1,32 @@
+project:
+  name: AuthAdminApproval
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: auth_admin_approval.db
+
+auth:
+  enabled: true
+  registration:
+    mode: admin_approval
+
+rbac:
+  enabled: true
+  roles: [admin, customer]
+  default_permissions:
+    create: [admin, customer]
+    list: [admin, customer]
+    read: [admin, customer]
+    update: [admin, customer]
+    delete: [admin]
+
+entities:
+  - name: Note
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+
+services:
+  - name: notes
+    entities: [Note]

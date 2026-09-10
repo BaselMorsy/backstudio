@@ -990,3 +990,87 @@ def test_ambiguous_multi_path_is_structurally_impossible_at_schema_level():
                 RelationshipDecl(name="batch", cardinality="many-to-one", target="Batch", cascades_ownership=True),
             ],
         )
+
+
+def test_translate_email_verification_mode_adds_is_verified_field():
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")
+    state = translate(erd)
+
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    field_names = [f["name"] for f in user["fields"]]
+    assert "is_verified" in field_names
+    assert "is_approved" not in field_names
+
+    is_verified_field = next(f for f in user["fields"] if f["name"] == "is_verified")
+    assert is_verified_field["type"] == "boolean"
+    assert is_verified_field["nullable"] is False
+    assert is_verified_field["default"] is False
+
+    assert state["registration_mode"] == "email_verification"
+
+
+def test_translate_admin_approval_mode_adds_is_approved_field():
+    erd = load_erd(f"{FIXTURES}/auth_admin_approval.yml")
+    state = translate(erd)
+
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    field_names = [f["name"] for f in user["fields"]]
+    assert "is_approved" in field_names
+    assert "is_verified" not in field_names
+
+    is_approved_field = next(f for f in user["fields"] if f["name"] == "is_approved")
+    assert is_approved_field["type"] == "boolean"
+    assert is_approved_field["nullable"] is False
+    assert is_approved_field["default"] is False
+
+    assert state["registration_mode"] == "admin_approval"
+
+
+def test_translate_open_mode_adds_neither_field():
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    field_names = [f["name"] for f in user["fields"]]
+    assert "is_verified" not in field_names
+    assert "is_approved" not in field_names
+    assert state["registration_mode"] == "open"
+
+
+def test_translate_threads_jwt_lifetimes_into_security_config():
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")
+    state = translate(erd)
+
+    sec = state["security_config"]
+    assert sec["jwt_expiration_minutes"] == 30
+    assert sec["jwt_refresh_expiration_minutes"] == 10080
+    assert sec["jwt_email_verification_expiration_minutes"] == 1440
+    assert sec["jwt_password_reset_expiration_minutes"] == 30
+
+
+def test_translate_custom_jwt_lifetimes_flow_through():
+    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl
+    from backend.schemas.data import ModelField, FieldType
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="CustomLifetimes", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="c.db"),
+        auth=AuthSpec(
+            enabled=True,
+            jwt=JWTSpec(
+                refresh_token_expiration_minutes=5,
+                email_verification_expiration_minutes=7,
+                password_reset_expiration_minutes=1,
+            ),
+        ),
+        entities=[
+            EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+
+    sec = state["security_config"]
+    assert sec["jwt_refresh_expiration_minutes"] == 5
+    assert sec["jwt_email_verification_expiration_minutes"] == 7
+    assert sec["jwt_password_reset_expiration_minutes"] == 1

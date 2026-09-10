@@ -1,0 +1,39 @@
+project:
+  name: AuthEmailVerification
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: auth_email_verification.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 30
+    refresh_token_expiration_minutes: 10080
+    email_verification_expiration_minutes: 1440
+    password_reset_expiration_minutes: 30
+  registration:
+    mode: email_verification
+
+rbac:
+  enabled: true
+  roles: [admin, customer]
+  default_permissions:
+    create: [admin, customer]
+    list: [admin, customer]
+    read: [admin, customer]
+    update: [admin, customer]
+    delete: [admin]
+
+entities:
+  - name: Note
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+
+services:
+  - name: notes
+    entities: [Note]

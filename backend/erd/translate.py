@@ -348,6 +348,10 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
 def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
     declared = next((e for e in erd.entities if e.name == "User"), None)
     fields = [dict(f) for f in AUTH_USER_FIELDS]
+    if erd.auth.registration.mode == "email_verification":
+        fields.append({"name": "is_verified", "type": "boolean", "nullable": False, "default": False})
+    elif erd.auth.registration.mode == "admin_approval":
+        fields.append({"name": "is_approved", "type": "boolean", "nullable": False, "default": False})
     if declared:
         fields.extend(f.model_dump(mode='json') for f in declared.fields)
     return {
@@ -478,6 +482,9 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "jwt_secret_env_var": erd.auth.jwt.secret_env_var,
             "jwt_algorithm": erd.auth.jwt.algorithm,
             "jwt_expiration_minutes": erd.auth.jwt.expiration_minutes,
+            "jwt_refresh_expiration_minutes": erd.auth.jwt.refresh_token_expiration_minutes,
+            "jwt_email_verification_expiration_minutes": erd.auth.jwt.email_verification_expiration_minutes,
+            "jwt_password_reset_expiration_minutes": erd.auth.jwt.password_reset_expiration_minutes,
         }
 
     return {
@@ -498,4 +505,5 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "auth_enabled": erd.auth.enabled,
         "rbac_enabled": erd.rbac.enabled,
         "rbac_roles": erd.rbac.roles,
+        "registration_mode": erd.auth.registration.mode,
     }

@@ -1,0 +1,7 @@
+"""{{ project.name }} - {{ project.auth_module_name }} email stub"""
+
+
+def send_email(to: str, subject: str, body: str) -> None:
+    """Development-mode stub - logs instead of sending. Replace with a real
+    email provider integration (SES, SendGrid, SMTP, ...) before production."""
+    print(f"[DEV EMAIL] To: {to}\nSubject: {subject}\n\n{body}\n")

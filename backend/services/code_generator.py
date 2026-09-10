@@ -279,6 +279,7 @@ class CodeGenerator:
             self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))
             self._write_file(auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context))
             self._write_file(auth_dir / "routes.py", self._render_template("Python/auth/routes.py.jinja", context))
+            self._write_file(auth_dir / "email.py", self._render_template("Python/auth/email.py.jinja", context))
 
         # RBAC dependency (only meaningful once auth exists, enforced at the ERD validation layer)
         if state.get('rbac_enabled'):

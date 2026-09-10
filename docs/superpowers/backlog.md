@@ -145,7 +145,7 @@ deleted, so we keep a record of what was considered and when.
   never `await`ed), and the async engine requires explicit `await engine.dispose()` on
   shutdown or it hangs process exit. RLS (row-level access control, next in the backlog)
   is now unblocked to be designed directly against this async shape.
-- [ ] **Spec 2 — Auth service expansion.** Agreed scope, never yet written as
+- [x] **Spec 2 — Auth service expansion.** Agreed scope, never yet written as
   a formal spec:
   - Admin user management: `list_users` / `get_user` / `set_user_roles` /
     `deactivate_user` / `reactivate_user`, RBAC-gated to admin, only
@@ -154,6 +154,35 @@ deleted, so we keep a record of what was considered and when.
     (invite-only deferred further, no concrete design yet).
   - Forgot/reset password: dev-mode `send_email()` stub, generic response
     on request to avoid email enumeration.
+  Fixed 2026-09-10: designed and implemented per
+  `docs/superpowers/specs/2026-09-10-auth-expansion-design.md` and
+  `docs/superpowers/plans/2026-09-10-auth-expansion.md`. Admin user
+  management (`list`/`get`/`set roles`/`deactivate`/`reactivate`, plus
+  `approve` under `admin_approval`) is gated to a reserved `admin` role —
+  `rbac.enabled: true` now requires `admin` to be declared in `rbac.roles`
+  at load time, the same way `User` is a reserved entity name. Registration
+  gating adds two mutually exclusive modes on `auth.registration.mode`:
+  `email_verification` (adds `User.is_verified`, gates login, adds
+  `verify-email`/`resend-verification`) and `admin_approval` (adds
+  `User.is_approved`, gates login, adds the `approve` endpoint, and itself
+  requires `rbac.enabled: true` since approval is admin-gated). Forgot/reset
+  password is always generated regardless of mode, using a dev-mode
+  `send_email()` stub and a generic response on both `forgot-password` and
+  `resend-verification` to avoid leaking which emails are registered. Four
+  JWT lifetimes are now independently configurable on `auth.jwt`
+  (`expiration_minutes`, `refresh_token_expiration_minutes`,
+  `email_verification_expiration_minutes`, `password_reset_expiration_minutes`).
+  One notable technical finding: the password-reset token achieves genuine
+  single-use semantics as a stateless JWT, with no new database table and no
+  caller-supplied hash — `verify_password_reset_token(self, db, token)` in
+  `auth/service.py.jinja` decodes the token, looks up the *current*
+  `password_hash` fresh from the DB for the user id the token itself decodes
+  to, and compares it against a SHA256-truncated fingerprint embedded in the
+  token at issuance; changing the password on reset invalidates the
+  fingerprint, so any replay of the same token fails. All routes — old and
+  new — are mounted under one `/auth` prefix from a single `APIRouter()`,
+  not any bare path. Verified via real HTTP+DB round-trip tests for both
+  sync and `database.async_mode: true`.
 
 ## Minor findings — modular-services final review
 

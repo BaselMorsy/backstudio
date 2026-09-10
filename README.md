@@ -250,10 +250,83 @@ auth:
 
 When enabled, a `User` entity is automatically added to your model (`id`, `email`,
 `password_hash`, `roles`, `is_active`, `created_at`, `updated_at`) and a full auth service is
-generated (`/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/me`) — see
-[Auth & RBAC in depth](#auth--rbac-in-depth) below. You can add your own extra fields to `User`
-by declaring an entity literally named `User` in `entities:` (see below); you cannot redeclare the
-reserved fields listed above.
+generated. **Every auth route — the four above and every one added by `registration`/`rbac` below
+— is mounted under a single `/auth` prefix** (`/auth/register`, `/auth/login`, `/auth/refresh`,
+`/auth/me`, ...; the prefix follows `auth_module_name`, which defaults to `auth` and can be
+renamed — see [`services`](#services)) — see [Auth & RBAC in depth](#auth--rbac-in-depth) below.
+You can add your own extra fields to `User` by declaring an entity literally named `User` in
+`entities:` (see below); you cannot redeclare the reserved fields listed above (which fields are
+reserved depends on `registration.mode` — see immediately below).
+
+#### `auth.registration` (optional, default `open`)
+
+```yaml
+auth:
+  enabled: true
+  registration:
+    mode: open   # open | email_verification | admin_approval — default "open"
+```
+
+Three mutually exclusive modes govern what happens between `POST /auth/register` and a user being
+able to actually log in. In every mode, registering itself always succeeds and creates the row —
+the gate is enforced at **login** (`POST /auth/login` / `authenticate_user`), not at registration:
+
+| Mode | Requires | Gates |
+|---|---|---|
+| `open` (default) | nothing | nothing — a freshly registered user can log in immediately. |
+| `email_verification` | nothing extra | adds `is_verified: bool` (default `false`) to `User`/`UserResponse`; login is rejected with `401 Email not verified` until it's `true`; adds `POST /auth/verify-email` and `POST /auth/resend-verification`. |
+| `admin_approval` | `rbac.enabled: true` (checked at load time — approval is an admin-gated endpoint) | adds `is_approved: bool` (default `false`) to `User`/`UserResponse`; login is rejected with `401 Account pending approval` until it's `true`; adds `POST /auth/users/{id}/approve`. |
+
+#### `auth.jwt`'s other three lifetimes
+
+Beyond `algorithm` and `expiration_minutes` (the access-token lifetime, shown above), three more
+independently configurable token lifetimes live on `auth.jwt`:
+
+```yaml
+auth:
+  jwt:
+    expiration_minutes: 30                        # access token — default 30
+    refresh_token_expiration_minutes: 10080        # refresh token — default 10080 (7 days)
+    email_verification_expiration_minutes: 1440    # email-verification token — default 1440 (24h)
+    password_reset_expiration_minutes: 30           # password-reset token — default 30
+```
+
+Each is used for exactly one token `type` claim (`access` / `refresh` / `email_verification` /
+`password_reset`); an endpoint that decodes a token rejects it if the `type` doesn't match what
+that endpoint expects. `email_verification_expiration_minutes` only does anything when
+`auth.registration.mode: email_verification` is set — the other three are always in effect.
+
+#### New auth endpoints
+
+**Admin user management** — generated whenever `rbac.enabled: true` (which itself requires
+`admin` to be declared in `rbac.roles`, checked at load time). Every route below is gated to the
+`admin` role:
+
+| Method & path | Description |
+|---|---|
+| `GET /auth/users` | List users (`skip`/`limit` query params). |
+| `GET /auth/users/{id}` | Get one user by id — `404` if it doesn't exist. |
+| `PUT /auth/users/{id}/roles` | Replace a user's roles — `400` on an unknown role, `404` on a missing user. |
+| `POST /auth/users/{id}/deactivate` | Set `is_active: false`. |
+| `POST /auth/users/{id}/reactivate` | Set `is_active: true`. |
+| `POST /auth/users/{id}/approve` | Set `is_approved: true` — only generated when `auth.registration.mode: admin_approval`. |
+
+There's no hard delete — `deactivate`/`reactivate` are the only lifecycle controls.
+
+**Email verification** — generated whenever `auth.registration.mode: email_verification`:
+
+| Method & path | Description |
+|---|---|
+| `POST /auth/verify-email` | Body `{"token": "..."}` — marks the user verified; `400` on an invalid/expired token. |
+| `POST /auth/resend-verification` | Body `{"email": "..."}` — always returns the same generic message, whether or not that email is registered or already verified (avoids leaking which emails exist). |
+
+**Forgot / reset password** — always generated, regardless of `registration.mode` or
+`rbac.enabled`:
+
+| Method & path | Description |
+|---|---|
+| `POST /auth/forgot-password` | Body `{"email": "..."}` — always returns the same generic message (enumeration-safe); if the email exists, a reset token is generated and handed to the dev-mode `send_email()` stub. |
+| `POST /auth/reset-password` | Body `{"token": "...", "new_password": "..."}` — `400` on an invalid, expired, or already-used token. |
 
 ### `rbac` (optional, default disabled — **requires `auth.enabled: true`**)
 
@@ -649,8 +722,21 @@ alembic upgrade head
 
 - **Password hashing**: bcrypt via `passlib`. Plaintext passwords are never stored or compared.
 - **Tokens**: access tokens (short-lived, per `auth.jwt.expiration_minutes`) and refresh tokens
-  (7 days) are distinct — each carries a `type` claim (`"access"` / `"refresh"`) and each endpoint
-  rejects the wrong type, so a leaked access token can't be used to mint fresh refresh tokens.
+  (per `auth.jwt.refresh_token_expiration_minutes`, default 10080 minutes = 7 days) are distinct
+  — each carries a `type` claim (`"access"` / `"refresh"`) and each endpoint rejects the wrong
+  type, so a leaked access token can't be used to mint fresh refresh tokens. Email-verification
+  and password-reset tokens are separate JWTs the same way (`"email_verification"` /
+  `"password_reset"` type claims, their own `auth.jwt.*_expiration_minutes` lifetimes) — see
+  [`auth.registration`](#authregistration-optional-default-open) and
+  [New auth endpoints](#new-auth-endpoints) above.
+- **Password-reset tokens are single-use, with no new database table**: `create_password_reset_token`
+  embeds a truncated SHA-256 fingerprint of the user's *current* `password_hash` as an extra JWT
+  claim. `verify_password_reset_token(db, token)` decodes the token, looks up that same user's
+  *current* `password_hash` fresh from the database (by the id the token itself decodes to — never
+  a caller-supplied hash), and rejects the token unless the fingerprint still matches. Since
+  `POST /auth/reset-password` changes `password_hash` before returning, using the token once
+  invalidates it for any replay — a stateless JWT achieving genuine single-use semantics with no
+  server-side revocation list.
 - **First-user bootstrap**: when RBAC is enabled, the very first user to register is granted every
   declared role — otherwise nobody could ever pass an RBAC check on a fresh database. Every
   subsequent registration gets no roles by default; assign roles to later users directly in your

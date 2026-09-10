@@ -1065,3 +1065,63 @@ def test_async_many_to_many_id_list_round_trip_against_real_generated_app(tmp_pa
             assert list_resp.status_code == 200, list_resp.text
             listed_post = next(p for p in list_resp.json() if p["id"] == post_id)
             assert sorted(listed_post["tag_ids"]) == sorted([tag1_id, tag2_id])
+
+
+def test_rls_create_schema_silently_ignores_client_supplied_owner_field(tmp_path, monkeypatch, isolated_sys_path):
+    """The schema-level guarantee, proven over real HTTP: a client that includes
+    user_id in the POST /orders payload gets it silently dropped by Pydantic (unknown
+    field, not part of OrderCreate) - the created row's owner is still exactly the
+    resolved owner_id, matching test_root_owned_create_service_actually_ignores_client_supplied_owner's
+    proof one layer down, now proven at the HTTP boundary too.
+
+    rls_root_owned.yml's Order.rls.bypass_roles is [admin], and (per the bootstrap
+    convention exercised elsewhere in this file) the FIRST user ever registered gets
+    every declared role, including admin - so registering only one user and using it
+    as "the real owner" would make module_routes.py.jinja's
+    `owner_id = None if <bypass role> else current_user.id` resolve owner_id to None on
+    create, defeating the very thing this test wants to prove. So: register a bootstrap
+    admin first (discarded), then a second user granted only the non-bypass "customer"
+    role directly via the DB (same technique as
+    test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own above) - that second
+    user is "real_owner_id" here, and its create call resolves a real, non-None owner_id.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_schema_http_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # bootstrap admin (gets every role, including the bypass role) - registered
+            # only so the "real" owner below isn't the first user, and discarded.
+            client.post("/auth/register", json={"email": "bootstrap@example.com", "password": "supersecret123"})
+
+            register_resp = client.post("/auth/register", json={"email": "real@example.com", "password": "supersecret123"})
+            assert register_resp.json()["roles"] == []
+            real_owner_id = register_resp.json()["id"]
+
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'real@example.com'")
+            conn.commit()
+            conn.close()
+
+            login_resp = client.post("/auth/login", json={"email": "real@example.com", "password": "supersecret123"})
+            headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            order_resp = client.post(
+                "/orders", json={"status": "pending", "user_id": real_owner_id + 999}, headers=headers
+            )
+            assert order_resp.status_code == 201, order_resp.text
+            assert order_resp.json()["user_id"] == real_owner_id

@@ -614,3 +614,91 @@ def test_list_route_excludes_rls_link_from_client_query_params(tmp_path):
     list_src = routes_src[list_start:list_end]
     assert "product_id: Optional[int] = Query(None)" in list_src
     assert "order_id: Optional[int] = Query(None)" not in list_src
+
+
+def test_root_owned_create_and_update_schemas_omit_owner_fk(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "orders" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+
+    create_start = schemas_src.index("class OrderCreate(")
+    create_end = schemas_src.index("\nclass OrderUpdate(")
+    create_src = schemas_src[create_start:create_end]
+    assert "user_id" not in create_src
+    assert "status" in create_src  # the entity's own ordinary field is still present
+
+    update_start = schemas_src.index("class OrderUpdate(")
+    update_end = schemas_src.index("\nclass OrderResponse(")
+    update_src = schemas_src[update_start:update_end]
+    assert "user_id" not in update_src
+
+    response_start = schemas_src.index("class OrderResponse(")
+    response_src = schemas_src[response_start:]
+    assert "user_id" in response_src  # still visible in the response
+
+
+def test_cascade_owned_create_and_update_schemas_keep_linking_fk(tmp_path):
+    """OrderItem.order_id (cascades_ownership, not owner) must stay a normal field on
+    both Create and Update - only a ROOT owner FK is dropped, per spec Sec.4.5.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "ordering" / "schemas.py").read_text(encoding="utf-8")
+    create_start = schemas_src.index("class OrderItemCreate(")
+    create_end = schemas_src.index("\nclass OrderItemUpdate(")
+    assert "order_id" in schemas_src[create_start:create_end]
+
+    update_start = schemas_src.index("class OrderItemUpdate(")
+    update_end = schemas_src.index("\nclass OrderItemResponse(")
+    assert "order_id" in schemas_src[update_start:update_end]
+
+
+def test_entity_with_only_rls_owner_field_gets_pass_not_empty_create(tmp_path):
+    """A regression guard for the exact bug this task's design note warns about:
+    Bookmark's only field besides its primary key IS its owner:true relationship (no
+    other ordinary fields at all) - a naive `pass` condition keyed only on
+    entity.fields would wrongly render `pass` (since entity.fields has zero non-PK
+    entries) even though the owner FK... except the owner FK is EXCLUDED from Create
+    for a root-owned entity, so `pass` genuinely IS correct here. This test exists to
+    catch the opposite mistake: a `visible_owned_count` computed wrong (e.g. off by
+    one, or not root-aware) either wrongly omitting `pass` (leaving a syntactically
+    empty class body, which ast.parse below would catch) or wrongly including a
+    `user_id` field that should have been dropped.
+    """
+    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, RLSSpec, RLSIdentitySource, ServiceDecl, AuthSpec
+    from backend.schemas.data import ModelField, FieldType
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="RlsPassCheck", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="p.db"),
+        auth=AuthSpec(enabled=True),
+        entities=[
+            EntitySpec(
+                name="Bookmark",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[RelationshipDecl(name="user", cardinality="many-to-one", target="User", owner=True)],
+                rls=RLSSpec(identity_source=RLSIdentitySource(type="auth_user")),
+            ),
+        ],
+        services=[ServiceDecl(name="bookmarks", entities=["Bookmark"])],
+    )
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "bookmarks" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)  # would fail on a syntactically empty class body
+    create_start = schemas_src.index("class BookmarkCreate(")
+    create_end = schemas_src.index("\nclass BookmarkUpdate(")
+    assert "pass" in schemas_src[create_start:create_end]
+    assert "user_id" not in schemas_src[create_start:create_end]

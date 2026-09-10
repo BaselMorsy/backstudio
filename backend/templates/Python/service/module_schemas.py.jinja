@@ -7,6 +7,7 @@ from datetime import date, datetime
 from pydantic import BaseModel{% if has_m2m %}, model_validator{% endif +%}
 
 {% for entity in module.entities %}
+{% set visible_owned_count = entity.owned_relationships|length - (1 if (entity.rls and entity.rls.is_root) else 0) %}
 
 class {{ entity.name }}Create(BaseModel):
     """Fields required to create a {{ entity.name }}."""
@@ -16,11 +17,11 @@ class {{ entity.name }}Create(BaseModel):
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
-{% if rel.fk_column not in entity.fields|map(attribute='name')|list %}
+{% if rel.fk_column not in entity.fields|map(attribute='name')|list and not (rel.is_rls_link and entity.rls.is_root) %}
     {{ rel.fk_column }}: {% if rel.fk_nullable %}Optional[int] = None{% else %}int{% endif +%}
 {% endif %}
 {% endfor %}
-{% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 and visible_owned_count == 0 %}
     pass
 {% endif %}
 
@@ -33,11 +34,11 @@ class {{ entity.name }}Update(BaseModel):
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
-{% if rel.fk_column not in entity.fields|map(attribute='name')|list %}
+{% if rel.fk_column not in entity.fields|map(attribute='name')|list and not (rel.is_rls_link and entity.rls.is_root) %}
     {{ rel.fk_column }}: Optional[int] = None
 {% endif %}
 {% endfor %}
-{% if entity.fields|rejectattr('primary_key')|list|length == 0 and not entity.owned_relationships %}
+{% if entity.fields|rejectattr('primary_key')|list|length == 0 and visible_owned_count == 0 %}
     pass
 {% endif %}
 

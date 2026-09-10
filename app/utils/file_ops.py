@@ -1,9 +1,7 @@
 """File operation utilities"""
 
-import os
 import json
 import shutil
-import zipfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -64,38 +62,6 @@ def delete_directory(path: Path) -> None:
     """
     if path.exists() and path.is_dir():
         shutil.rmtree(path)
-
-
-def create_zip_archive(source_dir: Path, output_path: Path, exclude_patterns: Optional[list] = None) -> Path:
-    """
-    Create ZIP archive from directory.
-
-    Args:
-        source_dir: Source directory to archive
-        output_path: Output ZIP file path
-        exclude_patterns: List of patterns to exclude (e.g., ['__pycache__', '*.pyc'])
-
-    Returns:
-        Path to created ZIP file
-    """
-    exclude_patterns = exclude_patterns or []
-    ensure_directory(output_path.parent)
-
-    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, dirs, files in os.walk(source_dir):
-            # Filter out excluded directories
-            dirs[:] = [d for d in dirs if not any(pattern in d for pattern in exclude_patterns)]
-
-            for file in files:
-                # Skip excluded files
-                if any(pattern in file for pattern in exclude_patterns):
-                    continue
-
-                file_path = Path(root) / file
-                arcname = file_path.relative_to(source_dir)
-                zipf.write(file_path, arcname)
-
-    return output_path
 
 
 def get_timestamp() -> str:

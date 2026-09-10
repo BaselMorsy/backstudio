@@ -134,11 +134,11 @@ Options:
 
 1. Loads and validates the ERD (same failure mode as `validate`/`visualize` on an invalid file).
 2. Translates the ERD into generator state via `app.erd.translate.translate`.
-3. Generates the project into `<output>/<project.name>/codebase` via
+3. Generates the project into `<output>/<project.name>` via
    `app.services.code_generator.CodeGenerator`. If that directory already exists and `--force`
    was not passed, generation fails with exit code `1` and a message telling you to pass
-   `--force`; passing `--force` deletes and recreates the whole codebase directory.
-4. **`.env` handling:** if a previous run's `.env` file exists under the output codebase
+   `--force`; passing `--force` deletes and recreates the whole project directory.
+4. **`.env` handling:** if a previous run's `.env` file exists under the output project
    directory, its content is preserved across a `--force` regeneration (so your secret isn't
    silently rotated). Otherwise, if the ERD has `auth` enabled and the relevant secret
    environment variable (`erd.auth.jwt.secret_env_var`) isn't already set in the current
@@ -146,17 +146,17 @@ Options:
    telling you where.
 5. **Alembic autogeneration:** if the generated project has an `alembic.ini` (i.e. a database is
    configured), `generate` best-effort runs `alembic revision --autogenerate -m initial` in the
-   generated codebase directory (30s timeout). A failure here only prints a yellow warning — it
+   generated project directory (30s timeout). A failure here only prints a yellow warning — it
    never fails the `generate` command itself — and tells you to run the migration yourself once
    the database is reachable.
-6. On success, prints the generated codebase path in bold green and a reminder to copy the
+6. On success, prints the generated project path in bold green and a reminder to copy the
    directory into your project.
 
 ### Example
 
 ```bash
 $ uv run backstudio generate blog.yml --output workspace
-Generated at: workspace/BlogAPI/codebase
+Generated at: workspace/BlogAPI
 Copy this directory into your project.
 ```
 

@@ -46,22 +46,22 @@ to catch schema mistakes before generating code.
 
 ```bash
 $ uv run backstudio generate blog.yml --output workspace
-Generated at: workspace/BlogAPI/codebase
+Generated at: workspace/BlogAPI
 Copy this directory into your project.
 ```
 
-`generate` writes a full FastAPI project under `<output>/<project.name>/codebase`. Because
+`generate` writes a full FastAPI project under `<output>/<project.name>`. Because
 `auth` is off in this ERD, no `.env` secret is generated; because a SQLite database is
 declared, `generate` also runs `alembic revision --autogenerate` for you, producing an initial
 migration.
 
 ### What actually gets produced
 
-Running the command above produces this tree under `workspace/BlogAPI/codebase/`
+Running the command above produces this tree under `workspace/BlogAPI/`
 (captured from a real run; `__pycache__` directories omitted):
 
 ```
-workspace/BlogAPI/codebase/
+workspace/BlogAPI/
 ├── .gitignore
 ├── README.md
 ├── alembic.ini
@@ -93,7 +93,7 @@ workspace/BlogAPI/codebase/
 ## 4. Run the generated project
 
 ```bash
-cd workspace/BlogAPI/codebase
+cd workspace/BlogAPI
 python -m venv venv
 ```
 

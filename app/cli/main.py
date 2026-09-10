@@ -32,8 +32,8 @@ def _decode_and_truncate(output: object) -> str:
     return text + "\n"
 
 
-def _ensure_dev_env_secret(codebase_dir: Path, secret_env_var: str) -> str | None:
-    """Write a freshly-generated random secret to <codebase_dir>/.env for local dev.
+def _ensure_dev_env_secret(project_dir: Path, secret_env_var: str) -> str | None:
+    """Write a freshly-generated random secret to <project_dir>/.env for local dev.
 
     Does nothing (returns None) if the env var is already set in the current process,
     or if a .env file already exists (never overwrites one, e.g. on a --force
@@ -43,7 +43,7 @@ def _ensure_dev_env_secret(codebase_dir: Path, secret_env_var: str) -> str | Non
     if os.getenv(secret_env_var):
         return None
 
-    env_path = codebase_dir / ".env"
+    env_path = project_dir / ".env"
     if env_path.exists():
         return None
 
@@ -123,26 +123,26 @@ def generate(
     state = translate(erd)
     generator = CodeGenerator(output_dir=str(output))
 
-    # generate_project(force=True) deletes and recreates the whole codebase directory —
+    # generate_project(force=True) deletes and recreates the whole project directory —
     # including any .env a previous run wrote — so preserve one across a --force
     # regeneration rather than silently rotating the user's secret on every re-run.
-    predicted_env_path = output / state["name"] / "codebase" / ".env"
+    predicted_env_path = output / state["name"] / ".env"
     preserved_env_content = (
         predicted_env_path.read_text(encoding="utf-8") if predicted_env_path.exists() else None
     )
 
     try:
-        codebase_dir = generator.generate_project(state, force=force)
+        project_dir = generator.generate_project(state, force=force)
     except FileExistsError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         typer.secho("Use --force to overwrite.", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
 
     if preserved_env_content is not None:
-        (codebase_dir / ".env").write_text(preserved_env_content, encoding="utf-8")
+        (project_dir / ".env").write_text(preserved_env_content, encoding="utf-8")
     elif erd.auth.enabled:
         secret_env_var = erd.auth.jwt.secret_env_var
-        written_env_path = _ensure_dev_env_secret(codebase_dir, secret_env_var)
+        written_env_path = _ensure_dev_env_secret(project_dir, secret_env_var)
         if written_env_path:
             typer.secho(
                 f"Generated a random {secret_env_var} for local development and wrote it to "
@@ -150,11 +150,11 @@ def generate(
                 fg=typer.colors.CYAN,
             )
 
-    if (codebase_dir / "alembic.ini").exists():
+    if (project_dir / "alembic.ini").exists():
         try:
             subprocess.run(
                 [sys.executable, "-m", "alembic", "revision", "--autogenerate", "-m", "initial"],
-                cwd=codebase_dir,
+                cwd=project_dir,
                 check=True,
                 capture_output=True,
                 timeout=30,
@@ -174,7 +174,7 @@ def generate(
                 fg=typer.colors.YELLOW,
             )
 
-    typer.secho(f"Generated at: {codebase_dir}", fg=typer.colors.GREEN, bold=True)
+    typer.secho(f"Generated at: {project_dir}", fg=typer.colors.GREEN, bold=True)
     typer.echo("Copy this directory into your project.")
 
 

@@ -19,7 +19,7 @@ flowchart TD
     E --> F["CodeGenerator.generate_project()<br/>app/services/code_generator.py"]
     F --> F1["_generate_fastapi_project()"]
     F1 --> F2["Jinja2 render:<br/>Python/*.jinja templates"]
-    F2 --> G["generated FastAPI project<br/>workspace/{project_name}/codebase"]
+    F2 --> G["generated FastAPI project<br/>workspace/{project_name}"]
 ```
 
 ## Stage 1: `app/erd/loader.py` — YAML to a validated `ERDConfig`
@@ -120,7 +120,7 @@ is what `CodeGenerator.generate_project()` receives — it never sees an `ERDCon
 ## Stage 3: `app/services/code_generator.py` — `state` to rendered files
 
 `CodeGenerator.generate_project(project_state, force=False)` is the entry point. It resolves
-the output directory (`workspace/{project_name}/codebase`), refuses to overwrite an existing
+the output directory (`workspace/{project_name}`), refuses to overwrite an existing
 one unless `force=True`, and — for `framework == 'fastapi'` (the only supported value) —
 delegates to `_generate_fastapi_project(state, output_dir)`, which drives every Jinja2 render
 call.
@@ -144,6 +144,6 @@ single module's entities in isolation — see
 [Template system: the two context shapes](templates.md#the-two-context-shapes) for the full
 list and why mixing the two up has historically caused real bugs.
 
-The result of `generate_project()` is the path to the generated codebase directory — a
+The result of `generate_project()` is the path to the generated project directory — a
 self-contained FastAPI project ready to run, with its own `database/`, `modules/`, `alembic/`,
 `server.py`, `config.py`, and `requirements.txt`.

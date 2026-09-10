@@ -5,7 +5,7 @@
 
   **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
 
-  [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+  [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
@@ -90,14 +90,14 @@ OK: 1 entities, 0 relationships, auth=off, rbac=off
 
 ```bash
 $ uv run backstudio generate blog.yml --output workspace
-Generated at: workspace/BlogAPI/codebase
+Generated at: workspace/BlogAPI
 Copy this directory into your project.
 ```
 
 **Run it:**
 
 ```bash
-cd workspace/BlogAPI/codebase
+cd workspace/BlogAPI
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 

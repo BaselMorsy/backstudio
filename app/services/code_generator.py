@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
-from app.utils.file_ops import ensure_directory, create_zip_archive
+from app.utils.file_ops import ensure_directory
 
 _DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -159,7 +159,7 @@ class CodeGenerator:
             force: If True, overwrite existing generated code
 
         Returns:
-            Path to generated project directory (workspace/{project_name}/codebase)
+            Path to generated project directory (workspace/{project_name})
 
         Raises:
             FileExistsError: If project exists and force=False
@@ -168,25 +168,24 @@ class CodeGenerator:
         project_name = project_state['name']
         framework = project_state['framework']
 
-        # Output directory: workspace/{project_name}/codebase
+        # Output directory: workspace/{project_name}
         project_dir = self.output_dir / project_name
-        codebase_dir = project_dir / "codebase"
 
-        if codebase_dir.exists() and not force:
-            raise FileExistsError(f"Generated code already exists at {codebase_dir}")
+        if project_dir.exists() and not force:
+            raise FileExistsError(f"Generated code already exists at {project_dir}")
 
         # Create clean output directory
-        if codebase_dir.exists():
-            shutil.rmtree(codebase_dir)
-        ensure_directory(codebase_dir)
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+        ensure_directory(project_dir)
 
         # Generate FastAPI project (Python only)
         if framework == 'fastapi':
-            self._generate_fastapi_project(project_state, codebase_dir)
+            self._generate_fastapi_project(project_state, project_dir)
         else:
             raise ValueError(f"Unsupported framework: {framework}. Only 'fastapi' is supported.")
 
-        return codebase_dir
+        return project_dir
 
     def _generate_fastapi_project(self, state: Dict[str, Any], output_dir: Path) -> None:
         """
@@ -325,36 +324,3 @@ class CodeGenerator:
         pascal = ''.join(word.capitalize() for word in text.replace('_', ' ').split())
         return pascal[0].lower() + pascal[1:] if pascal else ''
 
-    def create_archive(self, project_name: str) -> Path:
-        """
-        Create ZIP archive of generated project.
-
-        Args:
-            project_name: Project name
-
-        Returns:
-            Path to created ZIP file
-        """
-        codebase_dir = self.output_dir / project_name / "codebase"
-        if not codebase_dir.exists():
-            raise FileNotFoundError(f"No generated code found for project {project_name}")
-
-        zip_path = self.output_dir / project_name / f"{project_name}.zip"
-
-        exclude_patterns = ['__pycache__', '.pyc', 'node_modules', '.git']
-        create_zip_archive(codebase_dir, zip_path, exclude_patterns)
-
-        return zip_path
-
-    def sync_project(self, project_name: str, project_state: Dict[str, Any]) -> Path:
-        """
-        Sync generated code with updated project state.
-
-        Args:
-            project_name: Project name
-            project_state: Updated project state
-
-        Returns:
-            Path to synced project directory
-        """
-        return self.generate_project(project_state, force=True)

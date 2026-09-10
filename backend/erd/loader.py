@@ -6,7 +6,7 @@ from typing import Dict, List, Union
 import yaml
 from pydantic import ValidationError
 
-from backend.erd.schema import ERDConfig
+from backend.erd.schema import ERDConfig, RelationshipDecl
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 
@@ -39,6 +39,93 @@ def load_erd(path: Union[str, Path]) -> ERDConfig:
     return erd
 
 
+def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
+    owner_targets: Dict[str, str] = {}  # entity name -> its owner:true relationship's target
+    for entity in erd.entities:
+        owner_rel = next((r for r in entity.relationships if r.owner), None)
+        if owner_rel is None:
+            continue
+        owner_targets[entity.name] = owner_rel.target
+
+        if entity.rls is None:
+            raise ERDValidationError(
+                f"Entity '{entity.name}': relationship '{owner_rel.name}' has 'owner: true' but "
+                f"the entity declares no 'rls:' block — every 'owner: true' entity must declare "
+                "'rls: {identity_source: ...}'."
+            )
+
+        source = entity.rls.identity_source
+        if source.type == "auth_user":
+            if not erd.auth.enabled:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.identity_source.type 'auth_user' requires "
+                    "auth.enabled: true (there is no JWT-authenticated caller to resolve "
+                    "ownership from otherwise)."
+                )
+            if owner_rel.target != "User":
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.identity_source.type 'auth_user' requires the "
+                    f"'owner: true' relationship's target to be 'User' (got '{owner_rel.target}') "
+                    "— auth_user resolves ownership from the JWT-authenticated User; a different "
+                    "owner entity needs rls.identity_source.type: header instead."
+                )
+
+        if entity.rls.bypass_roles:
+            if not erd.rbac.enabled:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.bypass_roles requires rbac.enabled: true "
+                    "(bypass roles are RBAC roles)."
+                )
+            unknown = sorted(set(entity.rls.bypass_roles) - set(erd.rbac.roles))
+            if unknown:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.bypass_roles references unknown role(s): "
+                    f"{', '.join(unknown)} — declared roles are: "
+                    f"{', '.join(erd.rbac.roles) or 'none declared'}."
+                )
+
+    for entity in erd.entities:
+        cascade_rel = next((r for r in entity.relationships if r.cascades_ownership), None)
+        if cascade_rel is None:
+            continue
+        # Walk up the cascades_ownership chain (bounded by len(erd.entities) to avoid an
+        # infinite loop on a cycle here too - Task 3's resolver gives the authoritative,
+        # precise cycle error; this is a coarser, cheaper pre-check).
+        current = cascade_rel.target
+        seen = {entity.name}
+        steps = 0
+        by_name = {e.name: e for e in erd.entities}
+        while steps <= len(erd.entities):
+            if current in owner_targets:
+                break  # reached a root-owned entity - structurally valid
+            if current in seen or current not in by_name:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': relationship '{cascade_rel.name}' "
+                    f"(cascades_ownership: true, target '{cascade_rel.target}') does not lead to "
+                    "any entity with 'owner: true' — either the chain doesn't terminate at an "
+                    "owned entity, or it cycles back on itself."
+                )
+            seen.add(current)
+            next_entity = by_name[current]
+            next_cascade = next((r for r in next_entity.relationships if r.cascades_ownership), None)
+            if next_cascade is None:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': relationship '{cascade_rel.name}' "
+                    f"(cascades_ownership: true, target '{cascade_rel.target}') does not lead to "
+                    "any entity with 'owner: true' — either the chain doesn't terminate at an "
+                    "owned entity, or it cycles back on itself."
+                )
+            current = next_cascade.target
+            steps += 1
+        else:
+            raise ERDValidationError(
+                f"Entity '{entity.name}': relationship '{cascade_rel.name}' "
+                f"(cascades_ownership: true, target '{cascade_rel.target}') does not lead to "
+                "any entity with 'owner: true' — either the chain doesn't terminate at an "
+                "owned entity, or it cycles back on itself."
+            )
+
+
 def _validate_semantics(erd: ERDConfig) -> None:
     if not erd.entities:
         raise ERDValidationError("ERD must declare at least one entity")
@@ -62,6 +149,8 @@ def _validate_semantics(erd: ERDConfig) -> None:
         )
 
     known_entities = set(entity_names) | ({"User"} if erd.auth.enabled else set())
+
+    _validate_rls(erd, known_entities)
 
     for entity in erd.entities:
         field_names = [f.name for f in entity.fields]

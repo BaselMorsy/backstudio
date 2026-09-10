@@ -341,3 +341,170 @@ services:
         path.write_text(content)
         erd = load_erd(path)  # must not raise
         assert erd.services[1].name == "identity"
+
+
+def test_rls_bypass_roles_requires_rbac_enabled(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      bypass_roles: [admin]
+      identity_source: {type: auth_user}
+services:
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="bypass_roles"):
+        load_erd(bad)
+
+
+def test_rls_bypass_roles_unknown_role_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+rbac: {enabled: true, roles: [customer]}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      bypass_roles: [admin]
+      identity_source: {type: auth_user}
+services:
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="unknown role"):
+        load_erd(bad)
+
+
+def test_rls_auth_user_identity_source_requires_auth_enabled(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source: {type: auth_user}
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="auth\\.enabled"):
+        load_erd(bad)
+
+
+def test_rls_auth_user_identity_source_requires_target_user(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source: {type: auth_user}
+services:
+  - {name: main, entities: [User]}
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="target"):
+        load_erd(bad)
+
+
+def test_rls_header_identity_source_does_not_require_auth(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source: {type: header, header_name: X-Tenant-Id}
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert erd.entities[1].rls.identity_source.type == "header"
+
+
+def test_owner_true_entity_missing_rls_block_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+services:
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="rls"):
+        load_erd(bad)
+
+
+def test_cascades_ownership_target_not_owned_rejected(tmp_path):
+    """OrderItem cascades_ownership through 'order', but Order carries no owner: true
+    anywhere and nothing further up the graph does either - structurally impossible to
+    resolve, caught here without needing the full walk Task 3 does.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: OrderItem
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: order, cardinality: many-to-one, target: Order, cascades_ownership: true}
+services:
+  - {name: orders, entities: [Order]}
+  - {name: order_items, entities: [OrderItem]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="does not lead to"):
+        load_erd(bad)

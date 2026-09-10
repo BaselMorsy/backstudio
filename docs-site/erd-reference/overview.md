@@ -16,6 +16,35 @@ This page shows the shape of each key with one short snippet. For every field's 
 type, default value, and validation rule, see the
 [Full field reference](fields.md).
 
+## Constraints at a glance
+
+These keys aren't independent — several have real dependencies on each other, enforced by
+`app/erd/loader.py` at generate time (not just the schema). The full field reference explains
+each one in depth, with the exact loader code; this is the cheat sheet.
+
+!!! warning "RBAC needs auth, and an `admin` role"
+    `rbac.enabled: true` requires **both** `auth.enabled: true` (RBAC needs a way to identify
+    the current user) **and** `"admin"` present in `rbac.roles` (the auto-generated admin
+    user-management endpoints are gated to that exact role name).
+
+!!! warning "`admin_approval` registration needs RBAC"
+    `auth.registration.mode: admin_approval` requires `rbac.enabled: true` — the
+    `POST /users/{id}/approve` endpoint that approves a pending registration is itself an
+    admin-only, RBAC-gated route.
+
+!!! warning "Does row-level security need a `User` entity?"
+    Only if you use `identity_source.type: auth_user` — that resolves row ownership from the
+    JWT-authenticated `User`, so it requires `auth.enabled: true`. `identity_source.type: header`
+    needs **neither** `auth.enabled` nor a `User` entity — it resolves ownership from a request
+    header instead (e.g. for multi-tenant setups with no per-row user auth). Either way,
+    `bypass_roles` (if you use it) still requires `rbac.enabled: true`, since bypass roles are
+    RBAC roles.
+
+!!! warning "Every entity belongs to exactly one service"
+    `services:` isn't optional bookkeeping — the loader rejects an ERD where any declared
+    entity (other than the auto-injected `User`) isn't assigned to exactly one `services:`
+    entry's `entities:` list. Zero or more-than-one is an error, not a default.
+
 ## `project`
 
 ```yaml
@@ -62,9 +91,14 @@ rbac:
 
 ## `entities`
 
+Every entry is more than just fields — it can also declare relationships, restrict which CRUD
+endpoints exist, override RBAC per action, and (if it's owned by a user) declare row-level
+security. This example showcases the full shape, not just the common case:
+
 ```yaml
 entities:
   - name: Post
+    table_name: blog_posts          # optional: override the generated table name
     fields:
       - {name: id, type: integer, primary_key: true}
       - {name: title, type: string, max_length: 200}
@@ -75,14 +109,25 @@ entities:
         target: Category
         ondelete: SET NULL
         nullable: true
+      - name: author
+        cardinality: many-to-one
+        target: User
+        owner: true                 # this relationship IS Post's ownership column
     endpoints:
+      enabled: [create, list, read, update, delete]   # restrict this list to disable an action entirely
       rbac:
-        delete: [admin]
+        delete: [admin]              # per-action override, takes precedence over rbac.default_permissions
+    rls:                             # required because a relationship above has owner: true
+      identity_source:
+        type: auth_user              # resolve the owner from the JWT-authenticated User
+      bypass_roles: [admin]          # admins see/write every row, not just their own
 ```
 
-An entity with an `owner: true` relationship also needs an `rls:` block declaring where the
-owning identity comes from — see [Full field reference](fields.md#rls-row-level-security-rlsspec)
-and [Row-Level Security](../features/rls.md) for the full mechanics.
+`owner: true`/`cascades_ownership: true` (row-level ownership), `rls:` (where the owning identity
+comes from), and `endpoints.enabled`/`endpoints.rbac` (which actions exist and who can call them)
+are all real, independent capabilities — see
+[Full field reference](fields.md#rls-row-level-security-rlsspec) and
+[Row-Level Security](../features/rls.md) for the full mechanics.
 
 ## `services`
 

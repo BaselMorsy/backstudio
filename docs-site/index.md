@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" alt="BackStudio logo" width="160"></p>
+
 # BackStudio
 
 **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
@@ -5,11 +7,21 @@
 ## What it is
 
 BackStudio's `backstudio` CLI reads a single YAML file describing your entities (an "ERD" —
-entity-relationship definition) and generates a complete, runnable FastAPI backend: SQLAlchemy
-models, a full CRUD REST API per entity, optional JWT authentication, role-based access control
-(RBAC), row-level security, and Alembic migration scaffolding. No server to run, no UI to click
-through — write a YAML file, run one command, get a codebase. Generation is also deterministic:
-the same ERD always produces the same generated code.
+entity-relationship definition) and generates a complete, runnable FastAPI application — not
+just a database layer. For every entity you get, generated together and wired to each other:
+
+- **SQLAlchemy models** — the database layer, sync or fully `async`.
+- **A service layer** (`service.py`) — the business logic and DB-access functions each route calls.
+- **A FastAPI CRUD REST API** (`routes.py`) — real `@router.get/post/put/delete` endpoints per
+  entity, calling straight into the service layer above. When `database.async_mode: true`, this
+  isn't just the database that goes async — the service methods and the route handlers themselves
+  become `async def` too, end to end, so the whole request path is genuinely non-blocking, not
+  just the SQL.
+- Optional JWT authentication, role-based access control (RBAC), row-level security, and Alembic
+  migration scaffolding, each wired into that same service+routes pair.
+
+No server to run, no UI to click through — write a YAML file, run one command, get a runnable
+codebase. Generation is also deterministic: the same ERD always produces the same generated code.
 
 ## Why ERD-driven
 

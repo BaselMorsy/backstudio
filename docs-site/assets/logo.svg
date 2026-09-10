@@ -1,0 +1,42 @@
+<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .symbol {
+        fill: none;
+        stroke: #c8a951; /* antique gold */
+        stroke-width: 7;
+        stroke-linecap: round;
+        stroke-linejoin: miter;
+      }
+      .text {
+        fill: #f5f1e8; /* ivory */
+        font-family: "Didot", "Bodoni MT", "Playfair Display", "Libre Baskerville", serif;
+        font-weight: 600;
+        font-size: 60px;
+        letter-spacing: -0.5px;
+      }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="420" height="120" fill="#0f2a1f" rx="10"/>
+
+  <!-- Logo Group -->
+  <g transform="translate(40, 60)">
+
+    <!-- THE "B" SYMBOL (|>>) -->
+    <line x1="0" y1="-30" x2="0" y2="30" class="symbol" />
+    <polyline points="16,-26 34,-15 16,-4" class="symbol" />
+    <polyline points="16,4 34,15 16,26" class="symbol" />
+
+    <!-- "ack" -->
+    <text x="48" y="22" class="text">ack</text>
+
+    <!-- THE "S" SYMBOL (< >) -->
+    <g transform="translate(160, 0)">
+      <polyline points="30,-26 8,-15 30,-4" class="symbol" />
+      <polyline points="8,4 30,15 8,26" class="symbol" />
+      <text x="42" y="22" class="text">tudio</text>
+    </g>
+  </g>
+</svg>

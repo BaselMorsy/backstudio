@@ -82,6 +82,11 @@ fields on the same model).
 |---|---|---|---|
 | `mode` | `Literal["open", "email_verification", "admin_approval"]` | default `"open"` | Registration flow. See below for what each mode requires and gates. |
 
+!!! warning "`admin_approval` requires RBAC"
+    `mode: admin_approval` requires `rbac.enabled: true` — and since `rbac.enabled: true`
+    itself requires `"admin"` in `rbac.roles` (see [`rbac`](#rbac-rbacspec) below),
+    `admin_approval` transitively requires an `admin` role to exist.
+
 **`mode` values, verified against `app/erd/loader.py`:**
 
 - **`open`** — no extra requirements. New users are active immediately on registration.
@@ -119,6 +124,12 @@ auto-injected auth fields: `id`, `email`, `password_hash`, `roles`, `is_active`,
 | `enabled` | `bool` | default `False` | Turns on role-based access control. |
 | `roles` | `List[str]` | default `[]` | The set of valid role names for this project. |
 | `default_permissions` | `Dict[str, List[str]]` | default `{}` | Maps a CRUD action (`create`, `list`, `read`, `update`, `delete`) to the list of roles allowed to perform it on any entity that doesn't override it via `endpoints.rbac`. Schema-level validation (`RBACSpec.actions_are_known`) rejects any key that isn't one of those 5 actions. |
+
+!!! warning "RBAC needs auth, and an `admin` role"
+    `rbac.enabled: true` requires **both**: `auth.enabled: true` (RBAC needs a way to identify
+    the current user) **and** `"admin"` present in `rbac.roles` (the auto-generated admin
+    user-management endpoints — list/get/set-roles/deactivate/reactivate users — are gated to
+    that exact role name).
 
 **Cross-field rules (loader, `app/erd/loader.py` `_validate_semantics`):**
 
@@ -244,6 +255,13 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
 |---|---|---|---|
 | `identity_source` | `RLSIdentitySource` | required | Where the "current owner" identity is resolved from — see below. |
 | `bypass_roles` | `List[str]` | default `[]` | Roles that bypass row-level filtering entirely for this entity. |
+
+!!! warning "Do you need a `User` entity for RLS?"
+    Only if `identity_source.type: auth_user` — that resolves ownership from the
+    JWT-authenticated `User`, so it requires `auth.enabled: true`. `identity_source.type:
+    header` needs **neither** `auth.enabled` nor a `User` entity at all — it resolves ownership
+    from a request header instead. Either way, `bypass_roles` (if used) still requires
+    `rbac.enabled: true`.
 
 #### `RLSIdentitySource`
 

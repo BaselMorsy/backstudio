@@ -13,11 +13,16 @@
 ## What it is
 
 BackStudio's `backstudio` CLI reads a single YAML file describing your entities (an "ERD" —
-entity-relationship definition) and generates a complete, runnable FastAPI backend: SQLAlchemy
-models, a full CRUD REST API per entity, optional JWT authentication, role-based access control
-(RBAC), row-level security, and Alembic migration scaffolding. No server to run, no UI to click
-through — write a YAML file, run one command, get a codebase. Generation is also deterministic:
-the same ERD always produces the same generated code.
+entity-relationship definition) and generates a complete, runnable FastAPI application: SQLAlchemy
+models, a service layer, and a full FastAPI CRUD REST API per entity — routes calling straight
+into generated service functions, both wired together, not just a database schema. Optional JWT
+authentication, role-based access control (RBAC), row-level security, and Alembic migration
+scaffolding are wired into that same service+routes pair. Set `database.async_mode: true` and the
+whole stack — models, service methods, and the route handlers themselves — becomes `async def`
+end to end, not just the SQL. No server to run, no UI to click through — write a YAML file, run
+one command, get a runnable codebase. Generation is also deterministic: the same ERD always
+produces the same generated code. See [Feature overview](#feature-overview) below for the full
+mechanics of each piece.
 
 ## Quick start
 
@@ -114,9 +119,10 @@ route.
 - **Row-Level Security** — scope an entity's reads and writes to the resolved owner of each row
   (from the authenticated user or a request header), with bypass roles for admins. See
   [docs-site/features/rls.md](docs-site/features/rls.md).
-- **Async database support** — set `database.async_mode: true` to generate an async SQLAlchemy
-  stack (async engine/session, `select()`/`execute()`-based repo layer, `async def`
-  service/route/auth handlers) instead of a sync one. See
+- **Async, end to end** — set `database.async_mode: true` to generate an async SQLAlchemy stack
+  (async engine/session, `select()`/`execute()`-based repo layer) — and the service methods and
+  FastAPI route handlers built on top become `async def` too, so the whole request path is
+  non-blocking, not just the database calls. See
   [docs-site/features/async.md](docs-site/features/async.md).
 
 ## CLI reference

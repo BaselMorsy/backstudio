@@ -231,6 +231,206 @@ def test_cascade_owned_filtering_actually_works_against_a_real_db_at_two_hops(tm
                 sys.modules.pop(mod_name, None)
 
 
+def test_root_owned_create_injects_owner_id_overriding_client_value(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "orders" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    create_start = service_src.index("def create_order(")
+    create_end = service_src.index("\n    def list_orders(")
+    create_src = service_src[create_start:create_end]
+    assert "owner_id: Optional[int] = None" in create_src
+    assert 'data["user_id"] = owner_id' in create_src
+    # no FK-existence validation is rendered for the owner relationship itself
+    assert "get_user_by_id" not in create_src
+
+
+def test_root_owned_create_service_actually_ignores_client_supplied_owner(tmp_path):
+    """A client-supplied user_id in the payload must be silently overridden by the
+    resolved owner_id - proves this at runtime, not just via string assertions.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_service_create_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        auth_service = importlib.import_module("modules.auth.service")
+        orders_service = importlib.import_module("modules.orders.service")
+
+        database_base.init_db()
+        auth = auth_service.get_auth_service()
+        orders = orders_service.get_orders_service()
+        db = database_base.SessionLocal()
+        try:
+            real_owner = auth.register_user(db, "real@example.com", "supersecret123")
+            attacker_id = real_owner.id + 999  # doesn't even need to exist - never looked up
+
+            order = orders.create_order(db, {"status": "pending", "user_id": attacker_id}, owner_id=real_owner.id)
+            assert order.user_id == real_owner.id
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_cascade_owned_create_validates_parent_ownership(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "ordering" / "service.py").read_text(encoding="utf-8")
+    create_start = service_src.index("def create_order_item(")
+    create_end = service_src.index("\n    def list_order_items(")
+    create_src = service_src[create_start:create_end]
+    assert "owner_id: Optional[int] = None" in create_src
+    assert 'repo.get_order_by_id(db, data["order_id"], owner_id=owner_id) is None' in create_src
+
+
+def test_cascade_owned_create_actually_rejects_an_unowned_parent(tmp_path):
+    import pytest as _pytest
+
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_cascade_create_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        auth_service = importlib.import_module("modules.auth.service")
+        ordering_service = importlib.import_module("modules.ordering.service")
+
+        database_base.init_db()
+        auth = auth_service.get_auth_service()
+        ordering = ordering_service.get_ordering_service()
+        db = database_base.SessionLocal()
+        try:
+            owner1 = auth.register_user(db, "owner1@example.com", "supersecret123")
+            owner2 = auth.register_user(db, "owner2@example.com", "supersecret123")
+            order2 = ordering.create_order(db, {"status": "pending"}, owner_id=owner2.id)
+
+            # owner1 tries to attach an OrderItem to owner2's (real, existing) order
+            with _pytest.raises(ValueError):
+                ordering.create_order_item(db, {"quantity": 1, "order_id": order2.id}, owner_id=owner1.id)
+
+            # a genuinely nonexistent order_id gets the same ValueError
+            with _pytest.raises(ValueError):
+                ordering.create_order_item(db, {"quantity": 1, "order_id": 999999}, owner_id=owner1.id)
+
+            # owner2 can attach an OrderItem to their own order
+            item = ordering.create_order_item(db, {"quantity": 1, "order_id": order2.id}, owner_id=owner2.id)
+            assert item.order_id == order2.id
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_update_reassigning_cascade_linking_fk_validates_new_parent_ownership(tmp_path):
+    """Changing OrderItem.order_id via update must revalidate the NEW order_id's
+    ownership, not just the original creation-time value.
+    """
+    import pytest as _pytest
+
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_cascade_update_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        auth_service = importlib.import_module("modules.auth.service")
+        ordering_service = importlib.import_module("modules.ordering.service")
+
+        database_base.init_db()
+        auth = auth_service.get_auth_service()
+        ordering = ordering_service.get_ordering_service()
+        db = database_base.SessionLocal()
+        try:
+            owner1 = auth.register_user(db, "owner1@example.com", "supersecret123")
+            owner2 = auth.register_user(db, "owner2@example.com", "supersecret123")
+            order1 = ordering.create_order(db, {"status": "pending"}, owner_id=owner1.id)
+            order2 = ordering.create_order(db, {"status": "pending"}, owner_id=owner2.id)
+            item = ordering.create_order_item(db, {"quantity": 1, "order_id": order1.id}, owner_id=owner1.id)
+
+            with _pytest.raises(ValueError):
+                ordering.update_order_item(db, item.id, {"order_id": order2.id}, owner_id=owner1.id)
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_entity_without_rls_service_methods_unchanged(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "catalog" / "service.py").read_text(encoding="utf-8")
+    assert "owner_id" not in service_src
+
+
 def test_cascade_owner_id_composes_with_an_existing_owned_relationship_filter(tmp_path):
     """OrderItem.product_id (an ordinary owned_relationship, unrelated to ownership) and
     OrderItem's RLS owner_id filter (via its cascades_ownership chain to Order) must both

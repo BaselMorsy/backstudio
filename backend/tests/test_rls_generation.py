@@ -514,9 +514,15 @@ def test_rbac_gated_rls_entity_uses_current_user_as_named_param(tmp_path):
     create_src = routes_src[create_start:create_end]
     assert "dependencies=[Depends(require_roles(" not in create_src
     assert "current_user: User = Depends(require_roles(" in create_src
-    assert "owner_id = None if set(current_user.roles or []).intersection(" in create_src
-    assert '["admin"]' in create_src  # bypass_roles rendered into the intersection call
     assert "owner_id=owner_id" in create_src
+    # NB: create's own owner_id line is deliberately NOT bypass-aware - see
+    # test_bypass_role_create_route_stamps_the_callers_own_id_not_none. The bypass
+    # intersection call is asserted here on the list route instead, which is where
+    # owner_id=None ("don't filter") is the correct meaning of a bypass role.
+    list_start = routes_src.index("def list_order_route(")
+    list_src = routes_src[list_start:routes_src.index("\n@router.get(", list_start)]
+    assert "owner_id = None if set(current_user.roles or []).intersection(" in list_src
+    assert '["admin"]' in list_src  # bypass_roles rendered into the intersection call
 
 
 def test_rbac_disabled_rls_entity_uses_get_current_user_fallback(tmp_path):
@@ -702,3 +708,377 @@ def test_entity_with_only_rls_owner_field_gets_pass_not_empty_create(tmp_path):
     create_end = schemas_src.index("\nclass BookmarkUpdate(")
     assert "pass" in schemas_src[create_start:create_end]
     assert "user_id" not in schemas_src[create_start:create_end]
+
+
+# --- Final whole-branch review fixes -------------------------------------------------
+
+
+def test_bypass_role_create_route_stamps_the_callers_own_id_not_none(tmp_path):
+    """FINAL-REVIEW FIX 1 (critical). owner_id carries two distinct meanings and only one
+    of them is bypass-aware: on list/get/update/delete it means "whose rows may I touch"
+    (None = all, correct for a bypass role), but on create it means "whose row is this"
+    and must never be None - a bypass-role caller's POST would otherwise write a NULL
+    owner column (or 500 on a non-nullable one), producing a row invisible to every
+    non-bypass caller forever. So create_*_route computes owner_id WITHOUT the bypass
+    check, while every other route keeps it.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    create_start = routes_src.index('@router.post(\n    "/orders"')
+    create_end = routes_src.index("\n@router.get(")
+    create_src = routes_src[create_start:create_end]
+    assert "owner_id = current_user.id" in create_src
+    assert "intersection(" not in create_src  # NOT bypass-aware on create
+    assert "owner_id=owner_id" in create_src
+
+    # ...while every OTHER action stays bypass-aware, unchanged
+    rest_src = routes_src[create_end:]
+    bypass_line = 'owner_id = None if set(current_user.roles or []).intersection(["admin"]) else current_user.id'
+    assert rest_src.count(bypass_line) == 4  # list, read, update, delete
+
+
+def test_bypass_role_create_stamps_owner_in_async_mode_too(tmp_path):
+    """FINAL-REVIEW FIX 1, async parity."""
+    erd = load_erd(f"{FIXTURES}/rls_async_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    create_start = routes_src.index('@router.post(\n    "/orders"')
+    create_end = routes_src.index("\n@router.get(")
+    create_src = routes_src[create_start:create_end]
+    assert "owner_id = current_user.id" in create_src
+    assert "intersection(" not in create_src
+    assert "return await service.create_order(db, payload.model_dump(), owner_id=owner_id)" in create_src
+
+
+def test_header_sourced_create_route_owner_id_is_unchanged_by_fix_1(tmp_path):
+    """The header branch of create's owner_id computation was already concrete
+    (owner_id = rls_owner_header, never None-for-bypass) - fix 1 must not disturb it.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    create_start = routes_src.index('@router.post(\n    "/orders"')
+    create_end = routes_src.index("\n@router.get(")
+    assert "owner_id = rls_owner_header" in routes_src[create_start:create_end]
+    assert "current_user" not in routes_src
+
+
+def test_create_route_with_rls_and_no_owned_relationships_still_passes_owner_id(tmp_path):
+    """FINAL-REVIEW FIX 7 (defensive symmetry). create_*_route has two bodies depending on
+    whether the entity has any owned_relationships; the no-owned_relationships branch used
+    to drop `owner_id=owner_id` from the service call even for an RLS entity. That state is
+    unreachable through translate() today (an RLS entity always has at least its own
+    ownership relationship), so this test renders the routes template directly against a
+    hand-built context that puts it in exactly that shape.
+    """
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    template = generator.jinja_env.get_template("Python/service/module_routes.py.jinja")
+
+    entity = {
+        "name": "Note",
+        "snake_name": "note",
+        "plural_snake": "notes",
+        "base_path": "/notes",
+        "tags": ["notes"],
+        "enabled_actions": ["create"],
+        "rbac": {"create": None, "list": None, "read": None, "update": None, "delete": None},
+        "owned_relationships": [],  # <- the branch under test
+        "rls": {
+            "is_root": True,
+            "root_model": "Note",
+            "owner_fk_column": "user_id",
+            "join_chain": [],
+            "bypass_roles": [],
+            "identity_source": {"type": "auth_user"},
+        },
+    }
+    rendered = template.render(
+        project={
+            "name": "Demo",
+            "database_config": {"async_mode": False},
+            "rbac_enabled": False,
+            "auth_module_name": "auth",
+        },
+        module={"name": "notes", "snake_name": "notes", "entities": [entity]},
+    )
+    assert "return service.create_note(db, payload.model_dump(), owner_id=owner_id)" in rendered
+
+
+def test_cascade_join_is_emitted_inside_the_owner_id_guard(tmp_path):
+    """FINAL-REVIEW FIX 2. The .join() for a cascade chain used to sit at module level,
+    outside `if owner_id is not None:`, so it ran even in bypass mode - and an INNER JOIN
+    silently drops rows whose (nullable, client-supplied) linking FK is NULL, hiding an
+    orphan row from a bypass caller. Root-owned entities have no such asymmetry (a bypass
+    caller emits no WHERE at all and does see NULL-owner rows), so the join has to move
+    inside the guard.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    for start_marker, end_marker in (
+        ("def get_order_item_by_id(", "\ndef get_all_order_items("),
+        ("def get_all_order_items(", "\ndef update_order_item("),
+        ("def get_order_line_discount_by_id(", "\ndef get_all_order_line_discounts("),
+        ("def get_all_order_line_discounts(", "\ndef update_order_line_discount("),
+    ):
+        src = repo_src[repo_src.index(start_marker):repo_src.index(end_marker)]
+        guard_idx = src.index("    if owner_id is not None:\n")
+        join_lines = [ln for ln in src.splitlines() if ".join(" in ln]
+        assert join_lines, f"{start_marker}: expected at least one join line"
+        for line in join_lines:
+            # indented into the guard body (8 spaces), not at function level (4)
+            assert line.startswith("        query"), f"{start_marker}: badly indented join: {line!r}"
+            assert src.index(line) > guard_idx, f"{start_marker}: join emitted before the guard"
+
+
+def test_async_cascade_join_is_emitted_inside_the_owner_id_guard(tmp_path):
+    """FINAL-REVIEW FIX 2, async branch (a separate copy of the same template block)."""
+    erd = load_erd(f"{FIXTURES}/rls_async_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    for start_marker, end_marker in (
+        ("async def get_order_item_by_id(", "\nasync def get_all_order_items("),
+        ("async def get_all_order_items(", "\nasync def update_order_item("),
+    ):
+        src = repo_src[repo_src.index(start_marker):repo_src.index(end_marker)]
+        guard_idx = src.index("    if owner_id is not None:\n")
+        join_lines = [ln for ln in src.splitlines() if ".join(" in ln]
+        assert join_lines, f"{start_marker}: expected at least one join line"
+        for line in join_lines:
+            assert line.startswith("        stmt"), f"{start_marker}: badly indented join: {line!r}"
+            assert src.index(line) > guard_idx, f"{start_marker}: join emitted before the guard"
+
+
+def test_bypass_caller_can_reach_a_cascade_row_whose_linking_fk_is_null(tmp_path):
+    """FINAL-REVIEW FIX 2, proven live. OrderItem.order_id is nullable and stays a
+    client-supplied optional field on OrderItemCreate, so an orphan row (order_id=None) is
+    a genuinely reachable state. A bypass caller (owner_id=None) must be able to list, read
+    and delete it - matching root-owned bypass behaviour - while an owner-scoped caller
+    still cannot see it (it belongs to no owner).
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_cascade_orphan_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        repo = importlib.import_module("database.repo")
+        auth_service = importlib.import_module("modules.auth.service")
+
+        database_base.init_db()
+        service = auth_service.get_auth_service()
+        db = database_base.SessionLocal()
+        try:
+            owner = service.register_user(db, "owner@example.com", "supersecret123")
+            order = repo.create_order(db, {"status": "pending", "user_id": owner.id})
+            owned_item = repo.create_order_item(db, {"quantity": 1, "order_id": order.id})
+            orphan = repo.create_order_item(db, {"quantity": 9, "order_id": None})
+            assert orphan.order_id is None
+
+            # bypass caller sees BOTH the owned row and the orphan
+            assert {i.id for i in repo.get_all_order_items(db)} == {owned_item.id, orphan.id}
+            assert repo.get_order_item_by_id(db, orphan.id) is not None
+
+            # an owner-scoped caller sees only their own; the orphan belongs to nobody
+            assert [i.id for i in repo.get_all_order_items(db, owner_id=owner.id)] == [owned_item.id]
+            assert repo.get_order_item_by_id(db, orphan.id, owner_id=owner.id) is None
+
+            # and a bypass caller can actually clean the orphan up
+            assert repo.delete_order_item(db, orphan.id) is True
+            assert repo.get_order_item_by_id(db, orphan.id) is None
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_rls_lines_pascal_case_entity_names_like_every_other_model_reference(tmp_path):
+    """FINAL-REVIEW FIX 3. EntitySpec.name has no PascalCase requirement, and every model
+    reference in repo.py goes through the pascal_case filter to match the class actually
+    emitted into models.py - except, before this fix, the RLS join/where lines, which
+    rendered `root_model`/`from_model`/`to_model` raw. With snake_case entity names that
+    produced `query.filter(purchase_order.user_id == owner_id)`: parses and imports
+    cleanly, NameError only when the endpoint is called.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_non_pascal_names.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    # the raw entity names must never appear as bare Python names in the RLS lines
+    rls_lines = [ln for ln in repo_src.splitlines() if "owner_id" in ln and ("filter(" in ln or "join(" in ln)]
+    assert rls_lines
+    for line in rls_lines:
+        assert "purchase_order." not in line, f"raw entity name leaked into: {line!r}"
+        assert "order_item." not in line, f"raw entity name leaked into: {line!r}"
+
+    root_src = repo_src[repo_src.index("def get_purchase_order_by_id("):repo_src.index("\ndef get_all_purchase_orders(")]
+    assert "query = query.filter(PurchaseOrder.user_id == owner_id)" in root_src
+
+    cascade_src = repo_src[repo_src.index("def get_order_item_by_id("):repo_src.index("\ndef get_all_order_items(")]
+    assert "query = query.join(PurchaseOrder, OrderItem.purchase_order_id == PurchaseOrder.id)" in cascade_src
+    assert "query = query.filter(PurchaseOrder.user_id == owner_id)" in cascade_src
+
+
+def test_non_pascal_case_rls_functions_actually_execute_against_a_real_db(tmp_path):
+    """FINAL-REVIEW FIX 3, proven live: the pre-fix output byte-compiled fine and only blew
+    up with NameError at call time, so a string assertion alone is not enough - actually
+    call the generated functions.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_non_pascal_names.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_non_pascal_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        repo = importlib.import_module("database.repo")
+        auth_service = importlib.import_module("modules.auth.service")
+
+        database_base.init_db()
+        service = auth_service.get_auth_service()
+        db = database_base.SessionLocal()
+        try:
+            owner1 = service.register_user(db, "owner1@example.com", "supersecret123")
+            owner2 = service.register_user(db, "owner2@example.com", "supersecret123")
+
+            po1 = repo.create_purchase_order(db, {"status": "pending", "user_id": owner1.id})
+            po2 = repo.create_purchase_order(db, {"status": "pending", "user_id": owner2.id})
+            item1 = repo.create_order_item(db, {"quantity": 1, "purchase_order_id": po1.id})
+            repo.create_order_item(db, {"quantity": 1, "purchase_order_id": po2.id})
+
+            # root-owned WHERE (pre-fix: NameError: name 'purchase_order' is not defined)
+            assert [p.id for p in repo.get_all_purchase_orders(db, owner_id=owner1.id)] == [po1.id]
+            assert repo.get_purchase_order_by_id(db, po2.id, owner_id=owner1.id) is None
+
+            # one-hop cascade JOIN + WHERE (pre-fix: NameError on both names)
+            assert [i.id for i in repo.get_all_order_items(db, owner_id=owner1.id)] == [item1.id]
+            assert repo.get_order_item_by_id(db, item1.id, owner_id=owner1.id) is not None
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_header_sourced_root_create_validates_that_the_owner_row_exists(tmp_path):
+    """FINAL-REVIEW FIX 4. For an auth_user-sourced root-owned entity the owner id comes
+    from a JWT-validated User, so no existence check is generated. For a header-sourced one
+    it's raw client input (X-Tenant-Id: 999999) with nothing vouching for it, so it must get
+    the same existence check any other client-supplied FK gets - otherwise a dangling owner
+    FK is written silently, which is a regression from pre-RLS behaviour.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "orders" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    create_src = service_src[service_src.index("def create_order("):service_src.index("\n    def list_orders(")]
+    assert "if repo.get_tenant_by_id(db, owner_id) is None:" in create_src
+    assert 'raise ValueError(f"Tenant {owner_id} not found")' in create_src
+    # the check runs BEFORE the owner column is stamped
+    assert create_src.index("get_tenant_by_id") < create_src.index('data["tenant_id"] = owner_id')
+
+    # auth_user-sourced root-owned create must still render NO existence check
+    erd_auth = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    auth_dir = CodeGenerator(output_dir=str(tmp_path / "auth_user")).generate_project(translate(erd_auth), force=True)
+    auth_service_src = (auth_dir / "modules" / "orders" / "service.py").read_text(encoding="utf-8")
+    auth_create_src = auth_service_src[auth_service_src.index("def create_order("):auth_service_src.index("\n    def list_orders(")]
+    assert "get_user_by_id" not in auth_create_src
+
+
+def test_list_service_method_excludes_the_rls_link_filter_kwarg(tmp_path):
+    """FINAL-REVIEW FIX 6. The route layer already excludes an is_rls_link relationship
+    from the HTTP query params, so the service's matching kwarg was dead - no caller could
+    ever pass it. Same filter now applies at the service layer, for symmetry. The repo
+    layer's signature is deliberately unaffected (it still accepts the FK filter).
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_composability.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    service_src = (codebase_dir / "modules" / "ordering" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+
+    list_src = service_src[service_src.index("def list_order_items("):service_src.index("\n    def get_order_item(")]
+    assert "product_id: Optional[int] = None," in list_src  # ordinary FK filter kept
+    assert "order_id" not in list_src  # the rls link is gone from the service signature too
+    assert "repo.get_all_order_items(db, skip=skip, limit=limit, product_id=product_id, owner_id=owner_id)" in list_src
+
+    # the repo layer still exposes the FK filter - only the service/route layers hide it
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    repo_list_src = repo_src[repo_src.index("def get_all_order_items("):repo_src.index("\ndef update_order_item(")]
+    assert "order_id: Optional[int] = None," in repo_list_src

@@ -573,6 +573,7 @@ def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkey
             admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
             admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap: first user gets every role
+            admin_id = admin_resp.json()["id"]
 
             cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
             assert cust_resp.json()["roles"] == []
@@ -587,9 +588,22 @@ def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkey
             conn.close()
             cust_login = client.post("/auth/login", json={"email": "cust@example.com", "password": "supersecret123"})
             cust_headers = {"Authorization": f"Bearer {cust_login.json()['access_token']}"}
+            cust_id = cust_resp.json()["id"]
 
             order_admin = client.post("/orders", json={"status": "pending"}, headers=admin_headers).json()
             order_cust = client.post("/orders", json={"status": "pending"}, headers=cust_headers).json()
+
+            # FINAL-REVIEW FIX 1: a bypass-role caller's own POST must be stamped with ITS
+            # OWN id, never NULL. Bypass means "I may see and act on everyone's rows", not
+            # "the rows I create belong to nobody" - a NULL owner here would be permanently
+            # invisible to every non-bypass caller (and a 500 on a non-nullable owner FK).
+            # This assertion is the regression guard: before the fix, order_admin["user_id"]
+            # came back None and every other assertion in this test still passed.
+            assert order_admin["user_id"] == admin_id
+            assert order_cust["user_id"] == cust_id
+
+            # ...and it is genuinely persisted that way, not just echoed back
+            assert client.get(f"/orders/{order_admin['id']}", headers=admin_headers).json()["user_id"] == admin_id
 
             # admin (bypass) sees both via list
             admin_list = client.get("/orders", headers=admin_headers).json()
@@ -647,6 +661,52 @@ def test_rls_header_identity_isolates_tenants_and_422s_on_missing_header(tmp_pat
             # tenant2's header cannot see tenant1's order - 404, not 403
             cross_tenant_resp = client.get(f"/orders/{order1['id']}", headers={"X-Tenant-Id": str(tenant2["id"])})
             assert cross_tenant_resp.status_code == 404
+
+
+def test_rls_header_create_rejects_an_owner_id_that_does_not_exist(tmp_path, monkeypatch, isolated_sys_path):
+    """FINAL-REVIEW FIX 4, over real HTTP. X-Tenant-Id is raw client input with nothing
+    vouching for it (unlike an auth_user-sourced owner id, which the JWT auth flow has
+    already resolved to a real User row). Before this fix the generated create skipped the
+    owner-existence check entirely for the header case, so `X-Tenant-Id: 999999` wrote a
+    dangling tenant_id and returned 201. It must instead be rejected with the same
+    ValueError->400 shape any other nonexistent FK gets - and no row may be written.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_header_owner_check_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            tenant = client.post("/tenants", json={"name": "Acme"}).json()
+
+            # a real tenant id still works, unchanged
+            ok_resp = client.post(
+                "/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant["id"])}
+            )
+            assert ok_resp.status_code == 201, ok_resp.text
+            assert ok_resp.json()["tenant_id"] == tenant["id"]
+
+            # a tenant id that does not exist is rejected exactly like any other bad FK
+            bad_resp = client.post(
+                "/orders", json={"status": "pending"}, headers={"X-Tenant-Id": "999999"}
+            )
+            assert bad_resp.status_code == 400, bad_resp.text
+            assert "999999" in bad_resp.json()["detail"]
+
+            # ...and nothing was written for the bogus tenant
+            assert client.get("/orders", headers={"X-Tenant-Id": "999999"}).json() == []
+            assert len(client.get("/orders", headers={"X-Tenant-Id": str(tenant["id"])}).json()) == 1
 
 
 def test_rls_header_with_rbac_gates_action_but_header_still_governs_ownership(tmp_path, monkeypatch, isolated_sys_path):
@@ -1156,10 +1216,12 @@ def test_async_mode_rls_full_stack_round_trip_against_real_generated_app(tmp_pat
             admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
             assert admin_resp.status_code == 201, admin_resp.text
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap
+            admin_id = admin_resp.json()["id"]
             admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
 
             cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
             assert cust_resp.json()["roles"] == []
+            cust_id = cust_resp.json()["id"]
             import sqlite3
             conn = sqlite3.connect(str(db_path))
             conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
@@ -1170,6 +1232,13 @@ def test_async_mode_rls_full_stack_round_trip_against_real_generated_app(tmp_pat
             # root ownership: each user's own order, async create injects owner correctly
             order_admin = client.post("/orders", json={"status": "pending"}, headers=admin_headers).json()
             order_cust = client.post("/orders", json={"status": "pending"}, headers=cust_headers).json()
+
+            # FINAL-REVIEW FIX 1 (async parity): the bypass-role caller's own created row is
+            # owned by that caller, not NULL. See the sync twin of this assertion in
+            # test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own.
+            assert order_admin["user_id"] == admin_id
+            assert order_cust["user_id"] == cust_id
+            assert client.get(f"/orders/{order_admin['id']}", headers=admin_headers).json()["user_id"] == admin_id
 
             # customer (no bypass) sees only their own order via async list
             cust_orders = client.get("/orders", headers=cust_headers).json()

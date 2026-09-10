@@ -6,7 +6,7 @@ from typing import Dict, List, Union
 import yaml
 from pydantic import ValidationError
 
-from backend.erd.schema import ERDConfig, RelationshipDecl
+from backend.erd.schema import ERDConfig
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 
@@ -71,6 +71,17 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
                 )
 
         if entity.rls.bypass_roles:
+            if source.type == "header":
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.bypass_roles has no effect when "
+                    "identity_source.type is 'header' — the header identity source resolves "
+                    "ownership purely from the request header and never reads any role "
+                    "information, so there is nothing for a bypass role to plug into. "
+                    "Remove bypass_roles, or switch to identity_source.type: auth_user. "
+                    "(RBAC-gating a header-sourced entity's endpoints is still supported and "
+                    "unaffected — that is endpoints.rbac / rbac.default_permissions, not "
+                    "rls.bypass_roles.)"
+                )
             if not erd.rbac.enabled:
                 raise ERDValidationError(
                     f"Entity '{entity.name}': rls.bypass_roles requires rbac.enabled: true "

@@ -1,0 +1,36 @@
+project:
+  name: RlsNonPascalNames
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: rls_non_pascal_names.db
+
+auth:
+  enabled: true
+
+# EntitySpec.name has no PascalCase requirement, so an ERD author is free to name
+# entities in snake_case. Every model-name reference in the generated code must
+# still go through the pascal_case filter to match the SQLAlchemy class actually
+# emitted into models.py - including the RLS-specific join/where lines.
+entities:
+  - name: purchase_order
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: status, type: string, default: pending}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user
+
+  - name: order_item
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: quantity, type: integer, default: 1}
+    relationships:
+      - {name: purchase_order, cardinality: many-to-one, target: purchase_order, cascades_ownership: true}
+
+services:
+  - name: ordering
+    entities: [purchase_order, order_item]

@@ -390,6 +390,52 @@ services:
         load_erd(bad)
 
 
+def test_rls_bypass_roles_on_header_identity_source_rejected(tmp_path):
+    """bypass_roles is only ever read from the *authenticated caller's* roles, and a
+    header-sourced entity's owner_id computation never touches role information at all -
+    so this combination cannot do anything. Silently-inert configuration in an
+    access-control feature is a footgun (the author believes a bypass is active when
+    nothing is), so it's rejected at load time rather than ignored.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+rbac: {enabled: true, roles: [admin]}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      bypass_roles: [admin]
+      identity_source: {type: header, header_name: X-Tenant-Id}
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="bypass_roles has no effect"):
+        load_erd(bad)
+
+
+def test_rbac_gated_header_sourced_entity_without_bypass_roles_still_loads():
+    """The new bypass_roles+header rejection must not catch the legitimate
+    RBAC-gated + header-RLS combination: rls_header_owned_with_rbac.yml gates every
+    action on the 'admin' role but never sets rls.bypass_roles, so it must keep loading.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned_with_rbac.yml")
+    order = next(e for e in erd.entities if e.name == "Order")
+    assert order.rls.identity_source.type == "header"
+    assert order.rls.bypass_roles == []
+    assert erd.rbac.enabled is True
+    assert erd.rbac.default_permissions["create"] == ["admin"]
+
+
 def test_rls_auth_user_identity_source_requires_auth_enabled(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text(

@@ -399,19 +399,25 @@ entities:
   in the same project (e.g. RBAC gating who may call the route at all, while the header — not
   the caller — still governs ownership); `rls_header_owned_with_rbac.yml` is exactly this
   combination, and it's real and tested. `bypass_roles`, however, is only ever consulted from the
-  *authenticated caller's* roles, so it has no source to read from on a `header`-sourced entity:
-  setting it there isn't rejected — it's simply inert, unused configuration.
-- **`bypass_roles: [admin, ...]`** lets listed roles see and act on every row, unfiltered — but
-  it's only ever read for `identity_source: {type: auth_user}` (where `current_user`'s roles are
-  available to check); on a `header`-sourced entity it's silently ignored. Requires
-  `rbac.enabled: true` regardless.
+  *authenticated caller's* roles, so it has no source to read from on a `header`-sourced entity —
+  **combining the two is rejected at load time** with a validation error rather than silently
+  doing nothing. (RBAC-gating a header-sourced entity's *endpoints* is unaffected: that's
+  `endpoints.rbac` / `rbac.default_permissions`, not `rls.bypass_roles`.)
+- **`bypass_roles: [admin, ...]`** lets listed roles see and act on every row, unfiltered. It
+  requires `rbac.enabled: true`, and is only valid on an `identity_source: {type: auth_user}`
+  entity (where `current_user`'s roles are available to check) — pairing it with
+  `identity_source: {type: header}` is a load-time error.
+  Bypass applies to reads and to acting on existing rows (`list`/`read`/`update`/`delete`); it
+  does **not** change who owns a row the bypass caller *creates*. `POST` always stamps the
+  caller's own id as the owner, so an admin's newly created row belongs to that admin, never to
+  nobody.
 
 **What it changes elsewhere:**
 - The `owner: true` FK column (e.g. `user_id`) is **omitted from `Create`/`Update` schemas** —
   a client-supplied value for it is silently dropped by Pydantic, not read — but still appears
   on the `Response` schema. A `cascades_ownership: true` FK (e.g. `OrderItem.order_id`) is an
   ordinary field on all three schemas, same as any other relationship FK.
-  `RlsRootOwnedOrderCreate` from `rls_root_owned.yml`, rendered, has only
+  `OrderCreate` from `rls_root_owned.yml`, rendered, has only
   `status: Optional[str] = 'pending'` — no `user_id` field at all.
 - **List and single-row reads are filtered to the resolved owner** (or unfiltered, for a
   bypass-role caller). A non-owner's `GET`/`PUT`/`DELETE` on someone else's row returns a plain
@@ -420,6 +426,11 @@ entities:
 - **A cascaded write against a parent you don't own returns `400`**, the same status (and the
   same code path) as a nonexistent FK — `POST /order_items` with an `order_id` belonging to
   another owner fails exactly like `order_id: 999999` would.
+- **A `header`-sourced create with an owner id that doesn't exist returns `400`** — the header
+  is raw client input, so `POST /orders` with `X-Tenant-Id: 999999` is validated against the
+  `Tenant` table and rejected exactly like any other nonexistent FK, rather than writing a
+  dangling owner column. (No such check is needed — or generated — for `auth_user`, where the
+  owner id comes from the JWT-authenticated `User`.)
 - RLS-affected entities always require a resolved identity to write, so `cascades_ownership`
   entities also gain a `current_user` (or header) dependency on every route even when RBAC
   imposes no role restriction on the action — the owner filter has to run either way.

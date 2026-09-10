@@ -45,11 +45,6 @@ async def get_{{ model.name|snake_case }}_by_id(db: AsyncSession, {{ model.name|
 {% for rel in model.many_to_many_relationships %}
     stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
-{% if model.rls %}
-{% for hop in model.rls.join_chain %}
-    stmt = stmt.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
-{% endfor %}
-{% endif %}
     {% set pk_field = model.fields|selectattr('primary_key')|first %}
     {% if pk_field %}
     stmt = stmt.where({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id)
@@ -58,7 +53,10 @@ async def get_{{ model.name|snake_case }}_by_id(db: AsyncSession, {{ model.name|
     {%- endif +%}
 {% if model.rls %}
     if owner_id is not None:
-        stmt = stmt.where({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% for hop in model.rls.join_chain %}
+        stmt = stmt.join({{ hop.to_model|pascal_case }}, {{ hop.from_model|pascal_case }}.{{ hop.from_fk_column }} == {{ hop.to_model|pascal_case }}.{{ hop.to_pk_column }})
+{% endfor %}
+        stmt = stmt.where({{ model.rls.root_model|pascal_case }}.{{ model.rls.owner_fk_column }} == owner_id)
 {% endif %}
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
@@ -69,11 +67,6 @@ def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case 
 {% for rel in model.many_to_many_relationships %}
     query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
-{% if model.rls %}
-{% for hop in model.rls.join_chain %}
-    query = query.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
-{% endfor %}
-{% endif %}
     {% set pk_field = model.fields|selectattr('primary_key')|first %}
     {% if pk_field %}
     query = query.filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id)
@@ -82,7 +75,10 @@ def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case 
     {%- endif +%}
 {% if model.rls %}
     if owner_id is not None:
-        query = query.filter({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% for hop in model.rls.join_chain %}
+        query = query.join({{ hop.to_model|pascal_case }}, {{ hop.from_model|pascal_case }}.{{ hop.from_fk_column }} == {{ hop.to_model|pascal_case }}.{{ hop.to_pk_column }})
+{% endfor %}
+        query = query.filter({{ model.rls.root_model|pascal_case }}.{{ model.rls.owner_fk_column }} == owner_id)
 {% endif %}
     return query.first()
 {% endif %}
@@ -123,18 +119,16 @@ async def get_all_{{ model.plural_snake }}(
 {% for rel in model.many_to_many_relationships %}
     stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
-{% if model.rls %}
-{% for hop in model.rls.join_chain %}
-    stmt = stmt.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
-{% endfor %}
-{% endif %}
 {% for rel in model.owned_relationships %}
     if {{ rel.fk_column }} is not None:
         stmt = stmt.where({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
 {% endfor %}
 {% if model.rls %}
     if owner_id is not None:
-        stmt = stmt.where({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% for hop in model.rls.join_chain %}
+        stmt = stmt.join({{ hop.to_model|pascal_case }}, {{ hop.from_model|pascal_case }}.{{ hop.from_fk_column }} == {{ hop.to_model|pascal_case }}.{{ hop.to_pk_column }})
+{% endfor %}
+        stmt = stmt.where({{ model.rls.root_model|pascal_case }}.{{ model.rls.owner_fk_column }} == owner_id)
 {% endif %}
     stmt = stmt.offset(skip).limit(limit)
     result = await db.execute(stmt)
@@ -156,18 +150,16 @@ def get_all_{{ model.plural_snake }}(
 {% for rel in model.many_to_many_relationships %}
     query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
-{% if model.rls %}
-{% for hop in model.rls.join_chain %}
-    query = query.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
-{% endfor %}
-{% endif %}
 {% for rel in model.owned_relationships %}
     if {{ rel.fk_column }} is not None:
         query = query.filter({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
 {% endfor %}
 {% if model.rls %}
     if owner_id is not None:
-        query = query.filter({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% for hop in model.rls.join_chain %}
+        query = query.join({{ hop.to_model|pascal_case }}, {{ hop.from_model|pascal_case }}.{{ hop.from_fk_column }} == {{ hop.to_model|pascal_case }}.{{ hop.to_pk_column }})
+{% endfor %}
+        query = query.filter({{ model.rls.root_model|pascal_case }}.{{ model.rls.owner_fk_column }} == owner_id)
 {% endif %}
     return query.offset(skip).limit(limit).all()
 {% endif %}

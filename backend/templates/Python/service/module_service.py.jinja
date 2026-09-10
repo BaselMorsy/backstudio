@@ -31,7 +31,17 @@ class {{ module.name|pascal_case }}Service:
 {% for entity in module.entities %}
     {{ 'async ' if is_async }}def create_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, data: dict{% if entity.rls %}, owner_id: Optional[int] = None{% endif %}) -> {{ entity.name }}:
 {% for rel in entity.owned_relationships %}
-{% if rel.is_rls_link and entity.rls.is_root %}
+{% if rel.is_rls_link and entity.rls.is_root and entity.rls.identity_source.type == 'auth_user' %}
+{# root-owned + auth_user: owner_id is current_user.id, already proven to be a real
+   User row by the JWT auth dependency - no existence check needed (and the owner FK
+   is not in `data` at all, it is stamped from owner_id below). #}
+{% elif rel.is_rls_link and entity.rls.is_root %}
+        # owner_id here is a raw, unvalidated request header value - unlike an
+        # auth_user-sourced owner_id there is no auth flow vouching for it, so it needs
+        # the same existence check any other client-supplied FK gets, or a dangling FK
+        # to a nonexistent {{ rel.target_model }} gets written silently.
+        if {{ 'await ' if is_async }}repo.get_{{ rel.target_snake }}_by_id(db, owner_id) is None:
+            raise ValueError(f"{{ rel.target_model }} {owner_id} not found")
 {% elif rel.is_rls_link %}
         if data.get("{{ rel.fk_column }}") is not None and {{ 'await ' if is_async }}repo.get_{{ rel.target_snake }}_by_id(db, data["{{ rel.fk_column }}"], owner_id=owner_id) is None:
             raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
@@ -50,14 +60,14 @@ class {{ module.name|pascal_case }}Service:
         db: {{ 'AsyncSession' if is_async else 'Session' }},
         skip: int = 0,
         limit: int = 100,
-{% for rel in entity.owned_relationships %}
+{% for rel in entity.owned_relationships if not rel.is_rls_link %}
         {{ rel.fk_column }}: Optional[int] = None,
 {% endfor %}
 {% if entity.rls %}
         owner_id: Optional[int] = None,
 {% endif %}
     ) -> List[{{ entity.name }}]:
-        return {{ 'await ' if is_async }}repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %}{% if entity.rls %}, owner_id=owner_id{% endif %})
+        return {{ 'await ' if is_async }}repo.get_all_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships if not rel.is_rls_link %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %}{% if entity.rls %}, owner_id=owner_id{% endif %})
 
     {{ 'async ' if is_async }}def get_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, item_id: int{% if entity.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ entity.name }}]:
         return {{ 'await ' if is_async }}repo.get_{{ entity.snake_name }}_by_id(db, item_id{% if entity.rls %}, owner_id=owner_id{% endif %})

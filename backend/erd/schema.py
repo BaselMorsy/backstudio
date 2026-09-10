@@ -39,11 +39,19 @@ class JWTSpec(BaseModel):
     secret_env_var: str = "JWT_SECRET"
     algorithm: str = "HS256"
     expiration_minutes: int = 30
+    refresh_token_expiration_minutes: int = 10080
+    email_verification_expiration_minutes: int = 1440
+    password_reset_expiration_minutes: int = 30
+
+
+class RegistrationSpec(BaseModel):
+    mode: Literal["open", "email_verification", "admin_approval"] = "open"
 
 
 class AuthSpec(BaseModel):
     enabled: bool = False
     jwt: JWTSpec = Field(default_factory=JWTSpec)
+    registration: RegistrationSpec = Field(default_factory=RegistrationSpec)
 
 
 class RBACSpec(BaseModel):

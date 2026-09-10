@@ -1,0 +1,8 @@
+# Shell scripts must keep LF line endings regardless of a checking-out user's
+# core.autocrlf setting - a CRLF shebang line ("#!/usr/bin/env bash\r") breaks
+# on Linux/macOS with a "bad interpreter" error.
+*.sh text eol=lf
+
+# Windows batch files are conventionally CRLF; not load-bearing like .sh's
+# shebang, but keep them consistent for anyone editing on Windows.
+*.bat text eol=crlf

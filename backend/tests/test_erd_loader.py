@@ -373,14 +373,14 @@ def test_rls_bypass_roles_unknown_role_rejected(tmp_path):
 project: {name: Demo}
 database: {type: sqlite, database_name: d.db}
 auth: {enabled: true}
-rbac: {enabled: true, roles: [customer]}
+rbac: {enabled: true, roles: [admin, customer]}
 entities:
   - name: Order
     fields: [{name: id, type: integer, primary_key: true}]
     relationships:
       - {name: user, cardinality: many-to-one, target: User, owner: true}
     rls:
-      bypass_roles: [admin]
+      bypass_roles: [superadmin]
       identity_source: {type: auth_user}
 services:
   - {name: orders, entities: [Order]}
@@ -622,3 +622,153 @@ services:
     erd = load_erd(ok)  # must not raise
     assert len(erd.entities) == 3
     assert erd.entities[2].name == "OrderLineDiscount"
+
+
+def test_rbac_enabled_requires_admin_role(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+rbac: {enabled: true, roles: [customer]}
+entities:
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="admin"):
+        load_erd(bad)
+
+
+def test_rbac_enabled_with_admin_role_loads_fine(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+rbac: {enabled: true, roles: [admin, customer]}
+entities:
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert "admin" in erd.rbac.roles
+
+
+def test_admin_approval_mode_requires_rbac_enabled(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth:
+  enabled: true
+  registration: {mode: admin_approval}
+entities:
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="admin_approval"):
+        load_erd(bad)
+
+
+def test_admin_approval_mode_with_rbac_and_admin_role_loads_fine(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth:
+  enabled: true
+  registration: {mode: admin_approval}
+rbac: {enabled: true, roles: [admin]}
+entities:
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert erd.auth.registration.mode == "admin_approval"
+
+
+def test_email_verification_mode_needs_no_rbac(tmp_path):
+    """email_verification mode has no admin-only endpoint, so it must NOT
+    require rbac.enabled - only admin_approval does (it needs the admin-gated
+    approve endpoint).
+    """
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth:
+  enabled: true
+  registration: {mode: email_verification}
+entities:
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise
+    assert erd.auth.registration.mode == "email_verification"
+
+
+def test_declared_user_entity_can_have_is_verified_field_when_mode_is_not_email_verification(tmp_path):
+    """RESERVED_USER_FIELDS must be mode-aware: is_verified only collides
+    with the auto-injected field when email_verification mode is active.
+    """
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: User
+    fields:
+      - {name: is_verified, type: boolean, default: false}
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    erd = load_erd(ok)  # must not raise - mode is "open", is_verified is not reserved
+    assert erd.auth.registration.mode == "open"
+
+
+def test_declared_user_entity_is_verified_field_collides_under_email_verification_mode(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth:
+  enabled: true
+  registration: {mode: email_verification}
+entities:
+  - name: User
+    fields:
+      - {name: is_verified, type: boolean, default: false}
+  - name: Widget
+    fields: [{name: id, type: integer, primary_key: true}]
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="is_verified"):
+        load_erd(bad)

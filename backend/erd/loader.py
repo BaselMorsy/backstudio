@@ -9,6 +9,10 @@ from pydantic import ValidationError
 from backend.erd.schema import ERDConfig
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
+MODE_GATED_RESERVED_USER_FIELDS = {
+    "email_verification": {"is_verified"},
+    "admin_approval": {"is_approved"},
+}
 
 
 class ERDValidationError(Exception):
@@ -146,6 +150,21 @@ def _validate_semantics(erd: ERDConfig) -> None:
             "rbac.enabled requires auth.enabled: true (RBAC needs a way to identify the current user)"
         )
 
+    if erd.rbac.enabled and "admin" not in erd.rbac.roles:
+        raise ERDValidationError(
+            "rbac.enabled requires 'admin' to be declared in rbac.roles — the auto-generated "
+            "admin user-management endpoints (list/get/set-roles/deactivate/reactivate users) "
+            "are gated to that specific role name, exactly like 'User' is a reserved entity "
+            f"name. Declared roles: {', '.join(erd.rbac.roles) or 'none'}."
+        )
+
+    if erd.auth.registration.mode == "admin_approval" and not erd.rbac.enabled:
+        raise ERDValidationError(
+            "auth.registration.mode: admin_approval requires rbac.enabled: true — the "
+            "'POST /users/{id}/approve' endpoint that approves a pending registration is "
+            "gated to the 'admin' role, which requires RBAC to exist."
+        )
+
     entity_names = [e.name for e in erd.entities]
     duplicates = sorted({n for n in entity_names if entity_names.count(n) > 1})
     if duplicates:
@@ -172,11 +191,12 @@ def _validate_semantics(erd: ERDConfig) -> None:
             )
 
         if entity.name == "User" and erd.auth.enabled:
-            collide = sorted(set(field_names) & RESERVED_USER_FIELDS)
+            reserved = RESERVED_USER_FIELDS | MODE_GATED_RESERVED_USER_FIELDS.get(erd.auth.registration.mode, set())
+            collide = sorted(set(field_names) & reserved)
             if collide:
                 raise ERDValidationError(
                     f"Entity 'User': field(s) {', '.join(collide)} collide with auto-injected auth "
-                    f"fields ({', '.join(sorted(RESERVED_USER_FIELDS))}) — rename the colliding "
+                    f"fields ({', '.join(sorted(reserved))}) — rename the colliding "
                     "field(s) on your declared 'User' entity."
                 )
 

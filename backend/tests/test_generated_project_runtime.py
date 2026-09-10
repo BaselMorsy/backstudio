@@ -649,6 +649,78 @@ def test_rls_header_identity_isolates_tenants_and_422s_on_missing_header(tmp_pat
             assert cross_tenant_resp.status_code == 404
 
 
+def test_rls_header_with_rbac_gates_action_but_header_still_governs_ownership(tmp_path, monkeypatch, isolated_sys_path):
+    """rls_header_owned_with_rbac.yml: RBAC gates the action (a valid admin JWT is required
+    to call these routes at all), but the header - not the authenticated user - still
+    determines ownership. The same admin user, authenticated once, sees a different slice
+    of /orders depending purely on which tenant's X-Tenant-Id header it sends, proving RBAC
+    and header-RLS compose independently rather than one silently overriding the other.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned_with_rbac.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_header_rbac_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # bootstrap admin: first user registered gets every declared role (here, just "admin")
+            register_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert register_resp.status_code == 201, register_resp.text
+            assert set(register_resp.json()["roles"]) == {"admin"}
+
+            login_resp = client.post(
+                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+            tenant1 = client.post("/tenants", json={"name": "Acme"}, headers=admin_headers).json()
+            tenant2 = client.post("/tenants", json={"name": "Globex"}, headers=admin_headers).json()
+
+            order1 = client.post(
+                "/orders",
+                json={"status": "pending"},
+                headers={**admin_headers, "X-Tenant-Id": str(tenant1["id"])},
+            ).json()
+            client.post(
+                "/orders",
+                json={"status": "pending"},
+                headers={**admin_headers, "X-Tenant-Id": str(tenant2["id"])},
+            )
+
+            # same admin JWT, tenant1's header -> only tenant1's order (not both, even though
+            # the same RBAC-authorized user created both rows)
+            list_t1 = client.get(
+                "/orders", headers={**admin_headers, "X-Tenant-Id": str(tenant1["id"])}
+            ).json()
+            assert [o["id"] for o in list_t1] == [order1["id"]]
+
+            # same admin JWT, tenant2's header -> cannot see tenant1's order: 404, not 403
+            # (RBAC already let the request through - the header's ownership filter is what
+            # denies it, independently of the caller's role)
+            cross_tenant_resp = client.get(
+                f"/orders/{order1['id']}", headers={**admin_headers, "X-Tenant-Id": str(tenant2["id"])}
+            )
+            assert cross_tenant_resp.status_code == 404
+
+            # missing header entirely -> native FastAPI 422, even with valid RBAC credentials
+            missing_header_resp = client.get("/orders", headers=admin_headers)
+            assert missing_header_resp.status_code == 422
+
+
 def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path, monkeypatch, isolated_sys_path):
     """shophub_mini.yml: Order (in the 'ordering' module) has many-to-one to Product
     (in 'catalog') and to User (the auth entity) - proves FK validation works when

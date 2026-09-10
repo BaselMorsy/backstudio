@@ -566,6 +566,36 @@ def test_entity_without_rls_routes_unchanged(tmp_path):
     assert "current_user" not in routes_src
 
 
+def test_header_sourced_rls_entity_with_rbac_keeps_decorator_dependency_and_header_param(tmp_path):
+    """rls_header_owned_with_rbac.yml: Order is RLS header-sourced AND RBAC-gated on every
+    action - the decorator-suppression logic only ever fires for auth_user-sourced RLS
+    (see the design note in the task-7 brief), so here the decorator's
+    dependencies=[Depends(require_roles(...))] must render normally (NOT suppressed), while
+    the route also gets rls_owner_header (never current_user) - RBAC gates the action, the
+    header still independently governs ownership.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_owned_with_rbac.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    create_start = routes_src.index('@router.post(\n    "/orders"')
+    create_end = routes_src.index("\n@router.get(")
+    create_src = routes_src[create_start:create_end]
+    assert "dependencies=[Depends(require_roles(" in create_src
+    assert 'rls_owner_header: int = Header(..., alias="X-Tenant-Id")' in create_src
+    assert "current_user" not in create_src
+    assert "owner_id = rls_owner_header" in create_src
+
+    # current_user must never appear anywhere in this file - Order is entirely header-sourced
+    assert "current_user" not in routes_src
+    assert "from database.models import User" not in routes_src
+
+
 def test_list_route_excludes_rls_link_from_client_query_params(tmp_path):
     """rls_cascade_composability.yml: OrderItem's rls-link (order_id, cascades_ownership)
     must NOT appear as a client-supplied ?order_id= query param on list_order_items_route,

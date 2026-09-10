@@ -7,7 +7,8 @@ Building three new production-shaped example ERDs (`ecommerce.yml`,
 surfaced four real findings, documented in `examples/ISSUES.md` and left
 deliberately unfixed at the time for review. This spec covers fixing all
 four: one genuine code-generation bug, two RLS capability gaps, and one
-documentation gap.
+routing gap — the last of which turned out, after discussion, to warrant
+a small new opt-in capability rather than a docs-only fix.
 
 ## 2. Scope boundary
 
@@ -22,8 +23,10 @@ header itself, which carries no role information).
 Out of scope: any other RLS extension not named in the four issues; any
 change to the many-to-many-writes-stay-read-only limitation (not one of the
 four issues — it was confirmed as already-intentional, not a new finding);
-any change to `endpoints.base_path`'s actual behavior (issue #4 is a
-documentation gap, not a behavior change).
+any change to `endpoints.base_path`'s own existing behavior (issue #4 adds
+a new, separate `services[].prefix` field rather than changing what
+`base_path` does — see Section 6, revised after discussion from an
+originally docs-only plan into a real, opt-in capability).
 
 ## 3. Issue 1 — Unescaped free-text ERD fields break generated Python source
 
@@ -190,30 +193,101 @@ No change to `identity_source.type: header`'s behavior when `bypass_roles`
 is *not* set — that path is untouched, still requires the header
 unconditionally, exactly as today.
 
-## 6. Issue 4 — Document that module/service names are not URL prefixes
+## 6. Issue 4 — Opt-in per-service URL prefix
 
-### 6.1 Fix
+Revised after discussion: the original plan (below, superseded) was
+docs-only, on the theory that `endpoints.base_path` already provides an
+adequate manual escape hatch. In practice, `base_path` is a purely
+per-entity, purely manual override — a service with five entities that
+wants a shared `/catalog/...` namespace requires setting `base_path`
+identically-prefixed on all five, by hand, with no single source of truth
+and no defined convention for what a fresh user should actually do. This
+section replaces the docs-only plan with a real, opt-in capability, chosen
+specifically to avoid the alternative (auto-prefixing by service name by
+default) breaking every existing test fixture, the docs site, and the 3
+example projects already built and tested — all of which assert today's
+unprefixed paths.
 
-Pure documentation. Two edits:
+### 6.1 New schema field
 
-- `docs-site/erd-reference/fields.md`'s `endpoints.base_path` row/section:
-  state explicitly, next to the existing "Overrides the generated route
-  prefix" description, what the *default* (no `base_path` set) actually is
-  — routes are mounted directly at the API root with no module/service-name
-  prefix at all (only the auth module's routes get a prefix, `/auth` by
-  default, configurable via `auth_module_name`).
-- `docs-site/architecture/templates.md`: add a short, explicit note in the
-  section describing the `modules`-loop / route generation, stating the
-  same fact plainly, so a reader building a mental model of the generated
-  project's URL layout doesn't make the same wrong assumption (module-name
-  prefixing, by analogy with the auth module's own prefix) that produced
-  this finding in the first place.
+`ServiceDecl` gains one new field:
 
-### 6.2 Non-goal
+```python
+prefix: Optional[str] = None
+```
 
-No change to the actual mounting behavior — `endpoints.base_path` already
-provides an escape hatch for anyone who wants a namespaced prefix; this
-issue is purely that the *default* (no prefix) was never stated plainly.
+Default `None` preserves today's behavior exactly — every existing
+ERD/fixture/example is unaffected, zero behavior change. When set (e.g.
+`prefix: "/catalog"`), every entity assigned to that service gets its route
+path prepended with this prefix, **unless that specific entity already sets
+its own `endpoints.base_path`** — an entity-level `base_path` is always
+exact/absolute and takes full precedence, exactly as it already does today;
+it is never combined with the service prefix. This "more specific always
+wins, never combined" rule avoids a whole class of ambiguity (is
+`base_path` relative to the service prefix or absolute? — it stays exactly
+what it already is: an absolute override).
+
+**Validation** (schema-level, new — `base_path` itself has no equivalent
+validation today; this is a new field so it starts out validated
+correctly rather than inheriting that gap): `prefix`, if set, must start
+with `/` and must not end with `/` (avoids a double-slash when concatenated
+with an entity's own `/{plural_snake}` suffix). Empty string is invalid
+(equivalent to not setting it — reject rather than silently no-op, so a
+typo like `prefix: ""` fails loudly at validate-time instead of silently
+doing nothing).
+
+### 6.2 Mechanism (grounded in the current, real template/translate code)
+
+`app/erd/translate.py` currently computes, per entity:
+
+```python
+"base_path": entity.endpoints.base_path or f"/{plural_snake}",
+```
+
+This becomes: if `entity.endpoints.base_path` is set, unchanged (still wins
+outright, ignoring any service prefix). Otherwise, if the entity's
+containing service has `prefix` set, `f"{service.prefix}/{plural_snake}"`;
+otherwise (today's exact behavior), `f"/{plural_snake}"`. Finding "the
+entity's containing service" requires `translate.py` to look up which
+`ServiceDecl` an entity belongs to — this almost certainly already happens
+somewhere in `translate.py`'s existing `modules`-building logic (services
+are what get turned into `modules` in the first place); the plan must
+locate and reuse that existing lookup rather than adding a second, separate
+entity→service mapping pass. No change is needed in
+`module_routes.py.jinja` itself — it already just interpolates
+`entity.base_path` verbatim; the change is entirely in what `translate.py`
+computes for that value.
+
+### 6.3 Documentation
+
+Once the capability exists, document it for real (not just describe the
+current default): `docs-site/erd-reference/fields.md`'s `services` section
+gains the new `prefix` field (name, type, default, one-line description,
+matching every other field's documentation style on that page) and a
+`ServiceDecl` cross-field note if the validation in 6.1 needs one (e.g.
+"must start with `/`, must not end with `/`"). `docs-site/architecture/templates.md`
+gets the same explicit statement of the *default* (no `prefix` set → no
+service-name-based namespacing, only the auth module gets a prefix
+automatically) that the original, now-superseded plan called for, plus a
+one-line pointer to the new `prefix` field as the actual, real convention
+for anyone who wants namespaced URLs.
+
+### 6.4 Non-goal
+
+No change to the default for any ERD that doesn't opt in — this is
+additive only. No auto-derivation of a prefix from the service's own
+`name` (e.g. no implicit `prefix: true` shorthand that means "use my own
+name") — `prefix` always takes an explicit string, so what the URL
+actually looks like is never a guess from a naming-convention rule a user
+has to remember.
+
+---
+
+*Original, superseded docs-only plan (kept for the record): state in
+`docs-site/erd-reference/fields.md`'s `endpoints.base_path` section and
+`docs-site/architecture/templates.md` that module/service names are not
+URL prefixes by default. This is subsumed by 6.3 above, which documents
+the real `prefix` field instead of just the absence of one.*
 
 ## 7. Testing plan
 
@@ -244,9 +318,15 @@ issue is purely that the *default* (no prefix) was never stated plainly.
   test — it is the one place bypass does *not* fully apply); a bypass-role
   caller supplying the header on `create` succeeds and stamps the given
   tenant, not some default.
-- **Issue 4**: no test — verify the new doc prose is accurate against the
-  real current template code one more time at review time (this plan's own
-  spec-writing already re-verified it once).
+- **Issue 4**: a real HTTP round-trip test proving: a service with
+  `prefix: "/catalog"` set produces routes at `/catalog/<entity-plural>`
+  for every entity in that service that doesn't set its own `base_path`;
+  an entity in that same service that DOES set its own `endpoints.base_path`
+  is reachable at exactly that path, not the service prefix combined with
+  anything; a sibling service with no `prefix` set continues to produce
+  unprefixed routes exactly as today (proves the default is unchanged);
+  and `backstudio validate` rejects a `prefix` value that doesn't start
+  with `/`, that ends with `/`, or that's an empty string.
 - Full suite must stay green throughout (currently 253 passed); every new
   test is additive.
 

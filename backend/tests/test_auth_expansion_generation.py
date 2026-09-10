@@ -505,6 +505,96 @@ def test_admin_approval_mode_user_response_schema(tmp_path):
     assert "class ResendVerificationRequest(BaseModel):" not in schemas_src
 
 
+def test_email_verification_mode_routes_present_admin_routes_absent(tmp_path):
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")  # also rbac.enabled: true
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert '"/verify-email"' in routes_src
+    assert '"/resend-verification"' in routes_src
+    assert '"/forgot-password"' in routes_src
+    assert '"/reset-password"' in routes_src
+    assert '"/users"' in routes_src  # rbac.enabled is true on this fixture too
+    assert '"/users/{user_id}/approve"' not in routes_src  # not admin_approval mode
+
+
+def test_admin_approval_mode_approve_route_present(tmp_path):
+    erd = load_erd(f"{FIXTURES}/auth_admin_approval.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    assert '"/users/{user_id}/approve"' in routes_src
+    assert '"/verify-email"' not in routes_src
+    assert '"/resend-verification"' not in routes_src
+    # forgot/reset-password is unconditional regardless of mode
+    assert '"/forgot-password"' in routes_src
+    assert '"/reset-password"' in routes_src
+
+
+def test_open_mode_no_rbac_has_only_forgot_reset(tmp_path):
+    from backend.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl
+    from backend.schemas.data import ModelField, FieldType
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="OpenNoRbac", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="o.db"),
+        auth=AuthSpec(enabled=True),
+        entities=[
+            EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert '"/forgot-password"' in routes_src
+    assert '"/reset-password"' in routes_src
+    assert '"/verify-email"' not in routes_src
+    assert '"/users"' not in routes_src
+    assert "require_roles" not in routes_src
+    assert "from rbac import require_roles" not in routes_src
+
+
+def test_admin_routes_gated_with_require_roles_admin(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    assert "from rbac import require_roles" in routes_src
+    list_start = routes_src.index('"/users"')
+    list_block = routes_src[list_start:list_start + 400]
+    assert 'dependencies=[Depends(require_roles("admin"))]' in list_block
+
+
+def test_list_users_route_has_pagination_query_params(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
+    list_start = routes_src.index("def list_users_route(")
+    list_end = routes_src.index("\n@router.get", list_start)
+    list_src = routes_src[list_start:list_end]
+    assert "skip: int = Query(0, ge=0)" in list_src
+    assert "limit: int = Query(100, ge=1, le=500)" in list_src
+
+
 def test_reset_password_request_enforces_min_length(tmp_path):
     erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
     state = translate(erd)

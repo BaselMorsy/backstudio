@@ -1267,3 +1267,121 @@ def test_async_mode_rls_full_stack_round_trip_against_real_generated_app(tmp_pat
     # `with TestClient(...)` has already exited here, running the async lifespan
     # shutdown (await engine.dispose()) - reaching this line without a hang is itself
     # part of what this test proves, per the async-support plan's established pattern.
+
+
+def test_admin_user_management_403_then_200_round_trip(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "admin_routes_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
+            assert cust_resp.json()["roles"] == []
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
+            conn.commit()
+            conn.close()
+            cust_login = client.post("/auth/login", json={"email": "cust@example.com", "password": "supersecret123"})
+            cust_headers = {"Authorization": f"Bearer {cust_login.json()['access_token']}"}
+            cust_id = cust_resp.json()["id"]
+
+            # non-admin gets 403 on every admin endpoint
+            #
+            # DEVIATION FROM BRIEF (documented per task-6-brief.md's own instruction to
+            # fix, not silently deviate, when literal test code and literal implementation
+            # code disagree): the brief's literal test code here calls bare "/users", but
+            # these admin routes are appended to auth/routes.py.jinja's single `router =
+            # APIRouter()` (per the brief's own Step 3.6, "Add the admin routes ... at the
+            # end of the file"), and server.py.jinja (out of scope for this task - the
+            # task's file-touch list does not include it) mounts that whole router with
+            # `app.include_router(auth_router, prefix="/{{ project.auth_module_name }}",
+            # ...)`, exactly like /register, /login, /refresh and /me above it in the same
+            # file. So in a correctly-generated project these routes are only ever
+            # reachable at /auth/users..., never bare /users - a bare-path call 404s
+            # unconditionally, which is exactly what the un-prefixed brief literal test
+            # code hit here (404, not the 403 it asserted). Prefixed every /users call in
+            # this test with /auth to match real generated behavior.
+            assert client.get("/auth/users", headers=cust_headers).status_code == 403
+            assert client.get(f"/auth/users/{cust_id}", headers=cust_headers).status_code == 403
+            assert client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["admin"]}, headers=cust_headers).status_code == 403
+            assert client.post(f"/auth/users/{cust_id}/deactivate", headers=cust_headers).status_code == 403
+
+            # admin succeeds on all of them
+            list_resp = client.get("/auth/users", headers=admin_headers)
+            assert list_resp.status_code == 200
+            assert cust_id in [u["id"] for u in list_resp.json()]
+
+            get_resp = client.get(f"/auth/users/{cust_id}", headers=admin_headers)
+            assert get_resp.status_code == 200
+            assert get_resp.json()["id"] == cust_id
+
+            roles_resp = client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["admin", "customer"]}, headers=admin_headers)
+            assert roles_resp.status_code == 200
+            assert set(roles_resp.json()["roles"]) == {"admin", "customer"}
+
+            bad_roles_resp = client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["not_a_real_role"]}, headers=admin_headers)
+            assert bad_roles_resp.status_code == 400
+
+            deact_resp = client.post(f"/auth/users/{cust_id}/deactivate", headers=admin_headers)
+            assert deact_resp.status_code == 200
+            assert deact_resp.json()["is_active"] is False
+
+            react_resp = client.post(f"/auth/users/{cust_id}/reactivate", headers=admin_headers)
+            assert react_resp.status_code == 200
+            assert react_resp.json()["is_active"] is True
+
+            assert client.get("/auth/users/999999", headers=admin_headers).status_code == 404
+
+
+def test_forgot_password_and_resend_verification_are_enumeration_safe(tmp_path, monkeypatch, isolated_sys_path):
+    """The one test that would catch a status-code or body-shape leak of
+    'does this email exist' - the single most important correctness property
+    Task 6 must preserve.
+    """
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "enum_safe_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "real@example.com", "password": "supersecret123"})
+
+            real_resp = client.post("/auth/forgot-password", json={"email": "real@example.com"})
+            fake_resp = client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
+            assert real_resp.status_code == fake_resp.status_code == 200
+            assert real_resp.json() == fake_resp.json()
+
+            real_resend = client.post("/auth/resend-verification", json={"email": "real@example.com"})
+            fake_resend = client.post("/auth/resend-verification", json={"email": "nobody@example.com"})
+            assert real_resend.status_code == fake_resend.status_code == 200
+            assert real_resend.json() == fake_resend.json()

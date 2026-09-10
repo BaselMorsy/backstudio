@@ -1,7 +1,9 @@
 """{{ project.name }} - {{ project.auth_module_name }} routes"""
 
 {% set is_async = project.database_config.async_mode %}
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 {% if is_async %}
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,16 +13,26 @@ from sqlalchemy.orm import Session
 
 from database.base import get_db
 from database.models import User
-from .schemas import RefreshRequest, TokenResponse, UserLogin, UserRegister, UserResponse
+from .schemas import (
+    ForgotPasswordRequest, MessageResponse, RefreshRequest, ResetPasswordRequest,
+    SetUserRolesRequest, TokenResponse, UserLogin, UserRegister, UserResponse,
+{% if project.registration_mode == 'email_verification' %}
+    ResendVerificationRequest, VerifyEmailRequest,
+{% endif %}
+)
 from .service import AuthService, get_{{ project.auth_module_name }}_service
+{% if project.rbac_enabled %}
+from rbac import require_roles
+{% endif %}
 
 router = APIRouter()
-# Module-level singleton, resolved once at import time: `/me` (and rbac.py's
-# require_roles) needs a *bound method* to pass to Depends(), and FastAPI
-# evaluates a route's Depends() arguments at definition time - not per-request
-# - so the instance has to already exist here. The other routes below don't
-# need that and use the regular per-request Depends(get_..._service) pattern,
-# consistent with every other module's routes.py.
+# Module-level singleton, resolved once at import time: `/me` (and, when
+# rbac_enabled, rbac.py's role-check dependency) needs a *bound method* to
+# pass to Depends(), and FastAPI evaluates a route's Depends() arguments at
+# definition time - not per-request - so the instance has to already exist
+# here. The other routes below don't need that and use the regular
+# per-request Depends(get_..._service) pattern, consistent with every other
+# module's routes.py.
 _service = get_{{ project.auth_module_name }}_service()
 
 
@@ -76,3 +88,157 @@ _service = get_{{ project.auth_module_name }}_service()
 @router.get("/me", response_model=UserResponse)
 {{ 'async ' if is_async }}def me(current_user: User = Depends(_service.get_current_user)) -> UserResponse:
     return current_user
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+{{ 'async ' if is_async }}def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+{% if is_async %}
+    user = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+{% else %}
+    user = db.query(User).filter(User.email == payload.email).first()
+{% endif %}
+    if user is not None:
+        token = service.create_password_reset_token(user.id, user.password_hash)
+        from .email import send_email
+        send_email(user.email, "Reset your password", f"Your password reset token: {token}")
+    return MessageResponse(message="If that email is registered, a password reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+{{ 'async ' if is_async }}def reset_password(
+    payload: ResetPasswordRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+    try:
+        user_id = {{ 'await ' if is_async }}service.verify_password_reset_token(db, payload.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    new_hash = service.hash_password(payload.new_password)
+{% if is_async %}
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+{% else %}
+    user = db.query(User).filter(User.id == user_id).first()
+{% endif %}
+    user.password_hash = new_hash
+{% if is_async %}
+    await db.commit()
+{% else %}
+    db.commit()
+{% endif %}
+    return MessageResponse(message="Password reset successfully.")
+
+
+{% if project.registration_mode == 'email_verification' %}
+@router.post("/verify-email", response_model=MessageResponse)
+{{ 'async ' if is_async }}def verify_email_route(
+    payload: VerifyEmailRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+    try:
+        {{ 'await ' if is_async }}service.verify_email(db, payload.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return MessageResponse(message="Email verified.")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+{{ 'async ' if is_async }}def resend_verification(
+    payload: ResendVerificationRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+{% if is_async %}
+    user = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
+{% else %}
+    user = db.query(User).filter(User.email == payload.email).first()
+{% endif %}
+    if user is not None and not user.is_verified:
+        token = service.create_email_verification_token(user.id)
+        from .email import send_email
+        send_email(user.email, "Verify your email", f"Your verification token: {token}")
+    return MessageResponse(message="If that email is registered and unverified, a verification link has been sent.")
+{% endif %}
+
+
+{% if project.rbac_enabled %}
+@router.get("/users", response_model=List[UserResponse], dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def list_users_route(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> List[UserResponse]:
+    return {{ 'await ' if is_async }}service.list_users(db, skip=skip, limit=limit)
+
+
+@router.get("/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def get_user_route(
+    user_id: int,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    user = {{ 'await ' if is_async }}service.get_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.put("/users/{user_id}/roles", response_model=UserResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def set_user_roles_route(
+    user_id: int,
+    payload: SetUserRolesRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    try:
+        user = {{ 'await ' if is_async }}service.set_user_roles(db, user_id, payload.roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.post("/users/{user_id}/deactivate", response_model=UserResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def deactivate_user_route(
+    user_id: int,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    user = {{ 'await ' if is_async }}service.deactivate_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.post("/users/{user_id}/reactivate", response_model=UserResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def reactivate_user_route(
+    user_id: int,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    user = {{ 'await ' if is_async }}service.reactivate_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+{% if project.registration_mode == 'admin_approval' %}
+@router.post("/users/{user_id}/approve", response_model=UserResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def approve_user_route(
+    user_id: int,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    user = {{ 'await ' if is_async }}service.approve_user(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+{% endif %}
+{% endif %}

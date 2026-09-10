@@ -1,0 +1,36 @@
+project:
+  name: RlsRootOwned
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: rls_root_owned.db
+
+auth:
+  enabled: true
+
+rbac:
+  enabled: true
+  roles: [admin, customer]
+  default_permissions:
+    create: [admin, customer]
+    list: [admin, customer]
+    read: [admin, customer]
+    update: [admin, customer]
+    delete: [admin, customer]
+
+entities:
+  - name: Order
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: status, type: string, default: pending}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      bypass_roles: [admin]
+      identity_source:
+        type: auth_user
+
+services:
+  - name: orders
+    entities: [Order]

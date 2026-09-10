@@ -93,6 +93,8 @@ def _build_relationship(
         "cardinality": rel.cardinality.value,
         "source": {"model": entity.name, "attribute": source_attribute, "lazy": rel.lazy.value if rel.lazy else None},
         "target": {"model": rel.target, "attribute": target_attribute},
+        "owner": rel.owner,
+        "cascades_ownership": rel.cascades_ownership,
     }
 
     if rel.cardinality == "many-to-many":
@@ -219,6 +221,8 @@ def _owned_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> Li
             "fk_nullable": fk["nullable"],
             "target_model": other_model,
             "target_snake": _snake_case(other_model),
+            "owner": rel.get("owner", False),
+            "cascades_ownership": rel.get("cascades_ownership", False),
         })
     return owned
 
@@ -245,6 +249,100 @@ def _many_to_many_relationships_for(entity_name: str, rels: List[Dict[str, Any]]
             "target_plural_snake": _pluralize(other_model),
         })
     return m2m
+
+
+def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None:
+    """Resolve every entity's ownership (unowned / root-owned / cascade-owned), attaching
+    `rls` (the structure documented in the RLS plan's Global Constraints) to every model in
+    `data_models`, and marking exactly the RLS-governing relationship's `is_rls_link: True`
+    inside that model's `owned_relationships`. Must run after `owned_relationships` has been
+    populated on every model (reads `model["owned_relationships"]`), before `crud_entities`
+    is built (which copies `data_models[...]["owned_relationships"]` and needs `rls` too).
+    """
+    for model in data_models.values():
+        model["rls"] = None
+        for rel in model["owned_relationships"]:
+            rel["is_rls_link"] = False
+
+    entity_by_name = {e.name: e for e in erd.entities}
+
+    def owner_rel_of(model_name: str) -> Any:
+        model = data_models.get(model_name)
+        if model is None:
+            return None
+        return next((r for r in model["owned_relationships"] if r["owner"]), None)
+
+    def cascade_rel_of(model_name: str) -> Any:
+        model = data_models.get(model_name)
+        if model is None:
+            return None
+        return next((r for r in model["owned_relationships"] if r["cascades_ownership"]), None)
+
+    def pk_column_of(model_name: str) -> str:
+        model = data_models[model_name]
+        pk_field = next((f for f in model["fields"] if f.get("primary_key")), None)
+        return pk_field["name"] if pk_field else "id"
+
+    def resolve(model_name: str, visiting: frozenset) -> Any:
+        model = data_models.get(model_name)
+        if model is None:
+            return None
+        if model["rls"] is not None:
+            return model["rls"]
+
+        owner_rel = owner_rel_of(model_name)
+        if owner_rel is not None:
+            entity = entity_by_name[model_name]
+            rls = {
+                "is_root": True,
+                "root_model": model_name,
+                "owner_fk_column": owner_rel["fk_column"],
+                "join_chain": [],
+                "identity_source": entity.rls.identity_source.model_dump(mode="json"),
+                "bypass_roles": list(entity.rls.bypass_roles),
+            }
+            model["rls"] = rls
+            owner_rel["is_rls_link"] = True
+            return rls
+
+        cascade_rel = cascade_rel_of(model_name)
+        if cascade_rel is None:
+            return None
+
+        if model_name in visiting:
+            raise ERDValidationError(
+                f"Entity '{model_name}': its cascades_ownership chain has a cycle - it "
+                "eventually leads back to itself instead of terminating at an owner:true entity."
+            )
+
+        parent_name = cascade_rel["target_model"]
+        parent_rls = resolve(parent_name, visiting | {model_name})
+        if parent_rls is None:
+            raise ERDValidationError(
+                f"Entity '{model_name}': cascades_ownership relationship targets '{parent_name}', "
+                "which does not resolve to any owner:true entity."
+            )
+
+        hop = {
+            "from_model": model_name,
+            "from_fk_column": cascade_rel["fk_column"],
+            "to_model": parent_name,
+            "to_pk_column": pk_column_of(parent_name),
+        }
+        rls = {
+            "is_root": False,
+            "root_model": parent_rls["root_model"],
+            "owner_fk_column": parent_rls["owner_fk_column"],
+            "join_chain": [hop] + parent_rls["join_chain"],
+            "identity_source": parent_rls["identity_source"],
+            "bypass_roles": parent_rls["bypass_roles"],
+        }
+        model["rls"] = rls
+        cascade_rel["is_rls_link"] = True
+        return rls
+
+    for model_name in list(data_models.keys()):
+        resolve(model_name, frozenset())
 
 
 def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
@@ -351,6 +449,8 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         model["owned_relationships"] = _owned_relationships_for(model["name"], model["relationships"])
         model["many_to_many_relationships"] = _many_to_many_relationships_for(model["name"], model["relationships"])
 
+    _resolve_rls(erd, data_models)
+
     crud_entities: List[Dict[str, Any]] = []
     for entity in entities:
         plural_snake = _pluralize(entity.name)
@@ -365,6 +465,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "fields": [f.model_dump(mode='json') for f in entity.fields],
             "owned_relationships": data_models[entity.name]["owned_relationships"],
             "many_to_many_relationships": data_models[entity.name]["many_to_many_relationships"],
+            "rls": data_models[entity.name]["rls"],
         })
 
     modules = _resolve_modules(erd, crud_entities)

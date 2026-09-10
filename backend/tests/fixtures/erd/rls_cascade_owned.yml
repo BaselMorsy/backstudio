@@ -1,0 +1,46 @@
+project:
+  name: RlsCascadeOwned
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: rls_cascade_owned.db
+
+auth:
+  enabled: true
+
+entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Order
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: status, type: string, default: pending}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user
+
+  - name: OrderItem
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: quantity, type: integer, default: 1}
+    relationships:
+      - {name: order, cardinality: many-to-one, target: Order, cascades_ownership: true}
+
+  - name: OrderLineDiscount
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: percent_off, type: float}
+    relationships:
+      - {name: order_item, cardinality: many-to-one, target: OrderItem, cascades_ownership: true}
+
+services:
+  - name: catalog
+    entities: [Category]
+  - name: ordering
+    entities: [Order, OrderItem, OrderLineDiscount]

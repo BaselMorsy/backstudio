@@ -1,6 +1,7 @@
 import pytest
+from pydantic import ValidationError
 
-from backend.erd.loader import load_erd
+from backend.erd.loader import load_erd, ERDValidationError
 from backend.erd.translate import translate
 from backend.erd.schema import (
     ERDConfig,
@@ -584,6 +585,9 @@ def test_owned_relationships_many_to_one():
             "fk_nullable": True,
             "target_model": "Category",
             "target_snake": "category",
+            "owner": False,
+            "cascades_ownership": False,
+            "is_rls_link": False,
         }
     ]
     assert category["many_to_many_relationships"] == []
@@ -630,6 +634,9 @@ def test_owned_relationships_one_to_many_equivalent_to_many_to_one():
             "fk_nullable": True,
             "target_model": "Author",
             "target_snake": "author",
+            "owner": False,
+            "cascades_ownership": False,
+            "is_rls_link": False,
         }
     ]
 
@@ -733,6 +740,9 @@ def test_self_referential_many_to_one_produces_distinct_views_and_single_owned_f
             "fk_nullable": True,
             "target_model": "Employee",
             "target_snake": "employee",
+            "owner": False,
+            "cascades_ownership": False,
+            "is_rls_link": False,
         }
     ]
     assert employee["many_to_many_relationships"] == []
@@ -774,6 +784,9 @@ def test_self_referential_one_to_one_produces_distinct_attributes():
             "fk_nullable": True,
             "target_model": "Employee",
             "target_snake": "employee",
+            "owner": False,
+            "cascades_ownership": False,
+            "is_rls_link": False,
         }
     ]
 
@@ -817,6 +830,9 @@ def test_self_referential_one_to_many_produces_distinct_attributes():
             "fk_nullable": True,
             "target_model": "Category",
             "target_snake": "category",
+            "owner": False,
+            "cascades_ownership": False,
+            "is_rls_link": False,
         }
     ]
 
@@ -851,3 +867,126 @@ def test_translate_database_async_mode_defaults_false():
     )
     state = translate(erd)
     assert state["database_config"]["async_mode"] is False
+
+
+def test_translate_resolves_root_owned_entity():
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    order = next(m for m in state["data_models"] if m["name"] == "Order")
+    assert order["rls"] == {
+        "is_root": True,
+        "root_model": "Order",
+        "owner_fk_column": "user_id",
+        "join_chain": [],
+        "identity_source": {"type": "auth_user", "header_name": None},
+        "bypass_roles": ["admin"],
+    }
+
+    user_rel = next(r for r in order["owned_relationships"] if r["fk_column"] == "user_id")
+    assert user_rel["is_rls_link"] is True
+
+    module_order = next(e for m in state["modules"] for e in m["entities"] if e["name"] == "Order")
+    assert module_order["rls"] == order["rls"]
+    module_user_rel = next(r for r in module_order["owned_relationships"] if r["fk_column"] == "user_id")
+    assert module_user_rel["is_rls_link"] is True
+
+
+def test_translate_resolves_one_hop_cascade():
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    order_item = next(m for m in state["data_models"] if m["name"] == "OrderItem")
+    assert order_item["rls"]["is_root"] is False
+    assert order_item["rls"]["root_model"] == "Order"
+    assert order_item["rls"]["owner_fk_column"] == "user_id"
+    assert order_item["rls"]["join_chain"] == [
+        {"from_model": "OrderItem", "from_fk_column": "order_id", "to_model": "Order", "to_pk_column": "id"}
+    ]
+    assert order_item["rls"]["identity_source"] == {"type": "auth_user", "header_name": None}
+    assert order_item["rls"]["bypass_roles"] == []
+
+    order_rel = next(r for r in order_item["owned_relationships"] if r["fk_column"] == "order_id")
+    assert order_rel["is_rls_link"] is True
+
+
+def test_translate_resolves_two_hop_cascade():
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    discount = next(m for m in state["data_models"] if m["name"] == "OrderLineDiscount")
+    assert discount["rls"]["is_root"] is False
+    assert discount["rls"]["root_model"] == "Order"
+    assert discount["rls"]["owner_fk_column"] == "user_id"
+    assert discount["rls"]["join_chain"] == [
+        {
+            "from_model": "OrderLineDiscount",
+            "from_fk_column": "order_item_id",
+            "to_model": "OrderItem",
+            "to_pk_column": "id",
+        },
+        {"from_model": "OrderItem", "from_fk_column": "order_id", "to_model": "Order", "to_pk_column": "id"},
+    ]
+
+
+def test_translate_unrelated_entity_has_no_rls():
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    category = next(m for m in state["data_models"] if m["name"] == "Category")
+    assert category["rls"] is None
+    assert category["owned_relationships"] == []  # Category owns no FKs at all in this fixture
+
+
+def test_translate_entity_with_owned_relationships_but_no_rls_is_unaffected():
+    """An entity that has an ordinary owned_relationship (FK) but neither owner:true nor
+    cascades_ownership:true anywhere must come out with rls: None and every one of its
+    owned_relationships entries' is_rls_link False - RLS involvement is opt-in per entity,
+    not inferred from having FKs at all.
+    """
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    product = next(m for m in state["data_models"] if m["name"] == "Product")
+    assert product["rls"] is None
+    assert len(product["owned_relationships"]) == 1
+    assert product["owned_relationships"][0]["is_rls_link"] is False
+
+
+def test_cascades_ownership_cycle_rejected():
+    erd = ERDConfig(
+        project=ProjectMeta(name="Cyclic", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="c.db"),
+        entities=[
+            EntitySpec(
+                name="A",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[RelationshipDecl(name="b", cardinality="many-to-one", target="B", cascades_ownership=True)],
+            ),
+            EntitySpec(
+                name="B",
+                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+                relationships=[RelationshipDecl(name="a", cardinality="many-to-one", target="A", cascades_ownership=True)],
+            ),
+        ],
+        services=[ServiceDecl(name="ab", entities=["A", "B"])],
+    )
+    with pytest.raises(ERDValidationError, match="cycle"):
+        translate(erd)
+
+
+def test_ambiguous_multi_path_is_structurally_impossible_at_schema_level():
+    """Documents the Global Constraints/Task 3 design note: Task 1's at-most-one-
+    cascades_ownership-relationship-per-entity rule already makes a genuine multi-path
+    ambiguity unconstructable - this fails at EntitySpec construction, never reaching
+    translate() at all.
+    """
+    with pytest.raises(ValidationError):
+        EntitySpec(
+            name="OrderItem",
+            fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
+            relationships=[
+                RelationshipDecl(name="order", cardinality="many-to-one", target="Order", cascades_ownership=True),
+                RelationshipDecl(name="batch", cardinality="many-to-one", target="Batch", cascades_ownership=True),
+            ],
+        )

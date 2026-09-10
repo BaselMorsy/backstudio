@@ -246,6 +246,13 @@ def test_admin_approval_blocks_login_until_approved(tmp_path):
         service = auth_service.get_auth_service()
         db = database_base.SessionLocal()
         try:
+            # the first user registered is the bootstrap admin, auto-approved
+            # (symmetric with the RBAC roles bootstrap) so admin_approval mode
+            # has a way to bootstrap its first admin at all; register it first
+            # so "bob" below exercises the genuine non-first-user gating path.
+            admin = service.register_user(db, "admin@example.com", "supersecret123")
+            assert admin.is_approved is True
+
             user = service.register_user(db, "bob@example.com", "supersecret123")
             assert user.is_approved is False
 

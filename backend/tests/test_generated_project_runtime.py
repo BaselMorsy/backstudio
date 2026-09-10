@@ -1351,6 +1351,73 @@ def test_admin_user_management_403_then_200_round_trip(tmp_path, monkeypatch, is
             assert client.get("/auth/users/999999", headers=admin_headers).status_code == 404
 
 
+def test_deactivated_user_access_and_refresh_tokens_are_rejected(tmp_path, monkeypatch, isolated_sys_path):
+    """Regression test for the final-review Critical finding: deactivating a user
+    must not just block future logins (already covered by test_login... elsewhere) -
+    it must also invalidate that user's ALREADY-ISSUED access and refresh tokens.
+    Before the fix, get_current_user (used by /auth/me and every RBAC-protected
+    route) and /auth/refresh never re-checked is_active after initial login, so a
+    deactivated user's existing access token kept working forever and /auth/refresh
+    kept minting fresh token pairs for them indefinitely.
+    """
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "deactivate_token_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # bootstrap admin (first user registered gets every declared role)
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            # target user whose tokens we'll capture and then invalidate
+            target_resp = client.post("/auth/register", json={"email": "target@example.com", "password": "supersecret123"})
+            target_id = target_resp.json()["id"]
+
+            target_login = client.post("/auth/login", json={"email": "target@example.com", "password": "supersecret123"})
+            assert target_login.status_code == 200, target_login.text
+            old_access_token = target_login.json()["access_token"]
+            old_refresh_token = target_login.json()["refresh_token"]
+            target_headers = {"Authorization": f"Bearer {old_access_token}"}
+
+            # the not-yet-deactivated token works, as a control
+            assert client.get("/auth/me", headers=target_headers).status_code == 200
+
+            deact_resp = client.post(f"/auth/users/{target_id}/deactivate", headers=admin_headers)
+            assert deact_resp.status_code == 200, deact_resp.text
+            assert deact_resp.json()["is_active"] is False
+
+            # the OLD access token, issued before deactivation, must now be rejected
+            me_resp = client.get("/auth/me", headers=target_headers)
+            assert me_resp.status_code == 401, me_resp.text
+
+            # the OLD refresh token must also be rejected - no minting fresh tokens
+            # for a deactivated user
+            refresh_resp = client.post("/auth/refresh", json={"refresh_token": old_refresh_token})
+            assert refresh_resp.status_code == 401, refresh_resp.text
+
+            # reactivating restores normal access: a fresh login works again
+            react_resp = client.post(f"/auth/users/{target_id}/reactivate", headers=admin_headers)
+            assert react_resp.status_code == 200, react_resp.text
+            assert react_resp.json()["is_active"] is True
+
+            new_login = client.post("/auth/login", json={"email": "target@example.com", "password": "supersecret123"})
+            assert new_login.status_code == 200, new_login.text
+
+
 def test_forgot_password_and_resend_verification_are_enumeration_safe(tmp_path, monkeypatch, isolated_sys_path):
     """The one test that would catch a status-code or body-shape leak of
     'does this email exist' - the single most important correctness property
@@ -1448,22 +1515,13 @@ def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_
 
         with TestClient(server_module.app) as client:
             admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap gets every role AND is auto-approved? see below
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap gets every role
+            # bootstrap (first-user) admin is auto-approved, symmetric with the existing
+            # roles bootstrap - admin_approval mode would otherwise ship unbootstrappable,
+            # since nobody could ever reach the /users/{id}/approve endpoint that only an
+            # already-approved admin can call
+            assert admin_resp.json()["is_approved"] is True
             admin_id = admin_resp.json()["id"]
-
-            # the bootstrap admin (first user) still needs approval like anyone else under
-            # admin_approval mode - registration and role-bootstrap are orthogonal to approval
-            login_before = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
-            assert login_before.status_code == 401, login_before.text
-
-            # approve the admin directly via the DB (no bootstrap approval mechanism exists -
-            # this mirrors how other tests in this suite grant a role via direct SQL when no
-            # endpoint yet exists to do it through the API)
-            import sqlite3
-            conn = sqlite3.connect(str(db_path))
-            conn.execute("UPDATE users SET is_approved = 1 WHERE id = ?", (admin_id,))
-            conn.commit()
-            conn.close()
 
             admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert admin_login.status_code == 200, admin_login.text
@@ -1561,7 +1619,6 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
         import re
-        import sqlite3
 
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
@@ -1569,12 +1626,10 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
         with TestClient(server_module.app) as client:
             admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
             assert admin_resp.status_code == 201, admin_resp.text
+            # bootstrap (first-user) admin is auto-approved, symmetric with the existing
+            # roles bootstrap, so it can log in directly with no SQL workaround
+            assert admin_resp.json()["is_approved"] is True
             admin_id = admin_resp.json()["id"]
-
-            conn = sqlite3.connect(str(db_path))
-            conn.execute("UPDATE users SET is_approved = 1 WHERE id = ?", (admin_id,))
-            conn.commit()
-            conn.close()
 
             admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert admin_login.status_code == 200, admin_login.text

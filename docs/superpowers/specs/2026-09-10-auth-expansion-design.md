@@ -275,3 +275,9 @@ Coverage this plan must include:
   no existing pattern for, not specific to this feature).
 - Clickable-link email bodies (the dev-mode stub embeds the raw token as
   text; a real provider integration would template a proper link).
+- Session/token revocation on password reset: `POST /auth/reset-password` changes
+  `password_hash`, but any access/refresh token already issued before the reset
+  remains valid until it naturally expires — only newly-minted tokens require the
+  new password. Revoking already-issued stateless JWTs needs a mechanism this
+  codebase doesn't have (e.g. token versioning, or a `password_hash` fingerprint
+  check on every authenticated request) and is a separable architectural change.

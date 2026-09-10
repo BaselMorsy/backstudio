@@ -736,11 +736,13 @@ alembic upgrade head
   a caller-supplied hash), and rejects the token unless the fingerprint still matches. Since
   `POST /auth/reset-password` changes `password_hash` before returning, using the token once
   invalidates it for any replay — a stateless JWT achieving genuine single-use semantics with no
-  server-side revocation list.
+  server-side revocation list. Note this covers only the reset token itself: any access/refresh
+  token already issued before the reset stays valid until it naturally expires — resetting a
+  password does not evict existing sessions.
 - **First-user bootstrap**: when RBAC is enabled, the very first user to register is granted every
   declared role — otherwise nobody could ever pass an RBAC check on a fresh database. Every
-  subsequent registration gets no roles by default; assign roles to later users directly in your
-  database (or add your own role-management endpoint on top of the generated code).
+  subsequent registration gets no roles by default; an admin grants roles to later users via
+  `PUT /auth/users/{id}/roles` (see [New auth endpoints](#new-auth-endpoints) above).
 - **JWT secret is required, not defaulted**: `config.py`'s `Settings` reads the env var you named
   in `auth.jwt.secret_env_var` (via a `.env` file, or the real process environment — an exported
   env var always takes priority over `.env`) and **raises at startup** if neither provides it —

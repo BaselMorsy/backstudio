@@ -79,6 +79,8 @@ _service = get_{{ project.auth_module_name }}_service()
 {% endif %}
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
     return TokenResponse(
         access_token=service.create_access_token(user.id),
         refresh_token=service.create_refresh_token(user.id),

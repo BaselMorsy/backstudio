@@ -547,6 +547,108 @@ def test_many_to_many_id_list_round_trip_against_real_generated_app(tmp_path, mo
             assert sorted(listed_post["tag_ids"]) == sorted([tag1_id, tag2_id])
 
 
+def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkeypatch, isolated_sys_path):
+    """rls_root_owned.yml: admin (bypass_roles) sees every order via list and can read/
+    update/delete anyone's; customer (no bypass) only ever sees their own, and a
+    customer's attempt to touch another user's order gets a plain 404, not 403.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_bypass_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap: first user gets every role
+
+            cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
+            assert cust_resp.json()["roles"] == []
+            # give the second user the customer role directly via the ORM (no role-grant
+            # endpoint exists - out of this plan's scope) so it can exercise a real,
+            # non-bypass RLS path rather than being blocked by RBAC entirely
+            db_path_for_grant = db_path
+            import sqlite3
+            conn = sqlite3.connect(str(db_path_for_grant))
+            conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
+            conn.commit()
+            conn.close()
+            cust_login = client.post("/auth/login", json={"email": "cust@example.com", "password": "supersecret123"})
+            cust_headers = {"Authorization": f"Bearer {cust_login.json()['access_token']}"}
+
+            order_admin = client.post("/orders", json={"status": "pending"}, headers=admin_headers).json()
+            order_cust = client.post("/orders", json={"status": "pending"}, headers=cust_headers).json()
+
+            # admin (bypass) sees both via list
+            admin_list = client.get("/orders", headers=admin_headers).json()
+            assert {o["id"] for o in admin_list} == {order_admin["id"], order_cust["id"]}
+
+            # customer (no bypass) sees only their own via list
+            cust_list = client.get("/orders", headers=cust_headers).json()
+            assert [o["id"] for o in cust_list] == [order_cust["id"]]
+
+            # customer's own order is fully accessible
+            assert client.get(f"/orders/{order_cust['id']}", headers=cust_headers).status_code == 200
+            assert client.put(f"/orders/{order_cust['id']}", json={"status": "shipped"}, headers=cust_headers).status_code == 200
+
+            # customer cannot see, update, or delete admin's order - plain 404, not 403
+            assert client.get(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
+            assert client.put(f"/orders/{order_admin['id']}", json={"status": "shipped"}, headers=cust_headers).status_code == 404
+            assert client.delete(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
+
+            # admin (bypass) CAN touch customer's order
+            assert client.get(f"/orders/{order_cust['id']}", headers=admin_headers).status_code == 200
+            assert client.delete(f"/orders/{order_cust['id']}", headers=admin_headers).status_code == 204
+
+
+def test_rls_header_identity_isolates_tenants_and_422s_on_missing_header(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/rls_header_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_header_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            tenant1 = client.post("/tenants", json={"name": "Acme"}).json()
+            tenant2 = client.post("/tenants", json={"name": "Globex"}).json()
+
+            # missing header -> native FastAPI 422, no custom error handling involved
+            missing_header_resp = client.get("/orders")
+            assert missing_header_resp.status_code == 422
+
+            order1 = client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant1["id"])}).json()
+            client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant2["id"])})
+
+            list_t1 = client.get("/orders", headers={"X-Tenant-Id": str(tenant1["id"])}).json()
+            assert [o["id"] for o in list_t1] == [order1["id"]]
+
+            # tenant2's header cannot see tenant1's order - 404, not 403
+            cross_tenant_resp = client.get(f"/orders/{order1['id']}", headers={"X-Tenant-Id": str(tenant2["id"])})
+            assert cross_tenant_resp.status_code == 404
+
+
 def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path, monkeypatch, isolated_sys_path):
     """shophub_mini.yml: Order (in the 'ordering' module) has many-to-one to Product
     (in 'catalog') and to User (the auth entity) - proves FK validation works when

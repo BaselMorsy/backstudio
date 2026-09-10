@@ -2,8 +2,11 @@
 
 {% set is_async = project.database_config.async_mode %}
 {% set has_owned_rel = (module.entities|map(attribute='owned_relationships')|map('length')|sum) > 0 %}
+{% set rls_entities = module.entities|selectattr('rls')|list %}
+{% set has_auth_user_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'auth_user')|list|length) > 0 %}
+{% set has_header_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'header')|list|length) > 0 %}
 from typing import List{% if has_owned_rel %}, Optional{% endif +%}
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status{% if has_header_rls %}, Header{% endif +%}
 {% if is_async %}
 from sqlalchemy.ext.asyncio import AsyncSession
 {% else %}
@@ -11,6 +14,9 @@ from sqlalchemy.orm import Session
 {% endif %}
 
 from database.base import get_db
+{% if has_auth_user_rls %}
+from database.models import User
+{% endif %}
 from .schemas import (
 {% for entity in module.entities %}
     {{ entity.name }}Create, {{ entity.name }}Response, {{ entity.name }}Update,
@@ -19,6 +25,11 @@ from .schemas import (
 from .service import {{ module.name|pascal_case }}Service, get_{{ module.snake_name }}_service
 {% if project.rbac_enabled %}
 from rbac import require_roles
+{% endif %}
+{% if has_auth_user_rls %}
+from modules.{{ project.auth_module_name }}.service import get_{{ project.auth_module_name }}_service
+
+_auth_service = get_{{ project.auth_module_name }}_service()
 {% endif %}
 
 router = APIRouter()
@@ -31,7 +42,7 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Create {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['create'] %}
+{% if project.rbac_enabled and entity.rbac['create'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -39,10 +50,24 @@ router = APIRouter()
     payload: {{ entity.name }}Create,
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+{% if project.rbac_enabled and entity.rbac['create'] %}
+    current_user: User = Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: User = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls %}
+    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+{% endif %}
 ) -> {{ entity.name }}Response:
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+    owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls %}
+    owner_id = rls_owner_header
+{% endif %}
 {% if entity.owned_relationships %}
     try:
-        return {{ 'await ' if is_async }}service.create_{{ entity.snake_name }}(db, payload.model_dump())
+        return {{ 'await ' if is_async }}service.create_{{ entity.snake_name }}(db, payload.model_dump(){% if entity.rls %}, owner_id=owner_id{% endif %})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 {% else %}
@@ -56,20 +81,34 @@ router = APIRouter()
     response_model=List[{{ entity.name }}Response],
     summary="List {{ entity.name }} records",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['list'] %}
+{% if project.rbac_enabled and entity.rbac['list'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
 {{ 'async ' if is_async }}def list_{{ entity.snake_name }}_route(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-{% for rel in entity.owned_relationships %}
+{% for rel in entity.owned_relationships if not rel.is_rls_link %}
     {{ rel.fk_column }}: Optional[int] = Query(None),
 {% endfor %}
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+{% if project.rbac_enabled and entity.rbac['list'] %}
+    current_user: User = Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: User = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls %}
+    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+{% endif %}
 ) -> List[{{ entity.name }}Response]:
-    return {{ 'await ' if is_async }}service.list_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %})
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+    owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls %}
+    owner_id = rls_owner_header
+{% endif %}
+    return {{ 'await ' if is_async }}service.list_{{ entity.plural_snake }}(db, skip=skip, limit=limit{% for rel in entity.owned_relationships if not rel.is_rls_link %}, {{ rel.fk_column }}={{ rel.fk_column }}{% endfor %}{% if entity.rls %}, owner_id=owner_id{% endif %})
 {% endif %}
 
 {% if 'read' in entity.enabled_actions %}
@@ -78,7 +117,7 @@ router = APIRouter()
     response_model={{ entity.name }}Response,
     summary="Get {{ entity.name }} by id",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['read'] %}
+{% if project.rbac_enabled and entity.rbac['read'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -86,8 +125,22 @@ router = APIRouter()
     item_id: int,
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+{% if project.rbac_enabled and entity.rbac['read'] %}
+    current_user: User = Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: User = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls %}
+    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+{% endif %}
 ) -> {{ entity.name }}Response:
-    item = {{ 'await ' if is_async }}service.get_{{ entity.snake_name }}(db, item_id)
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+    owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls %}
+    owner_id = rls_owner_header
+{% endif %}
+    item = {{ 'await ' if is_async }}service.get_{{ entity.snake_name }}(db, item_id{% if entity.rls %}, owner_id=owner_id{% endif %})
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
     return item
@@ -99,7 +152,7 @@ router = APIRouter()
     response_model={{ entity.name }}Response,
     summary="Update {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['update'] %}
+{% if project.rbac_enabled and entity.rbac['update'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -108,14 +161,28 @@ router = APIRouter()
     payload: {{ entity.name }}Update,
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+{% if project.rbac_enabled and entity.rbac['update'] %}
+    current_user: User = Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: User = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls %}
+    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+{% endif %}
 ) -> {{ entity.name }}Response:
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+    owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls %}
+    owner_id = rls_owner_header
+{% endif %}
 {% if entity.owned_relationships %}
     try:
-        item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
+        item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True){% if entity.rls %}, owner_id=owner_id{% endif %})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 {% else %}
-    item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True))
+    item = {{ 'await ' if is_async }}service.update_{{ entity.snake_name }}(db, item_id, payload.model_dump(exclude_unset=True){% if entity.rls %}, owner_id=owner_id{% endif %})
 {% endif %}
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
@@ -128,7 +195,7 @@ router = APIRouter()
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['delete'] %}
+{% if project.rbac_enabled and entity.rbac['delete'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -136,8 +203,22 @@ router = APIRouter()
     item_id: int,
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+{% if project.rbac_enabled and entity.rbac['delete'] %}
+    current_user: User = Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: User = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls %}
+    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+{% endif %}
 ) -> None:
-    deleted = {{ 'await ' if is_async }}service.delete_{{ entity.snake_name }}(db, item_id)
+{% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
+    owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls %}
+    owner_id = rls_owner_header
+{% endif %}
+    deleted = {{ 'await ' if is_async }}service.delete_{{ entity.snake_name }}(db, item_id{% if entity.rls %}, owner_id=owner_id{% endif %})
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="{{ entity.name }} not found")
 {% endif %}

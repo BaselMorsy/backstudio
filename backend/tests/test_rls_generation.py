@@ -492,3 +492,95 @@ def test_cascade_owner_id_composes_with_an_existing_owned_relationship_filter(tm
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_rbac_gated_rls_entity_uses_current_user_as_named_param(tmp_path):
+    """rls_root_owned.yml: Order.rls.bypass_roles=[admin], every action RBAC-gated
+    ([admin, customer]) - current_user must be a named Depends(require_roles(...))
+    parameter, and the decorator's separate dependencies=[] line must be suppressed
+    for create (no double-evaluation of require_roles).
+    """
+    erd = load_erd(f"{FIXTURES}/rls_root_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    create_start = routes_src.index('@router.post(\n    "/orders"')
+    create_end = routes_src.index("\n@router.get(")
+    create_src = routes_src[create_start:create_end]
+    assert "dependencies=[Depends(require_roles(" not in create_src
+    assert "current_user: User = Depends(require_roles(" in create_src
+    assert "owner_id = None if set(current_user.roles or []).intersection(" in create_src
+    assert '["admin"]' in create_src  # bypass_roles rendered into the intersection call
+    assert "owner_id=owner_id" in create_src
+
+
+def test_rbac_disabled_rls_entity_uses_get_current_user_fallback(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_no_rbac_action.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "notes" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert "from database.models import User" in routes_src
+    assert "current_user: User = Depends(_auth_service.get_current_user)" in routes_src
+    assert "Depends(require_roles(" not in routes_src  # RBAC disabled - never rendered at all
+    assert "owner_id = None if set(current_user.roles or []).intersection([])" in routes_src
+
+
+def test_header_sourced_rls_entity_uses_header_param_not_current_user(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_header_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+    assert "from fastapi import" in routes_src and "Header" in routes_src
+    assert 'rls_owner_header: int = Header(..., alias="X-Tenant-Id")' in routes_src
+    assert "current_user" not in routes_src
+    assert "from database.models import User" not in routes_src
+    assert "owner_id = rls_owner_header" in routes_src
+
+    tenants_src = (codebase_dir / "modules" / "tenants" / "routes.py").read_text(encoding="utf-8")
+    assert "owner_id" not in tenants_src  # Tenant itself carries no rls - only Order does
+
+
+def test_entity_without_rls_routes_unchanged(tmp_path):
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "catalog" / "routes.py").read_text(encoding="utf-8")
+    assert "owner_id" not in routes_src
+    assert "rls_owner_header" not in routes_src
+    assert "current_user" not in routes_src
+
+
+def test_list_route_excludes_rls_link_from_client_query_params(tmp_path):
+    """rls_cascade_composability.yml: OrderItem's rls-link (order_id, cascades_ownership)
+    must NOT appear as a client-supplied ?order_id= query param on list_order_items_route,
+    even though it's still a normal owned_relationships entry at the repo/service layer -
+    only the OTHER owned_relationship (product_id) should appear as a query param.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_composability.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    routes_src = (codebase_dir / "modules" / "ordering" / "routes.py").read_text(encoding="utf-8")
+    list_start = routes_src.index("def list_order_item_route(")
+    list_end = routes_src.index("\n@router.get(", list_start)
+    list_src = routes_src[list_start:list_end]
+    assert "product_id: Optional[int] = Query(None)" in list_src
+    assert "order_id: Optional[int] = Query(None)" not in list_src

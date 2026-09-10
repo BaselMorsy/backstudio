@@ -1,0 +1,25 @@
+project:
+  name: RlsNoRbacAction
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: rls_no_rbac_action.db
+
+auth:
+  enabled: true
+
+entities:
+  - name: Note
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user
+
+services:
+  - name: notes
+    entities: [Note]

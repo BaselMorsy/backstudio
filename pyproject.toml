@@ -1,6 +1,6 @@
 [project]
 name = "backstudio"
-version = "0.1.0"
+version = "2.0.0"
 description = "BackStudio - The Ultimate Backend Code Generator"
 requires-python = ">=3.11,<3.13"
 dependencies = [

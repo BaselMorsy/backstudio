@@ -1,0 +1,69 @@
+project:
+  name: LedgerBox
+  version: "1.0.0"
+  description: >-
+    A personal finance tracker demonstrating admin-approval registration and
+    row-level security scoped to the authenticated user, with ownership
+    cascading from Account down to Transaction - genuinely private
+    per-user data, not a public-read/owner-only-write resource (see
+    docs-site/features/rls.md for why that distinction matters).
+
+database:
+  type: sqlite
+  database_name: ledgerbox.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: LEDGERBOX_JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 15
+    refresh_token_expiration_minutes: 43200   # 30 days
+  registration:
+    mode: admin_approval
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+  default_permissions:
+    read: [admin, member]
+    list: [admin, member]
+    create: [admin, member]
+    update: [admin, member]
+    delete: [admin, member]
+
+entities:
+  - name: Account
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, max_length: 100}
+      - {name: account_type, type: string, default: checking}
+      - {name: balance, type: float, default: 0}
+    relationships:
+      - name: user
+        cardinality: many-to-one
+        target: User
+        owner: true
+    rls:
+      identity_source:
+        type: auth_user
+      bypass_roles: [admin]
+
+  - name: Transaction
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: amount, type: float}
+      - {name: description, type: string, max_length: 200}
+      - {name: category, type: string, default: uncategorized}
+      - {name: occurred_at, type: datetime}
+    relationships:
+      - name: account
+        cardinality: many-to-one
+        target: Account
+        cascades_ownership: true
+
+services:
+  - name: accounts
+    entities: [Account]
+  - name: transactions
+    entities: [Transaction]

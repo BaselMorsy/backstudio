@@ -1,0 +1,116 @@
+project:
+  name: ShopSphere
+  version: "1.0.0"
+  description: >-
+    An e-commerce catalog and ordering API demonstrating auth with email
+    verification, RBAC, and a full relationship mix (many-to-one, many-to-many,
+    and an association-object pattern for order line items).
+
+database:
+  type: sqlite
+  database_name: shopsphere.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: SHOPSPHERE_JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 30
+    refresh_token_expiration_minutes: 20160   # 14 days
+  registration:
+    mode: email_verification
+
+rbac:
+  enabled: true
+  roles: [admin, customer]
+  default_permissions:
+    read: [admin, customer]
+    list: [admin, customer]
+    create: [admin]
+    update: [admin]
+    delete: [admin]
+
+entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true, max_length: 100}
+
+  - name: Tag
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true, max_length: 50}
+
+  - name: Product
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, max_length: 200}
+      - {name: description, type: text}
+      - {name: price, type: float}
+      - {name: sku, type: string, unique: true, max_length: 40}
+      - {name: stock_quantity, type: integer, default: 0}
+    relationships:
+      - name: category
+        cardinality: many-to-one
+        target: Category
+        ondelete: SET NULL
+        nullable: true
+      - name: tags
+        cardinality: many-to-many
+        target: Tag
+
+  - name: Order
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: status, type: string, default: pending}
+      - {name: total_amount, type: float, default: 0}
+    relationships:
+      - name: customer
+        cardinality: many-to-one
+        target: User
+    endpoints:
+      rbac:
+        create: [admin, customer]
+
+  # Association-object pattern: a real many-to-many between Order and Product
+  # that carries its own data (quantity, unit_price) - the "how do I model a
+  # many-to-many with extra fields on the join" pattern.
+  - name: OrderItem
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: quantity, type: integer, default: 1}
+      - {name: unit_price, type: float}
+    relationships:
+      - name: order
+        cardinality: many-to-one
+        target: Order
+      - name: product
+        cardinality: many-to-one
+        target: Product
+    endpoints:
+      rbac:
+        create: [admin, customer]
+
+  - name: Review
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: rating, type: integer}
+      - {name: comment, type: text}
+    relationships:
+      - name: product
+        cardinality: many-to-one
+        target: Product
+      - name: reviewer
+        cardinality: many-to-one
+        target: User
+    endpoints:
+      rbac:
+        create: [admin, customer]
+
+services:
+  - name: catalog
+    entities: [Category, Tag, Product]
+  - name: ordering
+    entities: [Order, OrderItem]
+  - name: reviews
+    entities: [Review]

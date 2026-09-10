@@ -1,0 +1,81 @@
+project:
+  name: TaskFlow
+  version: "1.0.0"
+  description: >-
+    A multi-tenant project/task tracker demonstrating async database support
+    end to end and row-level security scoped by a tenant header (X-Tenant-Id)
+    rather than the authenticated user - the pattern for isolating tenants
+    that aren't necessarily tied 1:1 to a single user account.
+
+database:
+  type: sqlite
+  database_name: taskflow.db
+  async_mode: true
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: TASKFLOW_JWT_SECRET
+    algorithm: HS256
+    expiration_minutes: 30
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+  default_permissions:
+    read: [admin, member]
+    list: [admin, member]
+    create: [admin, member]
+    update: [admin, member]
+    delete: [admin, member]
+
+entities:
+  - name: Tenant
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, unique: true, max_length: 100}
+    endpoints:
+      rbac:
+        create: [admin]
+        update: [admin]
+        delete: [admin]
+
+  - name: Project
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string, max_length: 150}
+      - {name: description, type: text}
+    relationships:
+      - name: tenant
+        cardinality: many-to-one
+        target: Tenant
+        owner: true
+    rls:
+      identity_source:
+        type: header
+        header_name: X-Tenant-Id
+      # No bypass_roles here: the header identity source resolves ownership
+      # purely from the X-Tenant-Id header value and carries no role
+      # information, so there's nothing for a bypass role to plug into
+      # (backstudio validate rejects bypass_roles on a header-sourced
+      # entity outright). A platform admin who needs to see across every
+      # tenant would need a request-level mechanism outside what this ERD
+      # can express - see docs-site's Row-Level Security page.
+
+  - name: Task
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string, max_length: 200}
+      - {name: done, type: boolean, default: false}
+      - {name: priority, type: string, default: normal}
+    relationships:
+      - name: project
+        cardinality: many-to-one
+        target: Project
+        cascades_ownership: true
+
+services:
+  - name: tenants
+    entities: [Tenant]
+  - name: projects
+    entities: [Project, Task]

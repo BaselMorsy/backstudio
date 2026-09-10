@@ -1,3 +1,5 @@
+import os
+
 from typer.testing import CliRunner
 
 from app.cli.main import app
@@ -6,9 +8,22 @@ runner = CliRunner()
 FIXTURES = "app/tests/fixtures/erd"
 
 
+def test_generate_default_output_dir_is_the_current_directory(tmp_path, monkeypatch):
+    # No --output-dir given at all - the default must resolve against the process's
+    # actual current working directory, not a fixed "workspace" subfolder relative to
+    # wherever backstudio itself happens to be installed/invoked from.
+    erd_abs_path = os.path.abspath(f"{FIXTURES}/valid_minimal.yml")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["generate", erd_abs_path])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "Demo" / "server.py").exists()
+
+
 def test_generate_writes_codebase_and_reports_path(tmp_path):
     result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path)]
+        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)]
     )
     assert result.exit_code == 0
     assert "Generated at:" in result.output
@@ -17,16 +32,16 @@ def test_generate_writes_codebase_and_reports_path(tmp_path):
 
 
 def test_generate_refuses_to_overwrite_without_force(tmp_path):
-    runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path)])
-    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path)])
+    runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
     assert result.exit_code == 1
     assert "--force" in result.output
 
 
 def test_generate_force_overwrites(tmp_path):
-    runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path)])
+    runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
     result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path), "--force"]
+        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path), "--force"]
     )
     assert result.exit_code == 0
 
@@ -34,14 +49,14 @@ def test_generate_force_overwrites(tmp_path):
 def test_generate_invalid_erd_exits_nonzero(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text("project: [unterminated")
-    result = runner.invoke(app, ["generate", str(bad), "--output", str(tmp_path)])
+    result = runner.invoke(app, ["generate", str(bad), "--output-dir", str(tmp_path)])
     assert result.exit_code == 1
 
 
 def test_generate_writes_random_secret_when_auth_enabled_and_unset(tmp_path, monkeypatch):
     monkeypatch.delenv("JWT_SECRET", raising=False)
 
-    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output", str(tmp_path)])
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "Generated a random JWT_SECRET" in result.output
@@ -61,7 +76,7 @@ def test_generate_does_not_overwrite_existing_env_file(tmp_path, monkeypatch):
     (codebase_dir / ".env").write_text("JWT_SECRET=my-own-custom-secret\n", encoding="utf-8")
 
     result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output", str(tmp_path), "--force"]
+        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"]
     )
 
     assert result.exit_code == 0
@@ -72,7 +87,7 @@ def test_generate_does_not_overwrite_existing_env_file(tmp_path, monkeypatch):
 def test_generate_does_not_write_env_file_when_secret_already_set(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "already-exported-secret")
 
-    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output", str(tmp_path)])
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "Generated a random JWT_SECRET" not in result.output
@@ -82,12 +97,12 @@ def test_generate_does_not_write_env_file_when_secret_already_set(tmp_path, monk
 def test_generate_force_preserves_hand_edited_env_file(tmp_path, monkeypatch):
     monkeypatch.delenv("JWT_SECRET", raising=False)
 
-    runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output", str(tmp_path)])
+    runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path)])
     env_file = tmp_path / "ShopHub" / ".env"
     env_file.write_text("JWT_SECRET=my-hand-picked-secret\nEXTRA_VAR=keep-me\n", encoding="utf-8")
 
     result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output", str(tmp_path), "--force"]
+        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"]
     )
 
     assert result.exit_code == 0
@@ -97,7 +112,7 @@ def test_generate_force_preserves_hand_edited_env_file(tmp_path, monkeypatch):
 
 def test_generate_does_not_write_env_file_when_auth_disabled(tmp_path):
     result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output", str(tmp_path)]
+        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)]
     )
 
     assert result.exit_code == 0

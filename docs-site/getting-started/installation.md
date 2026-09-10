@@ -11,30 +11,57 @@
   dependencies. `uv` will provision a matching Python interpreter for you if you don't already
   have one on your PATH.
 
-## Install from a fresh clone
+## Option A: install the CLI globally (most users)
 
 ```bash
 git clone <this-repo-url>
 cd backstudio
-uv sync
+
+./install.sh          # macOS/Linux
+install.bat            # Windows
+```
+
+Each script bootstraps [`uv`](https://docs.astral.sh/uv/) if you don't already have it, then runs
+
+```bash
+uv tool install --editable . --python 3.11
+```
+
+`uv tool install` is different from `uv sync`: instead of a project-local `.venv` you have to
+activate or prefix commands into, it installs `backstudio` into its own isolated tool
+environment and puts a real `backstudio` executable on a directory `uv` keeps on your PATH
+(typically `~/.local/bin` on macOS/Linux, a per-user directory on Windows) — `backstudio --help`
+just works, no `uv run` prefix needed. `--editable .` means it re-reads your local checkout on
+every run rather than a frozen copy, so pulling the latest `git` changes takes effect
+immediately.
+
+If `backstudio` isn't found right after installing, restart your shell — PATH updates from a
+fresh `uv`/tool install don't always apply to an already-open terminal.
+
+## Option B: project-local dev setup (contributing to BackStudio)
+
+If you're developing BackStudio itself, you need the full dev environment (`pytest`, `mkdocs`,
+etc.), not just the installed CLI:
+
+```bash
+git clone <this-repo-url>
+cd backstudio
+uv sync --extra dev
 ```
 
 `uv sync` creates a `.venv` in the repo root and installs the pinned dependencies from
 `pyproject.toml`, including a `backstudio` console script — declared as
-`[project.scripts]` → `backstudio = "app.cli.main:app"` — inside that `.venv`.
+`[project.scripts]` → `backstudio = "app.cli.main:app"` — inside that `.venv`. The
+`backstudio` script lives inside `.venv` and is **not** automatically on your shell's PATH in
+this setup. You have two options:
 
-## Running the CLI
-
-The `backstudio` script lives inside `.venv` and is **not** automatically on your
-shell's PATH. You have two options:
-
-**Option 1 — prefix every command with `uv run` (recommended):**
+**Option B1 — prefix every command with `uv run` (recommended):**
 
 ```bash
 uv run backstudio --help
 ```
 
-**Option 2 — activate the virtual environment first, then call `backstudio` directly:**
+**Option B2 — activate the virtual environment first, then call `backstudio` directly:**
 
 ```bash
 # Windows (cmd.exe)

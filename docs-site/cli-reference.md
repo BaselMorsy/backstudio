@@ -1,9 +1,11 @@
 # CLI Reference
 
 The `backstudio` CLI is a [Typer](https://typer.tiangolo.com/) application defined in
-`app/cli/main.py`. It exposes three commands: `validate`, `visualize`, and `generate`. Run any
-command with `uv run backstudio ...`, or activate `.venv` first and drop the `uv run` prefix
-(see [Installation](getting-started/installation.md)).
+`app/cli/main.py`. It exposes three commands: `validate`, `visualize`, and `generate`. If you
+installed it globally (`install.sh`/`install.bat`), call it directly as `backstudio ...`. In a
+dev checkout, run any command with `uv run backstudio ...`, or activate `.venv` first and drop
+the `uv run` prefix (see [Installation](getting-started/installation.md)) — the examples below
+use the `uv run` form.
 
 ## Global options
 
@@ -117,9 +119,10 @@ Arguments:
   ERD_FILE  Path to the ERD YAML file  [required]
 
 Options:
-  --output PATH  Workspace directory  [default: workspace]
-  --force        Overwrite existing generated code
-  --help         Show this message and exit.
+  -o, --output-dir PATH  Directory the generated project lands in (default:
+                         current directory)  [default: .]
+  --force                Overwrite existing generated code
+  --help                 Show this message and exit.
 ```
 
 ### Arguments and options
@@ -127,17 +130,19 @@ Options:
 | Name | Flag forms | Type | Default | Help text |
 |---|---|---|---|---|
 | `ERD_FILE` | positional | `Path` | — (required) | "Path to the ERD YAML file"; must exist and be readable |
-| `output` | `--output` | `Path` | `workspace` | "Workspace directory" |
+| `output` | `-o`, `--output-dir` | `Path` | `.` (current directory) | "Directory the generated project lands in (default: current directory)" |
 | `force` | `--force` | `bool` flag | `False` | "Overwrite existing generated code" |
 
 ### Behavior
 
 1. Loads and validates the ERD (same failure mode as `validate`/`visualize` on an invalid file).
 2. Translates the ERD into generator state via `app.erd.translate.translate`.
-3. Generates the project into `<output>/<project.name>` via
-   `app.services.code_generator.CodeGenerator`. If that directory already exists and `--force`
-   was not passed, generation fails with exit code `1` and a message telling you to pass
-   `--force`; passing `--force` deletes and recreates the whole project directory.
+3. Generates the project into `<output-dir>/<project.name>` via
+   `app.services.code_generator.CodeGenerator` — by default, `<output-dir>` is wherever you ran
+   the command from, so `backstudio generate blog.yml` with no flags lands the project directly
+   at `./BlogAPI/`. If that directory already exists and `--force` was not passed, generation
+   fails with exit code `1` and a message telling you to pass `--force`; passing `--force`
+   deletes and recreates the whole project directory.
 4. **`.env` handling:** if a previous run's `.env` file exists under the output project
    directory, its content is preserved across a `--force` regeneration (so your secret isn't
    silently rotated). Otherwise, if the ERD has `auth` enabled and the relevant secret
@@ -155,7 +160,15 @@ Options:
 ### Example
 
 ```bash
-$ uv run backstudio generate blog.yml --output workspace
+$ uv run backstudio generate blog.yml
+Generated at: BlogAPI
+Copy this directory into your project.
+```
+
+Pass `--output-dir` to land it somewhere other than the current directory:
+
+```bash
+$ uv run backstudio generate blog.yml --output-dir workspace
 Generated at: workspace/BlogAPI
 Copy this directory into your project.
 ```
@@ -163,7 +176,7 @@ Copy this directory into your project.
 Regenerating over an existing output without `--force` fails safely:
 
 ```bash
-$ uv run backstudio generate blog.yml --output workspace
+$ uv run backstudio generate blog.yml
 <error message>
 Use --force to overwrite.
 ```

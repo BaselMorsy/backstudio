@@ -110,7 +110,9 @@ def visualize(
 @app.command()
 def generate(
     erd_file: Path = typer.Argument(..., exists=True, readable=True, help="Path to the ERD YAML file"),
-    output: Path = typer.Option(Path("workspace"), "--output", help="Workspace directory"),
+    output: Path = typer.Option(
+        Path("."), "--output-dir", "-o", help="Directory the generated project lands in (default: current directory)"
+    ),
     force: bool = typer.Option(False, "--force", help="Overwrite existing generated code"),
 ) -> None:
     """Generate a FastAPI backend from an ERD file."""

@@ -45,23 +45,24 @@ to catch schema mistakes before generating code.
 ## 3. Generate it
 
 ```bash
-$ uv run backstudio generate blog.yml --output workspace
-Generated at: workspace/BlogAPI
+$ uv run backstudio generate blog.yml
+Generated at: BlogAPI
 Copy this directory into your project.
 ```
 
-`generate` writes a full FastAPI project under `<output>/<project.name>`. Because
-`auth` is off in this ERD, no `.env` secret is generated; because a SQLite database is
-declared, `generate` also runs `alembic revision --autogenerate` for you, producing an initial
-migration.
+`generate` writes a full FastAPI project under `<output-dir>/<project.name>` — by default,
+`<output-dir>` is the current directory, so this lands directly at `./BlogAPI/` (pass
+`--output-dir PATH` to put it somewhere else instead). Because `auth` is off in this ERD, no
+`.env` secret is generated; because a SQLite database is declared, `generate` also runs
+`alembic revision --autogenerate` for you, producing an initial migration.
 
 ### What actually gets produced
 
-Running the command above produces this tree under `workspace/BlogAPI/`
+Running the command above produces this tree under `BlogAPI/`
 (captured from a real run; `__pycache__` directories omitted):
 
 ```
-workspace/BlogAPI/
+BlogAPI/
 ├── .gitignore
 ├── README.md
 ├── alembic.ini
@@ -93,7 +94,7 @@ workspace/BlogAPI/
 ## 4. Run the generated project
 
 ```bash
-cd workspace/BlogAPI
+cd BlogAPI
 python -m venv venv
 ```
 
@@ -111,8 +112,8 @@ uvicorn server:app --reload
 ```
 
 Then visit `http://localhost:8000/docs` for interactive Swagger docs covering the full CRUD API
-generated for `Post` (`POST /posts`, `GET /posts`, `GET /posts/{id}`, `PUT /posts/{id}`,
-`DELETE /posts/{id}`).
+generated for `Post` (`POST /posts`, `GET /posts`, `GET /posts/{item_id}`, `PUT /posts/{item_id}`,
+`DELETE /posts/{item_id}`).
 
 !!! note "Verified"
     Every command on this page — `validate`, `generate`, and booting the generated

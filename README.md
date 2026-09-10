@@ -5,6 +5,7 @@
 
   **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
 
+  [![Tests](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml/badge.svg)](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml)
   [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -28,19 +29,24 @@ mechanics of each piece.
 
 ### Install
 
+**Just want the `backstudio` command?** Clone the repo, then run the installer matching your OS
+from the repo root:
+
 ```bash
 git clone <this-repo-url>
 cd backstudio
-uv sync
+
+./install.sh          # macOS/Linux
+install.bat            # Windows
 ```
 
-This installs a `backstudio` console script (see `[project.scripts]` in `pyproject.toml`) inside
-`.venv` — it is **not** automatically on your shell's PATH. Prefix commands with `uv run`, or
-activate the venv first (`.venv\Scripts\activate.bat` on Windows, `source .venv/bin/activate` on
-macOS/Linux) and call `backstudio` directly:
+Each script bootstraps [`uv`](https://docs.astral.sh/uv/) if it isn't already on your machine,
+then runs `uv tool install --editable . --python 3.11` — this installs `backstudio` into its own
+isolated environment and puts a real `backstudio` executable on your PATH (no `uv run` prefix,
+no venv to activate). Verify it worked:
 
 ```bash
-$ uv run backstudio --help
+$ backstudio --help
 
 Usage: backstudio [OPTIONS] COMMAND [ARGS]...
 
@@ -51,6 +57,20 @@ Commands:
   validate   Validate an ERD file without generating anything.
   visualize  Render an HTML ER diagram for the given ERD file.
 ```
+
+If `backstudio` isn't found yet, restart your shell (PATH updates from a fresh `uv`/tool install
+don't always apply to an already-open terminal) and try again.
+
+**Developing or contributing to BackStudio itself?** Use the project-local dev environment
+instead — it installs `pytest`, `mkdocs`, and every other dev dependency alongside the CLI:
+
+```bash
+uv sync --extra dev
+```
+
+This creates `.venv` in the repo root; prefix commands with `uv run` (`uv run backstudio ...`,
+`uv run pytest app/tests`) or activate the venv first
+(`.venv\Scripts\activate.bat` on Windows, `source .venv/bin/activate` on macOS/Linux).
 
 ### A minimal ERD
 
@@ -82,22 +102,25 @@ For a fuller example with a relationship, JWT auth, and RBAC, see
 **Validate it:**
 
 ```bash
-$ uv run backstudio validate blog.yml
+$ backstudio validate blog.yml
 OK: 1 entities, 0 relationships, auth=off, rbac=off
 ```
 
 **Generate it:**
 
 ```bash
-$ uv run backstudio generate blog.yml --output workspace
-Generated at: workspace/BlogAPI
+$ backstudio generate blog.yml
+Generated at: BlogAPI
 Copy this directory into your project.
 ```
+
+By default, `generate` writes directly into the current directory (`./BlogAPI/` here) — pass
+`--output-dir PATH` (or `-o PATH`) to land it somewhere else instead.
 
 **Run it:**
 
 ```bash
-cd workspace/BlogAPI
+cd BlogAPI
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
@@ -133,8 +156,8 @@ Three commands:
   generating anything.
 - `backstudio visualize ERD_FILE [-o/--output PATH] [--open/--no-open]` — render an HTML ER
   diagram for the given ERD file.
-- `backstudio generate ERD_FILE [--output PATH] [--force]` — generate a full FastAPI backend
-  from an ERD file.
+- `backstudio generate ERD_FILE [-o/--output-dir PATH] [--force]` — generate a full FastAPI
+  backend from an ERD file, into the current directory by default.
 
 Full flag-by-flag details and the ERD YAML format: [docs-site/cli-reference.md](docs-site/cli-reference.md).
 
@@ -155,17 +178,22 @@ backstudio/
 ├── docs/superpowers/            # design specs and implementation plans
 ├── docs-site/                      # mkdocs-material documentation site source (see below)
 ├── assets/                            # logo and other README images
-├── workspace/                           # backstudio generate's default output directory
-├── mkdocs.yml                             # docs-site config — see "Documentation site" below
+├── .github/workflows/                   # CI (runs the test suite on push/PR)
+├── install.sh / install.bat               # one-shot installers — see "Install" above
+├── mkdocs.yml                               # docs-site config — see "Documentation site" below
 └── pyproject.toml
 ```
+
+`backstudio generate`'s default output directory is wherever you run it from (the current
+directory) — there's no fixed `workspace/` folder in the repo layout; that name only shows up if
+you (or an example) explicitly pass `--output-dir workspace`.
 
 ### Documentation site
 
 The full documentation site (architecture notes, ERD field reference, feature deep-dives, CLI
 reference) lives under `docs-site/`, configured by `mkdocs.yml`, and is built with
-`mkdocs`/`mkdocs-material` — both dev dependencies, already installed via the `dev` dependency
-group after `uv sync`. Preview it locally with:
+`mkdocs`/`mkdocs-material` — both dev dependencies, already installed via `uv sync --extra dev`.
+Preview it locally with:
 
 ```bash
 uv run mkdocs serve

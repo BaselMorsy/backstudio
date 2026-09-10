@@ -19,7 +19,7 @@ flowchart TD
     E --> F["CodeGenerator.generate_project()<br/>app/services/code_generator.py"]
     F --> F1["_generate_fastapi_project()"]
     F1 --> F2["Jinja2 render:<br/>Python/*.jinja templates"]
-    F2 --> G["generated FastAPI project<br/>workspace/{project_name}"]
+    F2 --> G["generated FastAPI project<br/>{output_dir}/{project_name}"]
 ```
 
 ## Stage 1: `app/erd/loader.py` — YAML to a validated `ERDConfig`
@@ -120,8 +120,10 @@ is what `CodeGenerator.generate_project()` receives — it never sees an `ERDCon
 ## Stage 3: `app/services/code_generator.py` — `state` to rendered files
 
 `CodeGenerator.generate_project(project_state, force=False)` is the entry point. It resolves
-the output directory (`workspace/{project_name}`), refuses to overwrite an existing
-one unless `force=True`, and — for `framework == 'fastapi'` (the only supported value) —
+the output directory (`{output_dir}/{project_name}` — the CLI's `generate --output-dir` flag
+sets `output_dir`, defaulting to the current directory; `CodeGenerator`'s own constructor
+defaults to `"workspace"` if instantiated directly, outside the CLI), refuses to overwrite an
+existing one unless `force=True`, and — for `framework == 'fastapi'` (the only supported value) —
 delegates to `_generate_fastapi_project(state, output_dir)`, which drives every Jinja2 render
 call.
 

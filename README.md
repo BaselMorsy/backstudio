@@ -352,6 +352,74 @@ up `database/models.py`; it also changes the generated schemas, service and rout
   posts costs one extra query, not one per row). There is no write path for it yet — sending
   `tag_ids` to `POST`/`PUT` does nothing; associate rows in your own code for now.
 
+##### Row-level access control (`owner`, `cascades_ownership`, `rls`)
+
+A `many-to-one` relationship can additionally opt into ownership:
+
+```yaml
+relationships:
+  - {name: user, cardinality: many-to-one, target: User, owner: true}
+    # marks this FK as the entity's ownership column — Order.user_id, here
+
+  - {name: order, cardinality: many-to-one, target: Order, cascades_ownership: true}
+    # OrderItem has no owner column of its own; it inherits Order's ownership through
+    # this FK instead — to arbitrary depth (an entity owned via a chain of
+    # cascades_ownership relationships is filtered the same way a direct owner is)
+```
+
+`owner: true` and `cascades_ownership: true` are mutually exclusive per relationship, and an
+entity may declare at most one ownership path (one `owner: true` relationship, or one
+`cascades_ownership: true` relationship, not both and not more than one of either).
+
+Declaring either one only marks *which* column carries ownership — enforcement is opted into
+separately, per entity, with an `rls:` block:
+
+```yaml
+entities:
+  - name: Order
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user            # auth_user | header
+        # header_name: X-Tenant-Id   # required when type: header — see below
+      bypass_roles: [admin]        # optional; requires rbac.enabled — these roles see every row
+```
+
+- **`identity_source: {type: auth_user}`** resolves ownership from the authenticated caller
+  (`current_user.id`, via the existing auth dependency) — requires `auth.enabled: true`. Every
+  generated route for the entity gains `current_user: User = Depends(...)` and a
+  `owner_id = None if <caller has a bypass role> else current_user.id` line before calling into
+  the service; `owner_id=None` means "no filter" (only reachable via `bypass_roles`).
+- **`identity_source: {type: header, header_name: X-Tenant-Id}`** resolves ownership from a
+  required request header instead of the authenticated user — no `auth.enabled` needed. Every
+  generated route gains `rls_owner_header: int = Header(..., alias="X-Tenant-Id")`; a request
+  missing that header gets FastAPI's own native `422`, with no custom error handling involved.
+  `bypass_roles` isn't meaningful here (there's no authenticated caller to hold a role) and is
+  rejected together with `type: header` at validation time.
+- **`bypass_roles: [admin, ...]`** (only valid with `identity_source: {type: auth_user}` and
+  `rbac.enabled: true`) lets listed roles see and act on every row, unfiltered.
+
+**What it changes elsewhere:**
+- The `owner: true` FK column (e.g. `user_id`) is **omitted from `Create`/`Update` schemas** —
+  a client-supplied value for it is silently dropped by Pydantic, not read — but still appears
+  on the `Response` schema. A `cascades_ownership: true` FK (e.g. `OrderItem.order_id`) is an
+  ordinary field on all three schemas, same as any other relationship FK.
+  `RlsRootOwnedOrderCreate` from `rls_root_owned.yml`, rendered, has only
+  `status: Optional[str] = 'pending'` — no `user_id` field at all.
+- **List and single-row reads are filtered to the resolved owner** (or unfiltered, for a
+  bypass-role caller). A non-owner's `GET`/`PUT`/`DELETE` on someone else's row returns a plain
+  **`404`**, identical to a nonexistent id — ownership is never distinguishable from
+  nonexistence.
+- **A cascaded write against a parent you don't own returns `400`**, the same status (and the
+  same code path) as a nonexistent FK — `POST /order_items` with an `order_id` belonging to
+  another owner fails exactly like `order_id: 999999` would.
+- RLS-affected entities always require a resolved identity to write, so `cascades_ownership`
+  entities also gain a `current_user` (or header) dependency on every route even when RBAC
+  imposes no role restriction on the action — the owner filter has to run either way.
+- All of the above is generated identically for `database.async_mode: true` — the RLS filter is
+  applied in the same `async def` repo/service/route functions the rest of the async stack uses.
+
 #### `endpoints`
 
 ```yaml

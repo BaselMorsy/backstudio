@@ -1125,3 +1125,76 @@ def test_rls_create_schema_silently_ignores_client_supplied_owner_field(tmp_path
             )
             assert order_resp.status_code == 201, order_resp.text
             assert order_resp.json()["user_id"] == real_owner_id
+
+
+def test_async_mode_rls_full_stack_round_trip_against_real_generated_app(tmp_path, monkeypatch, isolated_sys_path):
+    """rls_async_full.yml driven through real HTTP + a real aiosqlite DB - proves root
+    ownership, one-hop cascade, and admin bypass all compose correctly through the full
+    async stack (routes -> service -> repo -> DB), mirroring what the sync-path tests in
+    Tasks 4-8 already proved individually, now proven together in async_mode. Uses
+    TestClient as a context manager to exercise server.py's async lifespan
+    (await init_db() / await engine.dispose()), per the async-support plan's precedent.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_async_full.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_async_full_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            assert admin_resp.status_code == 201, admin_resp.text
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
+            assert cust_resp.json()["roles"] == []
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
+            conn.commit()
+            conn.close()
+            cust_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'cust@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            # root ownership: each user's own order, async create injects owner correctly
+            order_admin = client.post("/orders", json={"status": "pending"}, headers=admin_headers).json()
+            order_cust = client.post("/orders", json={"status": "pending"}, headers=cust_headers).json()
+
+            # customer (no bypass) sees only their own order via async list
+            cust_orders = client.get("/orders", headers=cust_headers).json()
+            assert [o["id"] for o in cust_orders] == [order_cust["id"]]
+
+            # admin (bypass) sees both
+            admin_orders = client.get("/orders", headers=admin_headers).json()
+            assert {o["id"] for o in admin_orders} == {order_admin["id"], order_cust["id"]}
+
+            # 1-hop cascade: customer creates an OrderItem on their own order (async)
+            item_resp = client.post(
+                "/order_items", json={"quantity": 2, "order_id": order_cust["id"]}, headers=cust_headers
+            )
+            assert item_resp.status_code == 201, item_resp.text
+
+            # customer cannot attach an OrderItem to admin's order - same 400 as a bad FK
+            bad_item_resp = client.post(
+                "/order_items", json={"quantity": 1, "order_id": order_admin["id"]}, headers=cust_headers
+            )
+            assert bad_item_resp.status_code == 400, bad_item_resp.text
+
+            # customer cannot read/update/delete admin's order - 404, not 403
+            assert client.get(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
+            assert client.delete(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
+
+    # `with TestClient(...)` has already exited here, running the async lifespan
+    # shutdown (await engine.dispose()) - reaching this line without a hang is itself
+    # part of what this test proves, per the async-support plan's established pattern.

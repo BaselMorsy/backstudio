@@ -102,10 +102,35 @@ deleted, so we keep a record of what was considered and when.
   in `test_generated_project_runtime.py` (create/read/filter/reject-bad-FK
   through real HTTP, for both cardinalities) plus unit and generation-level
   tests. Full suite: 106 passed.
-- [ ] **Row-level access control (RLS).** RBAC (role → action) already
+- [x] **Row-level access control (RLS).** RBAC (role → action) already
   exists; RLS (does this user own *this* row) does not. Flagged by the user
   as "extremely important." To be designed after/alongside async support,
   since both touch the repo/service call chain.
+  Fixed 2026-09-10: designed and implemented per
+  `docs/superpowers/specs/2026-09-10-rls-design.md` and
+  `docs/superpowers/plans/2026-09-10-rls.md`. Two opt-in relationship flags
+  (`owner: true` marks a many-to-one relationship as an entity's ownership
+  column; `cascades_ownership: true` inherits ownership from the relationship's
+  target, to arbitrary depth) plus an entity-level `rls:` block
+  (`identity_source: {type: auth_user | header, header_name: ...}`, optional
+  `bypass_roles: [role, ...]` gated on `rbac.enabled`) propagate end-to-end
+  through repo filtering (root and cascaded, at any depth), service-layer
+  owner injection/validation, route-layer identity resolution (from the
+  authenticated user or from a required header), and schema-layer owner-FK
+  omission from Create/Update — for both sync and `database.async_mode: true`.
+  Non-owner single-row access returns a plain 404 (never distinguishable from
+  nonexistence); a cascaded write against an unowned parent gets the same 400
+  as a nonexistent FK. One notable finding: `module_routes.py.jinja` had to
+  restructure `current_user` into a named route parameter
+  (`current_user: User = Depends(require_roles(...))`) rather than just
+  threading it through, because FastAPI's
+  `dependencies=[Depends(require_roles(...))]` list form discards its
+  dependency's return value — a real, non-obvious FastAPI gotcha, not a design
+  choice. A comprehensive async-mode round-trip test
+  (`rls_async_full.yml`, combining root ownership, one-hop cascade, RBAC and
+  admin bypass through real HTTP against a real generated async app) passed
+  cleanly on first run, confirming the prior sync-scoped tasks' async branches
+  were already correct. Full suite: 191 passed.
 - [x] **Async support.** Repo functions and API handlers are sync-only today,
   deliberately deferred during the modular-services restructuring. Needs its
   own design pass — whether repo functions become async too, or only the

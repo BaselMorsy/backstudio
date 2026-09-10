@@ -135,6 +135,7 @@ class RLSIdentitySource(BaseModel):
 class RLSSpec(BaseModel):
     identity_source: RLSIdentitySource
     bypass_roles: List[str] = Field(default_factory=list)
+    read_scope: Literal["owner", "any_authenticated"] = "owner"
 
 
 class RelationshipDecl(BaseModel):

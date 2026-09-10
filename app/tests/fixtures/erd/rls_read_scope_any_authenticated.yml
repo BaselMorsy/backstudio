@@ -1,0 +1,69 @@
+project:
+  name: RlsReadScopeAnyAuthenticated
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: rls_read_scope_any_authenticated.db
+
+auth:
+  enabled: true
+
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    create: []
+    list: []
+    read: []
+    update: []
+    delete: []
+
+entities:
+  - name: Tenant
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Note
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user
+      read_scope: any_authenticated
+
+  - name: Secret
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+    relationships:
+      - {name: user, cardinality: many-to-one, target: User, owner: true}
+    rls:
+      identity_source:
+        type: auth_user
+
+  - name: Announcement
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: body, type: string}
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source:
+        type: header
+        header_name: X-Tenant-Id
+      read_scope: any_authenticated
+
+services:
+  - name: tenants
+    entities: [Tenant]
+  - name: notes
+    entities: [Note]
+  - name: secrets
+    entities: [Secret]
+  - name: announcements
+    entities: [Announcement]

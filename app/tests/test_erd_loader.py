@@ -460,6 +460,70 @@ services:
         load_erd(bad)
 
 
+def test_rls_read_scope_any_authenticated_on_header_identity_requires_auth_enabled(tmp_path):
+    """read_scope: any_authenticated on a header-identity entity's list/read routes must
+    depend on a real authenticated-user check (see module_routes.py.jinja) - but that
+    dependency only exists to import when auth.enabled: true generates the auth module at
+    all. Without this guard, an ERD could declare a header-identity entity with
+    read_scope: any_authenticated and auth.enabled left false (header identity itself does
+    not require auth.enabled), which would generate routes referencing a nonexistent
+    _auth_service. Rejected at load time instead.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source: {type: header, header_name: X-Tenant-Id}
+      read_scope: any_authenticated
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="any_authenticated.*requires auth\\.enabled"):
+        load_erd(bad)
+
+
+def test_rls_read_scope_any_authenticated_on_header_identity_with_auth_enabled_loads(tmp_path):
+    """The read_scope: any_authenticated + header-identity + auth.enabled: true combination
+    (the fixture this task's runtime test uses) must load cleanly - the guard above only
+    rejects the unsafe auth.enabled: false case.
+    """
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      identity_source: {type: header, header_name: X-Tenant-Id}
+      read_scope: any_authenticated
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    erd = load_erd(ok)
+    order = next(e for e in erd.entities if e.name == "Order")
+    assert order.rls.read_scope == "any_authenticated"
+
+
 def test_rls_auth_user_identity_source_requires_target_user(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text(

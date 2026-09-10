@@ -300,6 +300,7 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
                 "join_chain": [],
                 "identity_source": entity.rls.identity_source.model_dump(mode="json"),
                 "bypass_roles": list(entity.rls.bypass_roles),
+                "read_scope": entity.rls.read_scope,
             }
             model["rls"] = rls
             owner_rel["is_rls_link"] = True
@@ -336,6 +337,7 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
             "join_chain": [hop] + parent_rls["join_chain"],
             "identity_source": parent_rls["identity_source"],
             "bypass_roles": parent_rls["bypass_roles"],
+            "read_scope": parent_rls["read_scope"],
         }
         model["rls"] = rls
         cascade_rel["is_rls_link"] = True

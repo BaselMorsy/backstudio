@@ -74,6 +74,16 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
                     "owner entity needs rls.identity_source.type: header instead."
                 )
 
+        if entity.rls.read_scope == "any_authenticated" and source.type == "header":
+            if not erd.auth.enabled:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.read_scope 'any_authenticated' on a "
+                    "header-identity entity requires auth.enabled: true — the generated "
+                    "list/read routes must depend on a real authenticated-user check so that "
+                    "'any_authenticated' genuinely means 'the caller presented a valid JWT', "
+                    "and there is no auth module generated to depend on otherwise."
+                )
+
         if entity.rls.bypass_roles:
             if source.type == "header":
                 raise ERDValidationError(

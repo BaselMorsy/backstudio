@@ -882,6 +882,7 @@ def test_translate_resolves_root_owned_entity():
         "join_chain": [],
         "identity_source": {"type": "auth_user", "header_name": None},
         "bypass_roles": ["admin"],
+        "read_scope": "owner",
     }
 
     user_rel = next(r for r in order["owned_relationships"] if r["fk_column"] == "user_id")
@@ -891,6 +892,27 @@ def test_translate_resolves_root_owned_entity():
     assert module_order["rls"] == order["rls"]
     module_user_rel = next(r for r in module_order["owned_relationships"] if r["fk_column"] == "user_id")
     assert module_user_rel["is_rls_link"] is True
+
+
+def test_translate_resolves_read_scope_any_authenticated_on_root_owned_entity():
+    """RLSSpec.read_scope defaults to 'owner' (already covered above); this confirms an
+    entity that explicitly sets read_scope: any_authenticated has that value threaded
+    through into its resolved rls dict, and that a sibling entity in the same ERD that
+    leaves it unset still resolves to the 'owner' default - the default is genuinely
+    per-entity, not globally flipped by another entity opting in.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_read_scope_any_authenticated.yml")
+    state = translate(erd)
+
+    note = next(m for m in state["data_models"] if m["name"] == "Note")
+    assert note["rls"]["read_scope"] == "any_authenticated"
+
+    secret = next(m for m in state["data_models"] if m["name"] == "Secret")
+    assert secret["rls"]["read_scope"] == "owner"
+
+    announcement = next(m for m in state["data_models"] if m["name"] == "Announcement")
+    assert announcement["rls"]["read_scope"] == "any_authenticated"
+    assert announcement["rls"]["identity_source"]["type"] == "header"
 
 
 def test_translate_resolves_one_hop_cascade():
@@ -906,6 +928,9 @@ def test_translate_resolves_one_hop_cascade():
     ]
     assert order_item["rls"]["identity_source"] == {"type": "auth_user", "header_name": None}
     assert order_item["rls"]["bypass_roles"] == []
+    # A cascade-owned entity's rls dict is a full copy propagated from its root - it has no
+    # rls: block of its own to read read_scope from, so this must come from the root too.
+    assert order_item["rls"]["read_scope"] == "owner"
 
     order_rel = next(r for r in order_item["owned_relationships"] if r["fk_column"] == "order_id")
     assert order_rel["is_rls_link"] is True

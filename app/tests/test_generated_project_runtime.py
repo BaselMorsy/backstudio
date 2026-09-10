@@ -1766,3 +1766,127 @@ def test_free_text_project_fields_with_quotes_backslashes_and_unicode_generate_a
     models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
     ast.parse(models_src)
     assert "default=\"O'Brien's\"" in models_src
+
+
+def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monkeypatch, isolated_sys_path):
+    """rls_read_scope_any_authenticated.yml: `read_scope: any_authenticated` makes
+    list/read visible to ANY authenticated caller (not just the owner or a bypass
+    role), while create/update/delete stay exactly owner-filtered/owner-stamped -
+    proven against a sibling entity (Secret) that leaves read_scope at its default
+    ('owner') in the very same fixture, to show the default is genuinely unaffected.
+
+    Also covers the header-identity entity (Announcement): today, a header-identity
+    entity's list/read routes carry no authentication dependency at all - only the
+    header parameter. Without this task's Step 4 fix, `read_scope: any_authenticated`
+    on such an entity (with this fixture's RBAC config resolving to *no* required
+    roles for list/read - an "empty effective RBAC" case) would silently become a
+    fully open, unauthenticated endpoint. The unauthenticated-request-gets-401
+    assertion below is the regression guard for exactly that gap.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_read_scope_any_authenticated.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_read_scope_any_authenticated_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # --- register two independent users; neither needs (nor gets) any
+            # special role - this fixture's rbac.default_permissions are all empty,
+            # so RBAC never gates anything here, only authentication + RLS do.
+            a_resp = client.post("/auth/register", json={"email": "a@example.com", "password": "supersecret123"})
+            assert a_resp.status_code == 201, a_resp.text
+            a_login = client.post("/auth/login", json={"email": "a@example.com", "password": "supersecret123"})
+            assert a_login.status_code == 200, a_login.text
+            a_headers = {"Authorization": f"Bearer {a_login.json()['access_token']}"}
+
+            b_resp = client.post("/auth/register", json={"email": "b@example.com", "password": "supersecret123"})
+            assert b_resp.status_code == 201, b_resp.text
+            b_login = client.post("/auth/login", json={"email": "b@example.com", "password": "supersecret123"})
+            assert b_login.status_code == 200, b_login.text
+            b_headers = {"Authorization": f"Bearer {b_login.json()['access_token']}"}
+
+            # ================= Note (read_scope: any_authenticated) =================
+            # 1. User A creates a Note - owned by A.
+            note = client.post("/notes", json={"body": "A's note"}, headers=a_headers).json()
+            assert note["user_id"] == a_resp.json()["id"]
+
+            # 2. User B (a different user, no special role) can see A's note via both
+            # list and get-by-id - the new any_authenticated behavior.
+            b_list = client.get("/notes", headers=b_headers).json()
+            assert [n["id"] for n in b_list] == [note["id"]]
+
+            b_get = client.get(f"/notes/{note['id']}", headers=b_headers)
+            assert b_get.status_code == 200, b_get.text
+            assert b_get.json()["id"] == note["id"]
+
+            # 3. User B's writes against A's Note are still owner-filtered - a plain
+            # 404, exactly like a non-any_authenticated entity - proving read_scope
+            # has no effect whatsoever on create/update/delete.
+            assert client.put(
+                f"/notes/{note['id']}", json={"body": "hijacked"}, headers=b_headers
+            ).status_code == 404
+            assert client.delete(f"/notes/{note['id']}", headers=b_headers).status_code == 404
+
+            # ...and A can still update/delete its own Note normally.
+            assert client.put(
+                f"/notes/{note['id']}", json={"body": "A's note, edited"}, headers=a_headers
+            ).status_code == 200
+
+            # ================= Secret (default read_scope: owner) =================
+            # 4. Sibling entity in the SAME fixture that does NOT set read_scope:
+            # today's exact, unaffected default behavior - user B's read 404s.
+            secret = client.post("/secrets", json={"body": "A's secret"}, headers=a_headers).json()
+
+            assert client.get("/secrets", headers=b_headers).json() == []
+            assert client.get(f"/secrets/{secret['id']}", headers=b_headers).status_code == 404
+
+            # A can still see its own secret - the default path still works at all.
+            assert client.get(f"/secrets/{secret['id']}", headers=a_headers).status_code == 200
+
+            # ================= Announcement (header identity, any_authenticated) =====
+            # A header-identity entity with read_scope: any_authenticated. Create is
+            # unaffected by this task (still header-only, no JWT required).
+            tenant = client.post("/tenants", json={"name": "Acme"}, headers=a_headers).json()
+            announcement = client.post(
+                "/announcements",
+                json={"body": "hello tenants"},
+                headers={"X-Tenant-Id": str(tenant["id"])},
+            ).json()
+
+            # An authenticated caller sees it via list/read with NO X-Tenant-Id header
+            # at all - ownership filtering is bypassed entirely for any_authenticated,
+            # and the header parameter isn't even part of these routes' signature.
+            auth_list = client.get("/announcements", headers=b_headers).json()
+            assert [a["id"] for a in auth_list] == [announcement["id"]]
+            auth_get = client.get(f"/announcements/{announcement['id']}", headers=b_headers)
+            assert auth_get.status_code == 200, auth_get.text
+
+            # 5. THE CRITICAL ASSERTION: an unauthenticated request (no Authorization
+            # header at all) to this header-identity entity's list/read routes is
+            # REJECTED, not silently allowed. Before Step 4's fix, a header-identity
+            # entity's list/read routes carried no auth dependency whatsoever - only
+            # the (now-removed, for this case) header parameter - so with this
+            # fixture's RBAC resolving to no required roles for list/read, this would
+            # have been a fully open, unauthenticated endpoint. This is the regression
+            # test for that gap.
+            unauth_list_resp = client.get("/announcements")
+            assert unauth_list_resp.status_code in (401, 403), unauth_list_resp.text
+            unauth_get_resp = client.get(f"/announcements/{announcement['id']}")
+            assert unauth_get_resp.status_code in (401, 403), unauth_get_resp.text
+
+            # ...and, for completeness, the same is true for the auth_user-identity
+            # Note entity's list/read (already guaranteed pre-existing behavior, but
+            # worth re-confirming it wasn't broken by this task's changes).
+            assert client.get("/notes").status_code in (401, 403)
+            assert client.get(f"/notes/{note['id']}").status_code in (401, 403)

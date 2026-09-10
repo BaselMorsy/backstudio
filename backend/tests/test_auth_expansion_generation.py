@@ -440,3 +440,80 @@ def test_admin_service_methods_actually_work_against_a_real_db(tmp_path):
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_unconditional_new_schemas_always_present(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # open mode
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "auth" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+    assert "class SetUserRolesRequest(BaseModel):" in schemas_src
+    assert "class ForgotPasswordRequest(BaseModel):" in schemas_src
+    assert "class ResetPasswordRequest(BaseModel):" in schemas_src
+    assert "class MessageResponse(BaseModel):" in schemas_src
+
+    # open mode: email_verification-only schemas must be absent
+    assert "class VerifyEmailRequest(BaseModel):" not in schemas_src
+    assert "class ResendVerificationRequest(BaseModel):" not in schemas_src
+
+    # open mode: UserResponse must not have is_verified/is_approved
+    resp_start = schemas_src.index("class UserResponse(")
+    resp_src = schemas_src[resp_start:]
+    assert "is_verified" not in resp_src
+    assert "is_approved" not in resp_src
+
+
+def test_email_verification_mode_schemas(tmp_path):
+    erd = load_erd(f"{FIXTURES}/auth_email_verification.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "auth" / "schemas.py").read_text(encoding="utf-8")
+    ast.parse(schemas_src)
+    assert "class VerifyEmailRequest(BaseModel):" in schemas_src
+    assert "class ResendVerificationRequest(BaseModel):" in schemas_src
+
+    resp_start = schemas_src.index("class UserResponse(")
+    resp_end = schemas_src.index("\n    class Config:", resp_start)
+    resp_src = schemas_src[resp_start:resp_end]
+    assert "is_verified: bool" in resp_src
+    assert "is_approved" not in resp_src
+
+
+def test_admin_approval_mode_user_response_schema(tmp_path):
+    erd = load_erd(f"{FIXTURES}/auth_admin_approval.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "auth" / "schemas.py").read_text(encoding="utf-8")
+    resp_start = schemas_src.index("class UserResponse(")
+    resp_end = schemas_src.index("\n    class Config:", resp_start)
+    resp_src = schemas_src[resp_start:resp_end]
+    assert "is_approved: bool" in resp_src
+    assert "is_verified" not in resp_src
+
+    # admin_approval mode has no email flow - these two must still be absent
+    assert "class VerifyEmailRequest(BaseModel):" not in schemas_src
+    assert "class ResendVerificationRequest(BaseModel):" not in schemas_src
+
+
+def test_reset_password_request_enforces_min_length(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    schemas_src = (codebase_dir / "modules" / "auth" / "schemas.py").read_text(encoding="utf-8")
+    reset_start = schemas_src.index("class ResetPasswordRequest(")
+    reset_end = schemas_src.index("\n\n\n", reset_start)
+    reset_src = schemas_src[reset_start:reset_end]
+    assert "min_length=8" in reset_src

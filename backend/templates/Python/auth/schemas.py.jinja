@@ -24,11 +24,43 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class MessageResponse(BaseModel):
+    message: str
+
+
+class SetUserRolesRequest(BaseModel):
+    roles: List[str]
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+
+{% if project.registration_mode == 'email_verification' %}
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+{% endif %}
 class UserResponse(BaseModel):
     id: int
     email: str
     roles: List[str] = []
     is_active: bool
+{% if project.registration_mode == 'email_verification' %}
+    is_verified: bool
+{% elif project.registration_mode == 'admin_approval' %}
+    is_approved: bool
+{% endif %}
 
     class Config:
         from_attributes = True

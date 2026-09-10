@@ -395,10 +395,16 @@ entities:
   required request header instead of the authenticated user — no `auth.enabled` needed. Every
   generated route gains `rls_owner_header: int = Header(..., alias="X-Tenant-Id")`; a request
   missing that header gets FastAPI's own native `422`, with no custom error handling involved.
-  `bypass_roles` isn't meaningful here (there's no authenticated caller to hold a role) and is
-  rejected together with `type: header` at validation time.
-- **`bypass_roles: [admin, ...]`** (only valid with `identity_source: {type: auth_user}` and
-  `rbac.enabled: true`) lets listed roles see and act on every row, unfiltered.
+  A `header`-sourced entity can still coexist with `auth.enabled`/`rbac.enabled: true` elsewhere
+  in the same project (e.g. RBAC gating who may call the route at all, while the header — not
+  the caller — still governs ownership); `rls_header_owned_with_rbac.yml` is exactly this
+  combination, and it's real and tested. `bypass_roles`, however, is only ever consulted from the
+  *authenticated caller's* roles, so it has no source to read from on a `header`-sourced entity:
+  setting it there isn't rejected — it's simply inert, unused configuration.
+- **`bypass_roles: [admin, ...]`** lets listed roles see and act on every row, unfiltered — but
+  it's only ever read for `identity_source: {type: auth_user}` (where `current_user`'s roles are
+  available to check); on a `header`-sourced entity it's silently ignored. Requires
+  `rbac.enabled: true` regardless.
 
 **What it changes elsewhere:**
 - The `owner: true` FK column (e.g. `user_id`) is **omitted from `Create`/`Update` schemas** —

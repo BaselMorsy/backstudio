@@ -133,3 +133,162 @@ def test_root_owned_filtering_actually_works_against_a_real_db(tmp_path):
         for mod_name in list(sys.modules):
             if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
                 sys.modules.pop(mod_name, None)
+
+
+def test_cascade_owned_repo_functions_render_join_chain(tmp_path):
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    ast.parse(repo_src)
+
+    one_hop_start = repo_src.index("def get_order_item_by_id(")
+    one_hop_end = repo_src.index("\ndef get_all_order_items(")
+    one_hop_src = repo_src[one_hop_start:one_hop_end]
+    assert "query.join(Order, OrderItem.order_id == Order.id)" in one_hop_src
+    assert "Order.user_id == owner_id" in one_hop_src
+
+    two_hop_start = repo_src.index("def get_order_line_discount_by_id(")
+    two_hop_end = repo_src.index("\ndef get_all_order_line_discounts(")
+    two_hop_src = repo_src[two_hop_start:two_hop_end]
+    assert "query.join(OrderItem, OrderLineDiscount.order_item_id == OrderItem.id)" in two_hop_src
+    assert "query.join(Order, OrderItem.order_id == Order.id)" in two_hop_src
+    assert "Order.user_id == owner_id" in two_hop_src
+
+    # Category is not reachable from any owner:true entity - completely unaffected
+    category_start = repo_src.index("def get_category_by_id(")
+    category_end = repo_src.index("\ndef get_all_categories(")
+    assert "owner_id" not in repo_src[category_start:category_end]
+
+
+def test_cascade_owned_filtering_actually_works_against_a_real_db_at_two_hops(tmp_path):
+    """Live proof at both hop depths in one flow: two owners, each with their own Order ->
+    OrderItem -> OrderLineDiscount chain; owner_id correctly isolates each owner's full
+    chain at every depth, and Category (unrelated) never takes an owner_id at all.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_owned.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_cascade_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        repo = importlib.import_module("database.repo")
+        auth_service = importlib.import_module("modules.auth.service")
+
+        database_base.init_db()
+        service = auth_service.get_auth_service()
+        db = database_base.SessionLocal()
+        try:
+            owner1 = service.register_user(db, "owner1@example.com", "supersecret123")
+            owner2 = service.register_user(db, "owner2@example.com", "supersecret123")
+
+            order1 = repo.create_order(db, {"status": "pending", "user_id": owner1.id})
+            order2 = repo.create_order(db, {"status": "pending", "user_id": owner2.id})
+
+            item1 = repo.create_order_item(db, {"quantity": 1, "order_id": order1.id})
+            item2 = repo.create_order_item(db, {"quantity": 1, "order_id": order2.id})
+
+            discount1 = repo.create_order_line_discount(db, {"percent_off": 10.0, "order_item_id": item1.id})
+            discount2 = repo.create_order_line_discount(db, {"percent_off": 10.0, "order_item_id": item2.id})
+
+            # 1-hop: owner_id isolates each owner's OrderItem
+            assert [i.id for i in repo.get_all_order_items(db, owner_id=owner1.id)] == [item1.id]
+            assert repo.get_order_item_by_id(db, item2.id, owner_id=owner1.id) is None
+            assert repo.get_order_item_by_id(db, item1.id, owner_id=owner1.id) is not None
+
+            # 2-hop: owner_id isolates each owner's OrderLineDiscount
+            assert [d.id for d in repo.get_all_order_line_discounts(db, owner_id=owner1.id)] == [discount1.id]
+            assert repo.get_order_line_discount_by_id(db, discount2.id, owner_id=owner1.id) is None
+            assert repo.get_order_line_discount_by_id(db, discount1.id, owner_id=owner1.id) is not None
+
+            # owner1 cannot delete owner2's OrderLineDiscount via the 2-hop chain
+            assert repo.delete_order_line_discount(db, discount2.id, owner_id=owner1.id) is False
+            assert repo.get_order_line_discount_by_id(db, discount2.id, owner_id=owner2.id) is not None
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)
+
+
+def test_cascade_owner_id_composes_with_an_existing_owned_relationship_filter(tmp_path):
+    """OrderItem.product_id (an ordinary owned_relationship, unrelated to ownership) and
+    OrderItem's RLS owner_id filter (via its cascades_ownership chain to Order) must both
+    apply in the same get_all_order_items() call - two ANDed WHERE clauses, not one
+    overwriting the other.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_cascade_composability.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
+    get_all_start = repo_src.index("def get_all_order_items(")
+    get_all_end = repo_src.index("\ndef update_order_item(")
+    get_all_src = repo_src[get_all_start:get_all_end]
+    assert "product_id: Optional[int] = None" in get_all_src
+    assert "owner_id: Optional[int] = None" in get_all_src
+    assert "OrderItem.product_id == product_id" in get_all_src
+    assert "Order.user_id == owner_id" in get_all_src
+
+    db_path = tmp_path / "rls_composability_test.db"
+
+    import sys
+    sys.path.insert(0, str(codebase_dir))
+    try:
+        import importlib
+        import os
+        os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
+        os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
+        os.environ["DEBUG"] = "True"
+
+        database_base = importlib.import_module("database.base")
+        repo = importlib.import_module("database.repo")
+        auth_service = importlib.import_module("modules.auth.service")
+
+        database_base.init_db()
+        service = auth_service.get_auth_service()
+        db = database_base.SessionLocal()
+        try:
+            owner1 = service.register_user(db, "owner1@example.com", "supersecret123")
+            product_a = repo.create_product(db, {"name": "A"})
+            product_b = repo.create_product(db, {"name": "B"})
+            order1 = repo.create_order(db, {"status": "pending", "user_id": owner1.id})
+
+            item_a = repo.create_order_item(db, {"quantity": 1, "order_id": order1.id, "product_id": product_a.id})
+            repo.create_order_item(db, {"quantity": 1, "order_id": order1.id, "product_id": product_b.id})
+
+            # both filters together narrow to exactly one row
+            filtered = repo.get_all_order_items(db, owner_id=owner1.id, product_id=product_a.id)
+            assert [i.id for i in filtered] == [item_a.id]
+        finally:
+            db.close()
+    finally:
+        sys.path.remove(str(codebase_dir))
+        os.environ.pop("DATABASE_URL", None)
+        os.environ.pop("JWT_SECRET", None)
+        os.environ.pop("DEBUG", None)
+        for mod_name in list(sys.modules):
+            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+                sys.modules.pop(mod_name, None)

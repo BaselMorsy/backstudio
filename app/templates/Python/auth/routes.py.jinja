@@ -1,4 +1,4 @@
-"""{{ project.name }} - {{ project.auth_module_name }} routes"""
+"""{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} routes"""
 
 {% set is_async = project.database_config.async_mode %}
 from typing import List

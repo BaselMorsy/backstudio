@@ -1,4 +1,4 @@
-"""{{ project.name }} - Dependency injection"""
+"""{{ project.name|replace('"', '\\"') }} - Dependency injection"""
 
 from fastapi import Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session

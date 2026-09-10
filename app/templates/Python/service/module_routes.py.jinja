@@ -1,4 +1,4 @@
-"""{{ project.name }} - {{ module.name }} routes (auto-generated CRUD)"""
+"""{{ project.name|replace('"', '\\"') }} - {{ module.name }} routes (auto-generated CRUD)"""
 
 {% set is_async = project.database_config.async_mode %}
 {% set has_owned_rel = (module.entities|map(attribute='owned_relationships')|map('length')|sum) > 0 %}

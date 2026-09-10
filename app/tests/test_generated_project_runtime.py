@@ -15,6 +15,7 @@ These tests generate a real project onto disk, actually run it (import the
 FastAPI app and drive it with TestClient; actually invoke the `alembic`
 CLI), and would have caught both regressions.
 """
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -1675,3 +1676,93 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
     # shutdown (await engine.dispose()) - reaching this line without a hang is
     # itself part of what this test proves, per the established precedent from
     # the async-support and RLS plans.
+
+
+def test_free_text_project_fields_with_quotes_backslashes_and_unicode_generate_and_byte_compile(tmp_path):
+    """Regression test for the free-text-ERD-field escaping bug fixed by this task:
+    `project.name`, `project.description`, and a `ModelField.default` used to be
+    embedded unescaped into generated Python source (`title="{{ project.name }}"`,
+    a raw f"'{value}'" for field defaults, etc.), so any value containing a `"`
+    (or, for a field default, a `'`) broke the generated project outright with a
+    SyntaxError. quote_stress.yml's project.name/description each carry a literal
+    `"`, a backslash `\\`, and a non-ASCII character; Item.label's default carries
+    a literal `'`.
+
+    Generation is driven via `CodeGenerator._generate_fastapi_project(...)`
+    directly, passing an already-created safe `tmp_path` subdirectory as the
+    output directory, rather than the public `generate_project()` - which
+    computes its output directory as `self.output_dir / project_state['name']`,
+    i.e. the very same unsanitized free-text value under test. `"` is also an
+    illegal NTFS/Windows filename character, so a project.name containing one
+    makes `generate_project()` raise `OSError` (WinError 123) at the directory-
+    creation step, before any template is even rendered. That is a real, but
+    separate and pre-existing, bug (unsanitized free text used as a filesystem
+    path segment - not free text embedded in generated Python source) which is
+    out of this task's template-escaping scope; see the task report. Calling
+    `_generate_fastapi_project` directly exercises exactly the template
+    rendering this test needs to cover without tripping that unrelated bug.
+    """
+    erd = load_erd(f"{FIXTURES}/quote_stress.yml")
+    state = translate(erd)
+
+    # Sanity: the fixture actually carries the dangerous characters under test.
+    assert '"' in state["name"] and "\\" in state["name"] and "café" in state["name"]
+    assert '"' in state["description"] and "\\" in state["description"]
+    label_field = state["data_models"][0]["fields"][1]
+    assert label_field["name"] == "label"
+    assert label_field["default"] == "O'Brien's"
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = tmp_path / "codebase"
+    codebase_dir.mkdir()
+    generator._generate_fastapi_project(state, codebase_dir)
+
+    # 1. Every generated .py file must byte-compile - this is what used to raise
+    # SyntaxError (or worse, silently produce a project that imports with a
+    # semantically wrong string) before the fix.
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    # 2. server.py: title=/description=/"name": must parse AND round-trip the
+    # original quote/backslash/unicode content exactly - not just "doesn't crash".
+    server_src = (codebase_dir / "server.py").read_text(encoding="utf-8")
+    tree = ast.parse(server_src)  # would raise SyntaxError before the fix
+
+    title_line = next(l for l in server_src.splitlines() if l.strip().startswith("title="))
+    title_value = ast.literal_eval(title_line.strip()[len("title="):].rstrip(","))
+    assert title_value == state["name"]
+
+    description_line = next(
+        l for l in server_src.splitlines() if l.strip().startswith("description=")
+    )
+    description_value = ast.literal_eval(
+        description_line.strip()[len("description="):].rstrip(",")
+    )
+    assert description_value == state["description"]
+
+    name_field_line = next(l for l in server_src.splitlines() if l.strip().startswith('"name":'))
+    name_field_value = ast.literal_eval(name_field_line.strip()[len('"name":'):].rstrip(",").strip())
+    assert name_field_value == state["name"]
+
+    # Module docstring (the |replace('"', '\\"') fix): the raw name is still
+    # fully recoverable, not stripped or mangled.
+    docstring = ast.get_docstring(tree)
+    assert docstring == f"{state['name']} - Main server application"
+
+    # 3. config.py: APP_NAME and the DATABASE_URL default must also round-trip.
+    config_src = (codebase_dir / "config.py").read_text(encoding="utf-8")
+    ast.parse(config_src)
+    app_name_line = next(l for l in config_src.splitlines() if l.strip().startswith("APP_NAME:"))
+    app_name_value = ast.literal_eval(app_name_line.split("=", 1)[1].strip())
+    assert app_name_value == state["name"]
+
+    # 4. database/models.py: the ModelField.default containing a literal `'` must
+    # render via repr() (which picks the non-colliding quote character), not the
+    # old unescaped f"'{value}'".
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    ast.parse(models_src)
+    assert "default=\"O'Brien's\"" in models_src

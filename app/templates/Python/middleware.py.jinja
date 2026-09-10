@@ -1,4 +1,4 @@
-"""{{ project.name }} - Middleware components"""
+"""{{ project.name|replace('"', '\\"') }} - Middleware components"""
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware

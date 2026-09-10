@@ -1,4 +1,4 @@
-"""{{ project.name }} - {{ project.auth_module_name }} email stub"""
+"""{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} email stub"""
 
 
 def send_email(to: str, subject: str, body: str) -> None:

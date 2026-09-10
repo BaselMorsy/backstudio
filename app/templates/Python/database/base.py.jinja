@@ -1,4 +1,4 @@
-"""{{ project.name }} - Database base configuration"""
+"""{{ project.name|replace('"', '\\"') }} - Database base configuration"""
 
 {% if project.database_config.async_mode %}
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker

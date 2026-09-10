@@ -1,4 +1,4 @@
-"""{{ project.name }} - {{ module.name }} service"""
+"""{{ project.name|replace('"', '\\"') }} - {{ module.name }} service"""
 
 {% set is_async = project.database_config.async_mode %}
 from typing import List, Optional

@@ -81,7 +81,7 @@ class CodeGenerator:
             if isinstance(value, bool):
                 return 'True' if value else 'False'
             elif isinstance(value, str):
-                return f"'{value}'"
+                return repr(value)
             elif value is None:
                 return 'None'
             else:

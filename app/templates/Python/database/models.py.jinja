@@ -1,4 +1,4 @@
-"""{{ project.name }} - Database models"""
+"""{{ project.name|replace('"', '\\"') }} - Database models"""
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, Text, JSON, ForeignKey, Table
 from sqlalchemy.orm import relationship

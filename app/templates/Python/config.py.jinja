@@ -1,4 +1,4 @@
-"""{{ project.name }} - Configuration settings"""
+"""{{ project.name|replace('"', '\\"') }} - Configuration settings"""
 
 import os
 from dotenv import load_dotenv
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "{% if project.database_config.async_mode %}sqlite+aiosqlite{% else %}sqlite{% endif %}:///./{{ project.name|snake_case }}.db"  # Default to SQLite for easy testing
+        {{ (("sqlite+aiosqlite" if project.database_config.async_mode else "sqlite") ~ ":///./" ~ project.name|snake_case ~ ".db")|tojson }}  # Default to SQLite for easy testing
     )
 
     {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
 
     # Application
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
-    APP_NAME: str = "{{ project.name }}"
+    APP_NAME: str = {{ project.name|tojson }}
     APP_VERSION: str = "{{ project.version }}"
 
     class Config:

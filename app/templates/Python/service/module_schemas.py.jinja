@@ -1,4 +1,4 @@
-"""{{ project.name }} - {{ module.name }} schemas (auto-generated CRUD)"""
+"""{{ project.name|replace('"', '\\"') }} - {{ module.name }} schemas (auto-generated CRUD)"""
 
 {% set json_fields = module.entities|map(attribute='fields')|sum(start=[])|selectattr('type', 'equalto', 'json')|list %}
 {% set has_m2m = (module.entities|map(attribute='many_to_many_relationships')|map('length')|sum) > 0 %}

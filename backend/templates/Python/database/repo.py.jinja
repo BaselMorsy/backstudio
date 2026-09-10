@@ -39,33 +39,52 @@ def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
 
 
 {% if project.database_config.async_mode %}
-async def get_{{ model.name|snake_case }}_by_id(db: AsyncSession, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
+async def get_{{ model.name|snake_case }}_by_id(db: AsyncSession, {{ model.name|snake_case }}_id: int{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ model.name|pascal_case }}]:
     """Get {{ model.name }} by ID"""
     stmt = select({{ model.name|pascal_case }})
 {% for rel in model.many_to_many_relationships %}
     stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
+{% if model.rls %}
+{% for hop in model.rls.join_chain %}
+    stmt = stmt.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
+{% endfor %}
+{% endif %}
     {% set pk_field = model.fields|selectattr('primary_key')|first %}
     {% if pk_field %}
     stmt = stmt.where({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id)
     {%- else %}
     stmt = stmt.where({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id)
     {%- endif +%}
+{% if model.rls %}
+    if owner_id is not None:
+        stmt = stmt.where({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% endif %}
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 {% else %}
-def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case }}_id: int) -> Optional[{{ model.name|pascal_case }}]:
+def get_{{ model.name|snake_case }}_by_id(db: Session, {{ model.name|snake_case }}_id: int{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ model.name|pascal_case }}]:
     """Get {{ model.name }} by ID"""
     query = db.query({{ model.name|pascal_case }})
 {% for rel in model.many_to_many_relationships %}
     query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
+{% if model.rls %}
+{% for hop in model.rls.join_chain %}
+    query = query.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
+{% endfor %}
+{% endif %}
     {% set pk_field = model.fields|selectattr('primary_key')|first %}
     {% if pk_field %}
-    return query.filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id).first()
+    query = query.filter({{ model.name|pascal_case }}.{{ pk_field.name }} == {{ model.name|snake_case }}_id)
     {%- else %}
-    return query.filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id).first()
-    {%- endif %}
+    query = query.filter({{ model.name|pascal_case }}.id == {{ model.name|snake_case }}_id)
+    {%- endif +%}
+{% if model.rls %}
+    if owner_id is not None:
+        query = query.filter({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% endif %}
+    return query.first()
 {% endif %}
 
 
@@ -95,16 +114,28 @@ async def get_all_{{ model.plural_snake }}(
 {% for rel in model.owned_relationships %}
     {{ rel.fk_column }}: Optional[int] = None,
 {% endfor %}
+{% if model.rls %}
+    owner_id: Optional[int] = None,
+{% endif %}
 ) -> List[{{ model.name|pascal_case }}]:
     """Get all {{ model.name }}s with pagination"""
     stmt = select({{ model.name|pascal_case }})
 {% for rel in model.many_to_many_relationships %}
     stmt = stmt.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
+{% if model.rls %}
+{% for hop in model.rls.join_chain %}
+    stmt = stmt.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
+{% endfor %}
+{% endif %}
 {% for rel in model.owned_relationships %}
     if {{ rel.fk_column }} is not None:
         stmt = stmt.where({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
 {% endfor %}
+{% if model.rls %}
+    if owner_id is not None:
+        stmt = stmt.where({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% endif %}
     stmt = stmt.offset(skip).limit(limit)
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -116,24 +147,36 @@ def get_all_{{ model.plural_snake }}(
 {% for rel in model.owned_relationships %}
     {{ rel.fk_column }}: Optional[int] = None,
 {% endfor %}
+{% if model.rls %}
+    owner_id: Optional[int] = None,
+{% endif %}
 ) -> List[{{ model.name|pascal_case }}]:
     """Get all {{ model.name }}s with pagination"""
     query = db.query({{ model.name|pascal_case }})
 {% for rel in model.many_to_many_relationships %}
     query = query.options(selectinload({{ model.name|pascal_case }}.{{ rel.attribute }}))
 {% endfor %}
+{% if model.rls %}
+{% for hop in model.rls.join_chain %}
+    query = query.join({{ hop.to_model }}, {{ hop.from_model }}.{{ hop.from_fk_column }} == {{ hop.to_model }}.{{ hop.to_pk_column }})
+{% endfor %}
+{% endif %}
 {% for rel in model.owned_relationships %}
     if {{ rel.fk_column }} is not None:
         query = query.filter({{ model.name|pascal_case }}.{{ rel.fk_column }} == {{ rel.fk_column }})
 {% endfor %}
+{% if model.rls %}
+    if owner_id is not None:
+        query = query.filter({{ model.rls.root_model }}.{{ model.rls.owner_fk_column }} == owner_id)
+{% endif %}
     return query.offset(skip).limit(limit).all()
 {% endif %}
 
 
 {% if project.database_config.async_mode %}
-async def update_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:
+async def update_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int, update_data: dict{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ model.name|pascal_case }}]:
     """Update {{ model.name }}"""
-    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id{% if model.rls %}, owner_id=owner_id{% endif %})
     if {{ model.name|snake_case }}:
         for key, value in update_data.items():
             setattr({{ model.name|snake_case }}, key, value)
@@ -141,9 +184,9 @@ async def update_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|sna
         await db.refresh({{ model.name|snake_case }})
     return {{ model.name|snake_case }}
 {% else %}
-def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int, update_data: dict) -> Optional[{{ model.name|pascal_case }}]:
+def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int, update_data: dict{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ model.name|pascal_case }}]:
     """Update {{ model.name }}"""
-    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id{% if model.rls %}, owner_id=owner_id{% endif %})
     if {{ model.name|snake_case }}:
         for key, value in update_data.items():
             setattr({{ model.name|snake_case }}, key, value)
@@ -154,18 +197,18 @@ def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
 
 
 {% if project.database_config.async_mode %}
-async def delete_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int) -> bool:
+async def delete_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> bool:
     """Delete {{ model.name }}"""
-    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    {{ model.name|snake_case }} = await get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id{% if model.rls %}, owner_id=owner_id{% endif %})
     if {{ model.name|snake_case }}:
         await db.delete({{ model.name|snake_case }})
         await db.commit()
         return True
     return False
 {% else %}
-def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int) -> bool:
+def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_id: int{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> bool:
     """Delete {{ model.name }}"""
-    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id)
+    {{ model.name|snake_case }} = get_{{ model.name|snake_case }}_by_id(db, {{ model.name|snake_case }}_id{% if model.rls %}, owner_id=owner_id{% endif %})
     if {{ model.name|snake_case }}:
         db.delete({{ model.name|snake_case }})
         db.commit()

@@ -48,7 +48,7 @@ Pydantic's own per-field validation.
 | `use_env_vars` | `bool` | default `True` | Whether the generated project reads connection settings from environment variables rather than hardcoding them. |
 | `pool_size` | `int` | default `10` | SQLAlchemy connection pool size. |
 | `echo` | `bool` | default `False` | Whether SQLAlchemy logs all executed SQL (`echo=True`). |
-| `async_mode` | `bool` | default `False` | When `true`, generates an async SQLAlchemy engine/session stack (`asyncpg`/`aiomysql`/`aiosqlite` driver, async-aware Alembic `env.py` using `run_sync()`, async repository/service/route layers) instead of the default sync stack. See `docs-site/features/async.md` for the full generated-code mechanics. |
+| `async_mode` | `bool` | default `False` | When `true`, generates an async SQLAlchemy engine/session stack (`asyncpg`/`aiomysql`/`aiosqlite` driver, async-aware Alembic `env.py` using `run_sync()`, async repository/service/route layers) instead of the default sync stack. See [Async database support](../features/async.md) for the full generated-code mechanics. |
 
 ## `auth` (`AuthSpec`)
 
@@ -270,7 +270,7 @@ validator on `RLSIdentitySource`):**
   some entity with `owner: true`, with no cycles.
 
 Full row-level-security mechanics, including how the owning column and query filtering are
-generated: `docs-site/features/rls.md`.
+generated: [Row-Level Security](../features/rls.md).
 
 ## `services` (`List[ServiceDecl]`)
 

@@ -123,6 +123,8 @@ generated for `Post` (`POST /posts`, `GET /posts`, `GET /posts/{id}`, `PUT /post
 ## Next steps
 
 - Full flag-by-flag CLI details: [CLI Reference](../cli-reference.md)
-- Every field the ERD YAML format supports: `erd-reference/fields.md` (coming soon)
-- Turning on auth, RBAC, row-level security, or async database support: the `features/`
-  pages (coming soon)
+- Every field the ERD YAML format supports: [Full field reference](../erd-reference/fields.md)
+- Turning on auth, RBAC, row-level security, or async database support: the
+  [Authentication](../features/auth.md), [RBAC](../features/rbac.md),
+  [Row-Level Security](../features/rls.md), and [Async database support](../features/async.md)
+  pages

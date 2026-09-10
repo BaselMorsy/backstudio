@@ -7,45 +7,45 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Cardinality(str, Enum):
-	"""Relationship cardinality types"""
-	ONE_TO_MANY = "one-to-many"
-	MANY_TO_ONE = "many-to-one"
-	ONE_TO_ONE = "one-to-one"
-	MANY_TO_MANY = "many-to-many"
+    """Relationship cardinality types"""
+    ONE_TO_MANY = "one-to-many"
+    MANY_TO_ONE = "many-to-one"
+    ONE_TO_ONE = "one-to-one"
+    MANY_TO_MANY = "many-to-many"
 
 
 class LazyStrategy(str, Enum):
-	"""SQLAlchemy lazy loading strategies"""
-	SELECT = "select"
-	JOINED = "joined"
-	SELECTIN = "selectin"
-	SUBQUERY = "subquery"
-	RAISE = "raise"
+    """SQLAlchemy lazy loading strategies"""
+    SELECT = "select"
+    JOINED = "joined"
+    SELECTIN = "selectin"
+    SUBQUERY = "subquery"
+    RAISE = "raise"
 
 
 class FieldType(str, Enum):
-	"""Data model field types"""
-	STRING = "string"
-	INTEGER = "integer"
-	FLOAT = "float"
-	BOOLEAN = "boolean"
-	DATETIME = "datetime"
-	DATE = "date"
-	TEXT = "text"
-	JSON = "json"
-	UUID = "uuid"
+    """Data model field types"""
+    STRING = "string"
+    INTEGER = "integer"
+    FLOAT = "float"
+    BOOLEAN = "boolean"
+    DATETIME = "datetime"
+    DATE = "date"
+    TEXT = "text"
+    JSON = "json"
+    UUID = "uuid"
 
 
 class ModelField(BaseModel):
-	"""Data model field specification"""
-	name: str = Field(..., description="Field name")
-	type: FieldType = Field(..., description="Field data type")
-	nullable: bool = Field(default=True, description="Whether field can be null")
-	unique: bool = Field(default=False, description="Whether field must be unique")
-	default: Optional[Any] = Field(None, description="Default value")
-	primary_key: bool = Field(default=False, description="Whether this is a primary key")
-	index: bool = Field(default=False, description="Whether to create an index")
-	max_length: Optional[int] = Field(None, description="Max length for string fields")
+    """Data model field specification"""
+    name: str = Field(..., description="Field name")
+    type: FieldType = Field(..., description="Field data type")
+    nullable: bool = Field(default=True, description="Whether field can be null")
+    unique: bool = Field(default=False, description="Whether field must be unique")
+    default: Optional[Any] = Field(None, description="Default value")
+    primary_key: bool = Field(default=False, description="Whether this is a primary key")
+    index: bool = Field(default=False, description="Whether to create an index")
+    max_length: Optional[int] = Field(None, description="Max length for string fields")
 
 
 ALL_ACTIONS = ["create", "list", "read", "update", "delete"]

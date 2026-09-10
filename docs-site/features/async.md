@@ -110,5 +110,3 @@ current templates:
   override; one engine, one session type, one `get_db()` per generated project.
 - Streaming responses and background tasks are out of scope — this covers standard CRUD
   request/response only.
-- The legacy per-entity generation flow (distinct from the `module_*` templates this feature
-  touches) was never made async, and is flagged for eventual removal rather than being extended.

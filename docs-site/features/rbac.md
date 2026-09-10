@@ -81,7 +81,7 @@ roles = {{ project.rbac_roles|tojson }} if is_first_user else []
 ```
 
 An admin (which the first user now is, since `admin` is always one of `rbac.roles` when RBAC is
-on) grants roles to everyone after that via `PUT /users/{id}/roles`.
+on) grants roles to everyone after that via `PUT /auth/users/{id}/roles`.
 
 This same `is_first_user` computation is reused — not re-derived — by the `admin_approval`
 registration mode's own bootstrap fix (auto-approving the first user so they aren't locked out

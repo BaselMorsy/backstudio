@@ -147,9 +147,22 @@ backstudio/
 │   └── tests/                      # the test suite
 ├── examples/                  # example ERD files, incl. blog.yml used throughout this README
 ├── docs/superpowers/            # design specs and implementation plans
-├── assets/                        # logo and other README images
-├── workspace/                       # backstudio generate's default output directory
+├── docs-site/                      # mkdocs-material documentation site source (see below)
+├── assets/                            # logo and other README images
+├── workspace/                           # backstudio generate's default output directory
+├── mkdocs.yml                             # docs-site config — see "Documentation site" below
 └── pyproject.toml
+```
+
+### Documentation site
+
+The full documentation site (architecture notes, ERD field reference, feature deep-dives, CLI
+reference) lives under `docs-site/`, configured by `mkdocs.yml`, and is built with
+`mkdocs`/`mkdocs-material` — both dev dependencies, already installed via the `dev` dependency
+group after `uv sync`. Preview it locally with:
+
+```bash
+uv run mkdocs serve
 ```
 
 ## Contributing

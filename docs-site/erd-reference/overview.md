@@ -82,7 +82,7 @@ entities:
 
 An entity with an `owner: true` relationship also needs an `rls:` block declaring where the
 owning identity comes from — see [Full field reference](fields.md#rls-row-level-security-rlsspec)
-and `docs-site/features/rls.md` for the full mechanics.
+and [Row-Level Security](../features/rls.md) for the full mechanics.
 
 ## `services`
 

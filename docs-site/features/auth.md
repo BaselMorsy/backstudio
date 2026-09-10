@@ -22,7 +22,7 @@ this order — `service.py.jinja` lines 125–142):
 |---|---|---|
 | `open` (default) | Nothing beyond `is_active`. A new user can log in immediately. | Creates the user with `is_active=True`; no token generated. |
 | `email_verification` | Login raises `ValueError("Email not verified")` until `is_verified` is set. | Also generates an email-verification token via `create_email_verification_token` and sends it through the dev-mode `send_email()` stub. `POST /auth/verify-email` sets `is_verified=True`. `POST /auth/resend-verification` re-sends, and is **not** auth-gated (an unverified user has no bearer token to authenticate with). |
-| `admin_approval` | Login raises `ValueError("Account pending approval")` until `is_approved` is set. Requires `rbac.enabled: true` (the approve endpoint is `admin`-gated). | See bootstrap-admin behavior below. `POST /users/{id}/approve` sets `is_approved=True`. |
+| `admin_approval` | Login raises `ValueError("Account pending approval")` until `is_approved` is set. Requires `rbac.enabled: true` (the approve endpoint is `admin`-gated). | See bootstrap-admin behavior below. `POST /auth/users/{id}/approve` sets `is_approved=True`. |
 
 Since the modes are mutually exclusive, at most one of the latter two checks is ever compiled
 into a given generated project — there's no code path where both exist.
@@ -75,14 +75,15 @@ attempts.
 ## Admin user management
 
 Whenever `rbac.enabled: true`, five endpoints are generated under `require_roles("admin")`
-(`routes.py.jinja` lines 171–245): `GET /users`, `GET /users/{id}`, `PUT /users/{id}/roles`
-(full replace, rejecting any role not in the declared `rbac.roles` set), `POST
-/users/{id}/deactivate`, `POST /users/{id}/reactivate`. A sixth, `POST /users/{id}/approve`, is
-generated only under `admin_approval` mode.
+(`routes.py.jinja` lines 171–245): `GET /auth/users`, `GET /auth/users/{id}`, `PUT
+/auth/users/{id}/roles` (full replace, rejecting any role not in the declared `rbac.roles` set),
+`POST /auth/users/{id}/deactivate`, `POST /auth/users/{id}/reactivate`. A sixth, `POST
+/auth/users/{id}/approve`, is generated only under `admin_approval` mode. (These are mounted
+under the auth module's prefix, `/auth` by default, the same as the auth-flow routes above.)
 
 **Bootstrap-admin auto-approval.** Under `admin_approval` mode, the very first user registered
 would otherwise be locked out with no way to approve themselves — there's no existing admin to
-call `POST /users/{id}/approve`. This was a real defect caught in this feature's own final
+call `POST /auth/users/{id}/approve`. This was a real defect caught in this feature's own final
 whole-branch review and is fixed in the current template. `register_user` (`service.py.jinja`
 lines 76–110) computes `is_first_user` (reused from the RBAC bootstrap check below) and, when
 `registration.mode == admin_approval`, stamps it straight onto the new user:
@@ -118,7 +119,7 @@ if not user.is_active:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
 ```
 
-So today, deactivating a user via `POST /users/{id}/deactivate` immediately blocks both
+So today, deactivating a user via `POST /auth/users/{id}/deactivate` immediately blocks both
 `/auth/refresh` (no new access token can be minted) and every `get_current_user`-gated route
 (the existing access token stops working the moment it's next used) — not just future logins.
 

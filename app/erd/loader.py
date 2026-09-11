@@ -274,6 +274,12 @@ def _validate_services(erd: ERDConfig) -> None:
                     f"Service '{svc.name}': the auth entity 'User' must be the only entity in its "
                     f"service (found: {', '.join(svc.entities)})"
                 )
+            if svc.prefix is not None:
+                raise ERDValidationError(
+                    f"Service '{svc.name}': services[].prefix has no effect on the auth service "
+                    "(entities: [User]) - the auth router is always mounted at "
+                    "'/<this service's name>'. Rename the service instead, or remove the prefix."
+                )
             auth_services.append(svc.name)
             continue
 

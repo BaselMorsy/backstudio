@@ -286,6 +286,30 @@ services:
         load_erd(bad)
 
 
+def test_user_service_with_prefix_rejected(tmp_path):
+    """services[].prefix has no effect on the auth service: translate()'s
+    crud_entities loop skips 'User' entirely (the auth router is always mounted
+    at '/<auth service name>' by server.py.jinja), so a prefix set there is
+    accepted-but-silently-inert with no error and no effect. Reject it outright
+    instead.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+  - {name: identity, entities: [User], prefix: /api/v1}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="has no effect on the auth service"):
+        load_erd(bad)
+
+
 def test_user_service_without_auth_enabled_rejected(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text(

@@ -39,7 +39,7 @@ router = APIRouter()
 {% for entity in module.entities %}
 {% if 'create' in entity.enabled_actions %}
 @router.post(
-    "{{ entity.base_path }}",
+    {{ entity.base_path|tojson }},
     response_model={{ entity.name }}Response,
     status_code=status.HTTP_201_CREATED,
     summary="Create {{ entity.name }}",
@@ -59,7 +59,7 @@ router = APIRouter()
     current_user: User = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls %}
-    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% endif %}
 ) -> {{ entity.name }}Response:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
@@ -85,7 +85,7 @@ router = APIRouter()
 
 {% if 'list' in entity.enabled_actions %}
 @router.get(
-    "{{ entity.base_path }}",
+    {{ entity.base_path|tojson }},
     response_model=List[{{ entity.name }}Response],
     summary="List {{ entity.name }} records",
     tags={{ entity.tags|tojson }},
@@ -111,9 +111,9 @@ router = APIRouter()
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
     current_user: User = Depends(_auth_service.get_current_user),
-    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
-    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% endif %}
 ) -> List[{{ entity.name }}Response]:
 {% if entity.rls and entity.rls.read_scope == 'any_authenticated' %}
@@ -131,7 +131,7 @@ router = APIRouter()
         # param's requiredness depend on which caller is calling).
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+            detail={{ ("Missing required header: " ~ entity.rls.identity_source.header_name)|tojson }},
         )
     else:
         owner_id = rls_owner_header
@@ -143,7 +143,7 @@ router = APIRouter()
 
 {% if 'read' in entity.enabled_actions %}
 @router.get(
-    "{{ entity.base_path }}/{item_id}",
+    {{ (entity.base_path ~ "/{item_id}")|tojson }},
     response_model={{ entity.name }}Response,
     summary="Get {{ entity.name }} by id",
     tags={{ entity.tags|tojson }},
@@ -165,9 +165,9 @@ router = APIRouter()
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
     current_user: User = Depends(_auth_service.get_current_user),
-    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
-    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% endif %}
 ) -> {{ entity.name }}Response:
 {% if entity.rls and entity.rls.read_scope == 'any_authenticated' %}
@@ -185,7 +185,7 @@ router = APIRouter()
         # param's requiredness depend on which caller is calling).
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+            detail={{ ("Missing required header: " ~ entity.rls.identity_source.header_name)|tojson }},
         )
     else:
         owner_id = rls_owner_header
@@ -200,7 +200,7 @@ router = APIRouter()
 
 {% if 'update' in entity.enabled_actions %}
 @router.put(
-    "{{ entity.base_path }}/{item_id}",
+    {{ (entity.base_path ~ "/{item_id}")|tojson }},
     response_model={{ entity.name }}Response,
     summary="Update {{ entity.name }}",
     tags={{ entity.tags|tojson }},
@@ -221,9 +221,9 @@ router = APIRouter()
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
     current_user: User = Depends(_auth_service.get_current_user),
-    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
-    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% endif %}
 ) -> {{ entity.name }}Response:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
@@ -239,7 +239,7 @@ router = APIRouter()
         # param's requiredness depend on which caller is calling).
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+            detail={{ ("Missing required header: " ~ entity.rls.identity_source.header_name)|tojson }},
         )
     else:
         owner_id = rls_owner_header
@@ -261,7 +261,7 @@ router = APIRouter()
 
 {% if 'delete' in entity.enabled_actions %}
 @router.delete(
-    "{{ entity.base_path }}/{item_id}",
+    {{ (entity.base_path ~ "/{item_id}")|tojson }},
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete {{ entity.name }}",
     tags={{ entity.tags|tojson }},
@@ -281,9 +281,9 @@ router = APIRouter()
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
     current_user: User = Depends(_auth_service.get_current_user),
-    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
-    rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
+    rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% endif %}
 ) -> None:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
@@ -299,7 +299,7 @@ router = APIRouter()
         # param's requiredness depend on which caller is calling).
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+            detail={{ ("Missing required header: " ~ entity.rls.identity_source.header_name)|tojson }},
         )
     else:
         owner_id = rls_owner_header

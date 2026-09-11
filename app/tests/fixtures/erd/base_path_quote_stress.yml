@@ -1,0 +1,19 @@
+project:
+  name: BasePathQuoteStress
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: base_path_quote_stress.db
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+    endpoints:
+      base_path: '/we"ird\path'
+
+services:
+  - name: things
+    entities: [Widget]

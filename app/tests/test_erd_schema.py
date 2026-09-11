@@ -94,8 +94,15 @@ def test_service_prefix_accepts_valid_value():
 
 @pytest.mark.parametrize(
     "bad_prefix",
-    ["catalog", "/catalog/", ""],
-    ids=["missing-leading-slash", "trailing-slash", "empty-string"],
+    ["catalog", "/catalog/", "", '/cat"alog', "/cat\\alog", "/cat\x00alog"],
+    ids=[
+        "missing-leading-slash",
+        "trailing-slash",
+        "empty-string",
+        "double-quote",
+        "backslash",
+        "control-char",
+    ],
 )
 def test_service_prefix_rejects_invalid_values(bad_prefix):
     with pytest.raises(ValidationError):

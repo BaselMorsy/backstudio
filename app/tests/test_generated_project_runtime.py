@@ -1956,6 +1956,116 @@ def test_free_text_project_fields_with_quotes_backslashes_and_unicode_generate_a
     assert "default=\"O'Brien's\"" in models_src
 
 
+def _route_decorator_path_literals(routes_src: str) -> dict:
+    """Map each `<action>_<entity>_route` function name to the literal string
+    value of its `@router.<verb>(...)`'s first (path) argument, evaluated via
+    `ast.literal_eval` so the assertion proves the *decoded* Python value round-
+    trips, not just that the source text contains expected characters.
+    """
+    tree = ast.parse(routes_src)
+    result = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not (isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)):
+                continue
+            if decorator.func.attr not in ("post", "get", "put", "delete"):
+                continue
+            if not decorator.args:
+                continue
+            result[node.name] = ast.literal_eval(decorator.args[0])
+    return result
+
+
+def test_base_path_quote_stress_generates_and_byte_compiles_with_exact_path_round_trip(tmp_path):
+    """Regression test for the entity.base_path escaping gap found by the final
+    whole-branch review of the examples-issues-fixes plan: `entity.base_path`
+    (computed from `services[].prefix` and/or `endpoints.base_path`) used to be
+    interpolated unescaped into `module_routes.py.jinja`'s five
+    `@router.<verb>(...)` path-string sites, so a `"` in it broke the generated
+    project with a SyntaxError, and a `\\` was silently reinterpreted as a real
+    escape character (e.g. `\\p` / `\\path`) with no error at all - a silently
+    corrupted mounted route path. base_path_quote_stress.yml's Widget entity
+    declares `endpoints.base_path: '/we"ird\\path'` (a literal double quote and a
+    literal backslash) - deliberately via `endpoints.base_path`, not
+    `services[].prefix`, since prefix is now rejected outright by Fix 2's
+    character-set validator and base_path remains the unvalidated vector that
+    must instead render *correctly* rather than be rejected.
+    """
+    erd = load_erd(f"{FIXTURES}/base_path_quote_stress.yml")
+    state = translate(erd)
+
+    # Sanity: the fixture actually carries the dangerous characters under test,
+    # and translate() computed the expected base_path from it verbatim.
+    entity = next(
+        e for module in state["modules"] for e in module["entities"] if e["name"] == "Widget"
+    )
+    assert entity["base_path"] == '/we"ird\\path'
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = tmp_path / "codebase"
+    codebase_dir.mkdir()
+    generator._generate_fastapi_project(state, codebase_dir)
+
+    # 1. Every generated .py file must byte-compile - this is what used to raise
+    # SyntaxError before the fix.
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    # 2. modules/things/routes.py must parse, and every route's path literal
+    # must round-trip EXACTLY to the original base_path (not just "doesn't
+    # crash" - a fix that stripped the dangerous characters would also compile).
+    routes_src = (codebase_dir / "modules" / "things" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    paths = _route_decorator_path_literals(routes_src)
+    assert paths["create_widget_route"] == '/we"ird\\path'
+    assert paths["list_widget_route"] == '/we"ird\\path'
+    assert paths["get_widget_route"] == '/we"ird\\path/{item_id}'
+    assert paths["update_widget_route"] == '/we"ird\\path/{item_id}'
+    assert paths["delete_widget_route"] == '/we"ird\\path/{item_id}'
+
+
+def test_header_name_quote_stress_generates_and_byte_compiles_with_alias_round_trip(tmp_path):
+    """Regression test for the rls.identity_source.header_name escaping gap found
+    by the final whole-branch review: `header_name` used to be interpolated
+    unescaped into `module_routes.py.jinja`'s `Header(..., alias="...")` sites (and,
+    since Task 3, four `detail="Missing required header: ..."` sites too), so a `"`
+    in it broke the generated project with a SyntaxError.
+    header_name_quote_stress.yml's Order entity (header-identity RLS, following
+    rls_header_owned.yml's shape) declares `header_name: 'X-Ten"ant'` - a literal
+    double quote.
+    """
+    erd = load_erd(f"{FIXTURES}/header_name_quote_stress.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = tmp_path / "codebase"
+    codebase_dir.mkdir()
+    generator._generate_fastapi_project(state, codebase_dir)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    routes_src = (codebase_dir / "modules" / "orders" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    alias_line = next(l for l in routes_src.splitlines() if "alias=" in l)
+    alias_value = ast.literal_eval(
+        alias_line.strip().rsplit("alias=", 1)[1].rstrip(",)").rstrip(")")
+    )
+    assert alias_value == 'X-Ten"ant'
+
+
 def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monkeypatch, isolated_sys_path):
     """rls_read_scope_any_authenticated.yml: `read_scope: any_authenticated` makes
     list/read visible to ANY authenticated caller (not just the owner or a bypass

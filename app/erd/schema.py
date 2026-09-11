@@ -213,6 +213,17 @@ class ServiceDecl(BaseModel):
                 "- a trailing slash would produce a double-slash when combined with an entity's "
                 "own route path"
             )
+        for ch, label in (('"', "a double quote"), ("'", "a single quote"), ("\\", "a backslash")):
+            if ch in v:
+                raise ValueError(
+                    f"services: prefix {v!r} must not contain {label} - the prefix is embedded "
+                    "verbatim into the generated route decorators' path strings, and these "
+                    "characters have no legitimate meaning in a URL path segment"
+                )
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in v):
+            raise ValueError(
+                f"services: prefix {v!r} must not contain control characters"
+            )
         return v
 
 

@@ -390,15 +390,19 @@ services:
         load_erd(bad)
 
 
-def test_rls_bypass_roles_on_header_identity_source_rejected(tmp_path):
-    """bypass_roles is only ever read from the *authenticated caller's* roles, and a
-    header-sourced entity's owner_id computation never touches role information at all -
-    so this combination cannot do anything. Silently-inert configuration in an
-    access-control feature is a footgun (the author believes a bypass is active when
-    nothing is), so it's rejected at load time rather than ignored.
+def test_rls_bypass_roles_on_header_identity_source_now_loads(tmp_path):
+    """bypass_roles + identity_source.type: header used to be hard-rejected (a caller
+    whose role membership intersects bypass_roles had no way to be resolved, since the
+    header identity source never read role information). Task 3 gives this combination
+    real semantics: a bypass-role caller's list/read/update/delete routes skip the
+    header-based owner filter entirely (create still requires the header - see
+    module_routes.py.jinja and the runtime round-trip tests in
+    test_generated_project_runtime.py). So this ERD must load cleanly now, and the
+    other two bypass_roles validation rules (rbac.enabled, unknown roles) still apply
+    unconditionally regardless of identity_source.type.
     """
-    bad = tmp_path / "bad.yml"
-    bad.write_text(
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
         """
 project: {name: Demo}
 database: {type: sqlite, database_name: d.db}
@@ -419,7 +423,69 @@ services:
   - {name: orders, entities: [Order]}
 """
     )
-    with pytest.raises(ERDValidationError, match="bypass_roles has no effect"):
+    erd = load_erd(ok)
+    order = next(e for e in erd.entities if e.name == "Order")
+    assert order.rls.identity_source.type == "header"
+    assert order.rls.bypass_roles == ["admin"]
+
+
+def test_rls_bypass_roles_on_header_identity_source_still_requires_rbac_enabled(tmp_path):
+    """The rbac.enabled: true rule for bypass_roles was never nested inside the removed
+    source.type == 'header' check, so it must still apply to header-identity entities.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      bypass_roles: [admin]
+      identity_source: {type: header, header_name: X-Tenant-Id}
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="rbac\\.enabled"):
+        load_erd(bad)
+
+
+def test_rls_bypass_roles_on_header_identity_source_still_rejects_unknown_role(tmp_path):
+    """The unknown-role rule for bypass_roles was never nested inside the removed
+    source.type == 'header' check either, so it must still apply to header-identity
+    entities too.
+    """
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+rbac: {enabled: true, roles: [admin]}
+entities:
+  - name: Tenant
+    fields: [{name: id, type: integer, primary_key: true}]
+  - name: Order
+    fields: [{name: id, type: integer, primary_key: true}]
+    relationships:
+      - {name: tenant, cardinality: many-to-one, target: Tenant, owner: true}
+    rls:
+      bypass_roles: [superadmin]
+      identity_source: {type: header, header_name: X-Tenant-Id}
+services:
+  - {name: tenants, entities: [Tenant]}
+  - {name: orders, entities: [Order]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="unknown role"):
         load_erd(bad)
 
 

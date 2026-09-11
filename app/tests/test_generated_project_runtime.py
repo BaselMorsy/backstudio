@@ -782,6 +782,141 @@ def test_rls_header_with_rbac_gates_action_but_header_still_governs_ownership(tm
             assert missing_header_resp.status_code == 422
 
 
+def test_rls_header_bypass_roles_skip_header_except_on_create(tmp_path, monkeypatch, isolated_sys_path):
+    """rls_header_bypass_roles.yml: Order is header-sourced RLS (X-Tenant-Id) with
+    rls.bypass_roles: [admin] (Task 3's new combination - previously hard-rejected at
+    load time). Proves, over real HTTP against a real generated app:
+
+      (a) a non-bypass caller ("customer" role, not in bypass_roles) still gets a 422
+          on every action when the header is omitted - completely unchanged from
+          today's non-bypass behavior, even though the Header(...) param itself had to
+          become Optional at the FastAPI level to let bypass-role callers omit it (the
+          route body now raises the 422 manually for non-bypass callers instead).
+      (b) a bypass-role caller ("admin") can list/read/update/delete without ever
+          supplying X-Tenant-Id, and sees/affects rows across every tenant, not just
+          one - proving the header-based filter is genuinely skipped, not just
+          defaulted to some single tenant.
+      (c) a bypass-role caller's POST /orders WITHOUT the header still 422s - this is
+          the one action bypass_roles deliberately does NOT reach (a created row needs
+          a concrete tenant stamped on it), asserted explicitly rather than inferred
+          from (b) passing.
+      (d) a bypass-role caller's POST /orders WITH the header succeeds and the created
+          row is stamped with exactly that tenant id, not a default or NULL - proving
+          create's behavior is genuinely unchanged by this task's other route-body
+          edits.
+    """
+    erd = load_erd(f"{FIXTURES}/rls_header_bypass_roles.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "rls_header_bypass_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # bootstrap admin: first user registered gets every declared role, so it is
+            # a genuine bypass-role ("admin") caller.
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            assert admin_resp.status_code == 201, admin_resp.text
+            assert set(admin_resp.json()["roles"]) == {"admin", "customer"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
+
+            # second user: registration gives roles=[] by convention, so grant only the
+            # non-bypass "customer" role directly via the DB (no role-grant endpoint
+            # exists for self-service - same technique used elsewhere in this file, e.g.
+            # test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own).
+            cust_resp = client.post(
+                "/auth/register", json={"email": "cust@example.com", "password": "supersecret123"}
+            )
+            assert cust_resp.json()["roles"] == []
+            import sqlite3
+
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
+            conn.commit()
+            conn.close()
+            cust_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'cust@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
+
+            tenant1 = client.post("/tenants", json={"name": "Acme"}, headers=admin_headers).json()
+            tenant2 = client.post("/tenants", json={"name": "Globex"}, headers=admin_headers).json()
+
+            # seed one order per tenant using the non-bypass customer (header required,
+            # as always, for a non-bypass caller's create)
+            order1 = client.post(
+                "/orders",
+                json={"status": "pending"},
+                headers={**cust_headers, "X-Tenant-Id": str(tenant1["id"])},
+            ).json()
+            order2 = client.post(
+                "/orders",
+                json={"status": "pending"},
+                headers={**cust_headers, "X-Tenant-Id": str(tenant2["id"])},
+            ).json()
+
+            # --- (a) non-bypass caller: header still required on every action, unchanged ---
+            assert client.get("/orders", headers=cust_headers).status_code == 422
+            assert client.get(f"/orders/{order1['id']}", headers=cust_headers).status_code == 422
+            assert (
+                client.put(f"/orders/{order1['id']}", json={"status": "shipped"}, headers=cust_headers).status_code
+                == 422
+            )
+            assert client.delete(f"/orders/{order1['id']}", headers=cust_headers).status_code == 422
+            assert client.post("/orders", json={"status": "pending"}, headers=cust_headers).status_code == 422
+
+            # --- (b) bypass-role caller: list/read/update/delete all work with NO header,
+            # and see/affect rows across every tenant ---
+            admin_list = client.get("/orders", headers=admin_headers).json()
+            assert {o["id"] for o in admin_list} == {order1["id"], order2["id"]}
+
+            get1 = client.get(f"/orders/{order1['id']}", headers=admin_headers)
+            assert get1.status_code == 200, get1.text
+            get2 = client.get(f"/orders/{order2['id']}", headers=admin_headers)
+            assert get2.status_code == 200, get2.text
+
+            put_resp = client.put(
+                f"/orders/{order1['id']}", json={"status": "shipped"}, headers=admin_headers
+            )
+            assert put_resp.status_code == 200, put_resp.text
+            assert put_resp.json()["status"] == "shipped"
+
+            del_resp = client.delete(f"/orders/{order2['id']}", headers=admin_headers)
+            assert del_resp.status_code == 204, del_resp.text
+            # genuinely deleted, not just reported as deleted
+            assert client.get(f"/orders/{order2['id']}", headers=admin_headers).status_code == 404
+
+            # --- (c) bypass-role caller's create WITHOUT the header still 422s: the one
+            # place bypass_roles deliberately does not apply ---
+            create_no_header_resp = client.post(
+                "/orders", json={"status": "pending"}, headers=admin_headers
+            )
+            assert create_no_header_resp.status_code == 422, create_no_header_resp.text
+
+            # --- (d) bypass-role caller's create WITH the header succeeds and stamps
+            # exactly that tenant, not a default/null ---
+            create_with_header_resp = client.post(
+                "/orders",
+                json={"status": "pending"},
+                headers={**admin_headers, "X-Tenant-Id": str(tenant1["id"])},
+            )
+            assert create_with_header_resp.status_code == 201, create_with_header_resp.text
+            assert create_with_header_resp.json()["tenant_id"] == tenant1["id"]
+
+
 def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path, monkeypatch, isolated_sys_path):
     """shophub_mini.yml: Order (in the 'ordering' module) has many-to-one to Product
     (in 'catalog') and to User (the auth entity) - proves FK validation works when

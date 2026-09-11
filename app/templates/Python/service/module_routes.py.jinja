@@ -6,7 +6,8 @@
 {% set has_auth_user_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'auth_user')|list|length) > 0 %}
 {% set has_header_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'header')|list|length) > 0 %}
 {% set has_any_authenticated_header_rls = (rls_entities|selectattr('rls.read_scope', 'equalto', 'any_authenticated')|selectattr('rls.identity_source.type', 'equalto', 'header')|list|length) > 0 %}
-from typing import List{% if has_owned_rel %}, Optional{% endif +%}
+{% set has_header_bypass_rls = (rls_entities|selectattr('rls.identity_source.type', 'equalto', 'header')|selectattr('rls.bypass_roles')|list|length) > 0 %}
+from typing import List{% if has_owned_rel or has_header_bypass_rls %}, Optional{% endif +%}
 from fastapi import APIRouter, Depends, HTTPException, Query, status{% if has_header_rls %}, Header{% endif +%}
 {% if is_async %}
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 {% endif %}
 
 from database.base import get_db
-{% if has_auth_user_rls or has_any_authenticated_header_rls %}
+{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls %}
 from database.models import User
 {% endif %}
 from .schemas import (
@@ -27,7 +28,7 @@ from .service import {{ module.name|pascal_case }}Service, get_{{ module.snake_n
 {% if project.rbac_enabled %}
 from rbac import require_roles
 {% endif %}
-{% if has_auth_user_rls or has_any_authenticated_header_rls %}
+{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls %}
 from modules.{{ project.auth_module_name }}.service import get_{{ project.auth_module_name }}_service
 
 _auth_service = get_{{ project.auth_module_name }}_service()
@@ -108,6 +109,9 @@ router = APIRouter()
 {% else %}
     current_user: User = Depends(_auth_service.get_current_user),
 {% endif %}
+{% elif entity.rls and entity.rls.bypass_roles %}
+    current_user: User = Depends(_auth_service.get_current_user),
+    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
 {% endif %}
@@ -116,6 +120,21 @@ router = APIRouter()
     owner_id = None
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.bypass_roles %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    elif rls_owner_header is None:
+        # Non-bypass caller, header omitted: the header is still required for
+        # everyone who isn't a bypass-role caller - preserved manually here
+        # since the Header(...) param itself had to become Optional so that a
+        # bypass-role caller could omit it (FastAPI can't make a single Header
+        # param's requiredness depend on which caller is calling).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+        )
+    else:
+        owner_id = rls_owner_header
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}
@@ -144,6 +163,9 @@ router = APIRouter()
 {% else %}
     current_user: User = Depends(_auth_service.get_current_user),
 {% endif %}
+{% elif entity.rls and entity.rls.bypass_roles %}
+    current_user: User = Depends(_auth_service.get_current_user),
+    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
 {% endif %}
@@ -152,6 +174,21 @@ router = APIRouter()
     owner_id = None
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.bypass_roles %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    elif rls_owner_header is None:
+        # Non-bypass caller, header omitted: the header is still required for
+        # everyone who isn't a bypass-role caller - preserved manually here
+        # since the Header(...) param itself had to become Optional so that a
+        # bypass-role caller could omit it (FastAPI can't make a single Header
+        # param's requiredness depend on which caller is calling).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+        )
+    else:
+        owner_id = rls_owner_header
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}
@@ -182,12 +219,30 @@ router = APIRouter()
 {% else %}
     current_user: User = Depends(_auth_service.get_current_user),
 {% endif %}
+{% elif entity.rls and entity.rls.bypass_roles %}
+    current_user: User = Depends(_auth_service.get_current_user),
+    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
 {% endif %}
 ) -> {{ entity.name }}Response:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.bypass_roles %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    elif rls_owner_header is None:
+        # Non-bypass caller, header omitted: the header is still required for
+        # everyone who isn't a bypass-role caller - preserved manually here
+        # since the Header(...) param itself had to become Optional so that a
+        # bypass-role caller could omit it (FastAPI can't make a single Header
+        # param's requiredness depend on which caller is calling).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+        )
+    else:
+        owner_id = rls_owner_header
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}
@@ -224,12 +279,30 @@ router = APIRouter()
 {% else %}
     current_user: User = Depends(_auth_service.get_current_user),
 {% endif %}
+{% elif entity.rls and entity.rls.bypass_roles %}
+    current_user: User = Depends(_auth_service.get_current_user),
+    rls_owner_header: Optional[int] = Header(None, alias="{{ entity.rls.identity_source.header_name }}"),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias="{{ entity.rls.identity_source.header_name }}"),
 {% endif %}
 ) -> None:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.bypass_roles %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    elif rls_owner_header is None:
+        # Non-bypass caller, header omitted: the header is still required for
+        # everyone who isn't a bypass-role caller - preserved manually here
+        # since the Header(...) param itself had to become Optional so that a
+        # bypass-role caller could omit it (FastAPI can't make a single Header
+        # param's requiredness depend on which caller is calling).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing required header: {{ entity.rls.identity_source.header_name }}",
+        )
+    else:
+        owner_id = rls_owner_header
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}

@@ -2,11 +2,12 @@ project:
   name: LedgerBox
   version: "1.0.0"
   description: >-
-    A personal finance tracker demonstrating admin-approval registration and
-    row-level security scoped to the authenticated user, with ownership
-    cascading from Account down to Transaction - genuinely private
-    per-user data, not a public-read/owner-only-write resource (see
-    docs-site/features/rls.md for why that distinction matters).
+    A personal finance tracker built around the "envelope budgeting" method,
+    demonstrating admin-approval registration and row-level security scoped
+    to the authenticated user, with ownership cascading from Account down to
+    Transaction - genuinely private per-user data, not a
+    public-read/owner-only-write resource (see docs-site/features/rls.md for
+    why that distinction matters).
 
 database:
   type: sqlite

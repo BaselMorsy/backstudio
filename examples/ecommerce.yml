@@ -103,12 +103,20 @@ entities:
       - name: reviewer
         cardinality: many-to-one
         target: User
+        owner: true
+    rls:
+      identity_source: {type: auth_user}
+      read_scope: any_authenticated
+      bypass_roles: [admin]
     endpoints:
       rbac:
         create: [admin, customer]
+        update: [admin, customer]
+        delete: [admin, customer]
 
 services:
   - name: catalog
+    prefix: /catalog
     entities: [Category, Tag, Product]
   - name: ordering
     entities: [Order, OrderItem]

@@ -1,0 +1,37 @@
+project:
+  name: ServicePrefixDemo
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: service_prefix.db
+
+entities:
+  - name: Category
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Product
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+  - name: Featured
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+    endpoints:
+      base_path: /special-path
+
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: name, type: string}
+
+services:
+  - name: catalog
+    prefix: /catalog
+    entities: [Category, Product, Featured]
+  - name: misc
+    entities: [Widget]

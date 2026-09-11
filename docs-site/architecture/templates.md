@@ -178,3 +178,15 @@ there is no `state['modules']` entry representing auth to pass in. The two paths
 independent: an ERD with `auth.enabled: true` but zero non-auth `services:` entries generates
 only `modules/{auth_module_name}/`; an ERD with several `services:` entries but
 `auth.enabled: false` generates only the `modules`-loop's directories and skips auth entirely.
+
+**Route mounting has no implicit service-name prefix.** `server.py.jinja` includes each
+CRUD module's router with `app.include_router({{ module.snake_name }}_router)` — no `prefix=`
+argument at all — so with no `prefix` set on a service and no `base_path` set on an entity,
+that entity's routes are mounted directly at the API root (`/{plural-of-entity-name}`), not
+under `/{service-name}` or any other implicit namespace. The **only** router that gets an
+automatic prefix is the auth module's, via `app.include_router(auth_router, prefix="/{{
+project.auth_module_name }}", ...)`, which defaults to `/auth` (`_resolve_auth_module_name()`
+in `translate.py`). To opt a whole service's entities into a shared URL namespace, set that
+service's `prefix` in the ERD — see [`services[].prefix`](../erd-reference/fields.md#services-listservicedecl)
+for the full field details, including how an entity's own `endpoints.base_path` always wins
+outright over the service `prefix` rather than being combined with it.

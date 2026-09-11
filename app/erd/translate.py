@@ -2,7 +2,7 @@
 
 import re
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.erd.loader import ERDValidationError
 from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
@@ -457,6 +457,11 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
 
     _resolve_rls(erd, data_models)
 
+    service_prefix_by_entity: Dict[str, Optional[str]] = {}
+    for svc in erd.services:
+        for entity_name in svc.entities:
+            service_prefix_by_entity[entity_name] = svc.prefix
+
     crud_entities: List[Dict[str, Any]] = []
     for entity in entities:
         plural_snake = _pluralize(entity.name)
@@ -464,7 +469,14 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "name": entity.name,
             "snake_name": _snake_case(entity.name),
             "plural_snake": plural_snake,
-            "base_path": entity.endpoints.base_path or f"/{plural_snake}",
+            "base_path": (
+                entity.endpoints.base_path
+                or (
+                    f"{service_prefix_by_entity.get(entity.name)}/{plural_snake}"
+                    if service_prefix_by_entity.get(entity.name)
+                    else f"/{plural_snake}"
+                )
+            ),
             "tags": entity.endpoints.tags or [plural_snake],
             "enabled_actions": entity.endpoints.enabled,
             "rbac": _resolve_rbac(erd, entity),

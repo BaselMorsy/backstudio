@@ -368,6 +368,59 @@ def test_renamed_auth_module_serves_over_real_http_and_old_auth_path_is_gone(
             ).status_code == 404
 
 
+def test_service_prefix_mounts_routes_under_prefix_and_override_and_unprefixed_sibling_still_work(
+    tmp_path, monkeypatch, isolated_sys_path
+):
+    """service_prefix.yml: a `catalog` service with `prefix: /catalog` and three
+    entities - Category, Product (no `endpoints.base_path` override, so they
+    should be reachable under the `/catalog` prefix) and Featured (which DOES
+    set `endpoints.base_path: /special-path`, which must win outright over the
+    service prefix rather than being combined with it) - plus a sibling `misc`
+    service with no `prefix` set at all, whose Widget entity must still be
+    reachable at its bare, unprefixed `/widgets` path. No auth block in the
+    fixture, so auth/rbac are both disabled - no JWT_SECRET needed.
+    """
+    erd = load_erd(f"{FIXTURES}/service_prefix.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "service_prefix_runtime_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            # --- Category: prefixed service, no entity-level override ---
+            category_resp = client.post("/catalog/categories", json={"name": "Books"})
+            assert category_resp.status_code == 201, category_resp.text
+            assert client.get("/categories").status_code == 404
+
+            # --- Product: same prefixed service, no entity-level override ---
+            product_resp = client.post("/catalog/products", json={"name": "Widget Kit"})
+            assert product_resp.status_code == 201, product_resp.text
+            assert client.get("/products").status_code == 404
+
+            # --- Featured: same service, but its own endpoints.base_path wins
+            # outright over the service prefix - reachable at exactly
+            # /special-path, NOT /catalog/special-path. ---
+            featured_resp = client.post("/special-path", json={"name": "Sale Item"})
+            assert featured_resp.status_code == 201, featured_resp.text
+            assert client.get("/catalog/special-path").status_code == 404
+
+            # --- Widget: sibling service with no `prefix` set at all - still
+            # reachable at its bare, unprefixed /widgets path. ---
+            widget_resp = client.post("/widgets", json={"name": "Gadget"})
+            assert widget_resp.status_code == 201, widget_resp.text
+            assert client.get("/catalog/widgets").status_code == 404
+
+
 def test_alembic_autogenerate_runs_against_real_generated_project(tmp_path):
     """Generate a project onto real disk and actually invoke
     `alembic revision --autogenerate` against it - this is the exact command

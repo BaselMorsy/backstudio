@@ -1,7 +1,15 @@
 import pytest
 from pydantic import ValidationError
 
-from app.erd.schema import ERDConfig, ALL_ACTIONS, EntitySpec, RelationshipDecl, RLSIdentitySource, RLSSpec
+from app.erd.schema import (
+    ERDConfig,
+    ALL_ACTIONS,
+    EntitySpec,
+    RelationshipDecl,
+    RLSIdentitySource,
+    RLSSpec,
+    ServiceDecl,
+)
 
 
 MINIMAL = {
@@ -72,6 +80,26 @@ def test_uppercase_service_name_rejected():
     bad["services"] = [{"name": "Widgets", "entities": ["Widget"]}]
     with pytest.raises(ValidationError):
         ERDConfig(**bad)
+
+
+def test_service_prefix_defaults_to_none():
+    svc = ServiceDecl(name="catalog", entities=["Widget"])
+    assert svc.prefix is None
+
+
+def test_service_prefix_accepts_valid_value():
+    svc = ServiceDecl(name="catalog", entities=["Widget"], prefix="/catalog")
+    assert svc.prefix == "/catalog"
+
+
+@pytest.mark.parametrize(
+    "bad_prefix",
+    ["catalog", "/catalog/", ""],
+    ids=["missing-leading-slash", "trailing-slash", "empty-string"],
+)
+def test_service_prefix_rejects_invalid_values(bad_prefix):
+    with pytest.raises(ValidationError):
+        ServiceDecl(name="catalog", entities=["Widget"], prefix=bad_prefix)
 
 
 def test_database_async_mode_defaults_to_false():

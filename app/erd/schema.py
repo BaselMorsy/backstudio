@@ -180,6 +180,7 @@ class ServiceDecl(BaseModel):
     """Assigns a set of entities to a named service/module."""
     name: str = Field(..., min_length=1)
     entities: List[str] = Field(..., min_length=1)
+    prefix: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -189,6 +190,28 @@ class ServiceDecl(BaseModel):
                 f"services: service name '{v}' must be a valid lowercase Python identifier "
                 "(letters, digits, underscores; not starting with a digit) - it becomes the "
                 "generated modules/<name>/ directory and function-name segment"
+            )
+        return v
+
+    @field_validator("prefix")
+    @classmethod
+    def prefix_is_valid_path_segment(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if v == "":
+            raise ValueError(
+                "services: prefix, if set, must not be an empty string - omit the field "
+                "entirely (or leave it unset) rather than setting an empty prefix"
+            )
+        if not v.startswith("/"):
+            raise ValueError(
+                f"services: prefix '{v}' must start with '/' (e.g. '/catalog')"
+            )
+        if v.endswith("/"):
+            raise ValueError(
+                f"services: prefix '{v}' must not end with '/' (e.g. '/catalog', not '/catalog/') "
+                "- a trailing slash would produce a double-slash when combined with an entity's "
+                "own route path"
             )
         return v
 

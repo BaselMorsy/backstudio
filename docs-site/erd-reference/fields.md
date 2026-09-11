@@ -298,6 +298,7 @@ Each entry is a `ServiceDecl`:
 |---|---|---|---|
 | `name` | `str` (min length 1) | required | Service/module name. Must be a valid lowercase Python identifier (letters, digits, underscores; not starting with a digit) — it becomes the generated `modules/<name>/` directory and function-name segment. |
 | `entities` | `List[str]` (min length 1) | required | Names of the entities assigned to this service. |
+| `prefix` | `Optional[str]` | default `None` | Prepends this string to every entity's route path in this service, unless that entity sets its own `endpoints.base_path` (which always wins, never combined with the prefix). Must start with `/` and must not end with `/` if set. |
 
 **Cross-field rules (loader, `app/erd/loader.py` `_validate_services`):**
 
@@ -310,6 +311,10 @@ Each entry is a `ServiceDecl`:
   than `"User"`, which is handled by the rule above).
 - Every declared entity (other than `"User"`) must be assigned to **exactly one** service — not
   zero, not more than one.
+- `services[].prefix`, if set, must start with `/`, must not end with `/`,
+  and must not be an empty string (schema-level validation, `ServiceDecl.prefix_is_valid_path_segment`).
+- An entity's own `endpoints.base_path`, if set, always wins outright over
+  its service's `prefix` — the two are never combined.
 
 ## Enums reference
 

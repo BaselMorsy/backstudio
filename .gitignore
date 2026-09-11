@@ -7,3 +7,9 @@ workspace/
 *.egg-info/
 .env
 site/
+
+# Design specs, implementation plans, and issue-tracking docs are working
+# documents for the development workflow - kept locally, never pushed.
+docs/superpowers/specs/
+docs/superpowers/plans/
+ISSUES.md

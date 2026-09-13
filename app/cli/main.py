@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 
+from app.cli.grammar import TOP_LEVEL, TOPICS
 from app.erd.loader import ERDValidationError, load_erd
 from app.erd.translate import translate
 from app.erd.visualize import render_html
@@ -64,6 +65,29 @@ def _ensure_dev_env_secret(project_dir: Path, secret_env_var: str) -> str | None
 def main(ctx: typer.Context) -> None:
     """BackStudio CLI."""
     pass
+
+
+@app.command()
+def grammar(
+    topic: str = typer.Argument(
+        None,
+        help=f"One section's grammar: {' | '.join(TOPICS)}. Omit to list all top-level keys.",
+    )
+) -> None:
+    """Fast terminal reference for the ERD YAML grammar (not the full docs)."""
+    if topic is None:
+        typer.echo(TOP_LEVEL)
+        return
+
+    content = TOPICS.get(topic)
+    if content is None:
+        typer.secho(
+            f"Unknown topic '{topic}'. Valid topics: {', '.join(TOPICS)}",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(content)
 
 
 @app.command()

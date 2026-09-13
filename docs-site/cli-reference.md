@@ -1,7 +1,7 @@
 # CLI Reference
 
 The `backstudio` CLI is a [Typer](https://typer.tiangolo.com/) application defined in
-`app/cli/main.py`. It exposes three commands: `validate`, `visualize`, and `generate`. If you
+`app/cli/main.py`. It exposes four commands: `validate`, `visualize`, `generate`, and `grammar`. If you
 installed it globally (`install.sh`/`install.bat`), call it directly as `backstudio ...`. In a
 dev checkout, run any command with `uv run backstudio ...`, or activate `.venv` first and drop
 the `uv run` prefix (see [Installation](getting-started/installation.md)) — the examples below
@@ -179,4 +179,55 @@ Regenerating over an existing output without `--force` fails safely:
 $ uv run backstudio generate blog.yml
 <error message>
 Use --force to overwrite.
+```
+
+---
+
+## `backstudio grammar`
+
+Fast terminal reference for the ERD YAML grammar — not the full documentation site, just enough
+to remember how to type something specific.
+
+```
+Usage: backstudio grammar [OPTIONS] [TOPIC]
+
+  Fast terminal reference for the ERD YAML grammar (not the full docs).
+
+Arguments:
+  [TOPIC]  One section's grammar: project | database | auth | rbac |
+           entities | fields | relationships | endpoints | rls | services.
+           Omit to list all top-level keys.
+
+Options:
+  --help  Show this message and exit.
+```
+
+### Arguments
+
+| Name | Type | Required | Help text |
+|---|---|---|---|
+| `TOPIC` | `str` (positional, optional) | no | One of `project`, `database`, `auth`, `rbac`, `entities`, `fields`, `relationships`, `endpoints`, `rls`, `services`. Omitted → prints the 6 top-level `ERDConfig` keys instead. |
+
+### Behavior
+
+Prints a hand-curated cheat sheet from `app/cli/grammar.py`, sourced directly from
+`app/erd/schema.py` (not from this docs site) so it stays accurate even if a docs-site page
+drifts. With no `TOPIC`, lists the 6 top-level ERD keys (`project`, `database`, `auth`, `rbac`,
+`entities`, `services`) and points to the per-topic form. With an unknown `TOPIC`, prints an
+error listing the valid topics and exits `1`. Never reads or validates an ERD file — it's a
+static reference, independent of any project.
+
+### Example
+
+```bash
+$ uv run backstudio grammar rls
+rls:                                                         # RLSSpec, required when an
+                                                               # entity has an owner: true relationship
+  identity_source:
+    type: auth_user | header                                   # required
+    header_name: str        # required when type: header, e.g. X-Tenant-Id
+                             # (must not be "Authorization")
+  bypass_roles: [role, ...]     # roles that skip row filtering entirely; requires rbac.enabled
+  read_scope: owner | any_authenticated    # default "owner"
+...
 ```

@@ -254,7 +254,8 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
 | `identity_source` | `RLSIdentitySource` | required | Where the "current owner" identity is resolved from — see below. |
-| `bypass_roles` | `List[str]` | default `[]` | Roles that bypass row-level filtering entirely for this entity. |
+| `bypass_roles` | `List[str]` | default `[]` | Roles that bypass row-level filtering entirely for this entity, on `list`/`read`/`update`/`delete`. `create` is never bypass-aware for either identity source (a new row always needs a concrete owner, never `NULL`) — see [Row-Level Security](../features/rls.md#bypass-roles). |
+| `read_scope` | `Literal["owner", "any_authenticated"]` | default `"owner"` | `"any_authenticated"` makes `list`/`read` visible to any authenticated caller regardless of row ownership (a "public read, owner-only write" entity); `create`/`update`/`delete` stay owner- (or bypass-) scoped exactly as with the default `"owner"`. See [Row-Level Security](../features/rls.md#public-read-read_scope). |
 
 !!! warning "Do you need a `User` entity for RLS?"
     Only if `identity_source.type: auth_user` — that resolves ownership from the
@@ -279,10 +280,15 @@ validator on `RLSIdentitySource`):**
 - `identity_source.type: auth_user` requires `auth.enabled: true`.
 - `identity_source.type: auth_user` requires the owning relationship's `target` to be `"User"`
   (a different owner entity must use `type: header` instead).
-- `bypass_roles` has no effect (and is rejected) when `identity_source.type: header` — the
-  header identity source carries no role information for a bypass role to plug into.
 - `bypass_roles` requires `rbac.enabled: true` (bypass roles are RBAC roles), and every listed
-  role must already be declared in `rbac.roles`.
+  role must already be declared in `rbac.roles`. Valid with **either** `identity_source.type` —
+  `header`-sourced entities can declare `bypass_roles` too (a bypass-role caller still needs to be
+  an authenticated, RBAC-roled user to hold the role, even though the header itself carries no
+  role information); see [Row-Level Security](../features/rls.md#bypass-roles) for exactly which
+  actions bypass applies to.
+- `read_scope: "any_authenticated"` on a `header`-identity entity requires `auth.enabled: true` —
+  without it there's no `_auth_service` to authenticate the caller against, since header identity
+  alone doesn't otherwise require `auth.enabled`.
 - An entity whose ownership is declared via `cascades_ownership: true` (rather than `owner:
   true` directly) must have a chain of `cascades_ownership` relationships that terminates at
   some entity with `owner: true`, with no cycles.
@@ -325,6 +331,7 @@ Quick lookup for every `Enum`/`Literal` type used above:
 | `CliDatabaseType` (`database.type`) | `postgresql`, `mysql`, `sqlite` |
 | `RegistrationSpec.mode` | `open`, `email_verification`, `admin_approval` |
 | `RLSIdentitySource.type` | `auth_user`, `header` |
+| `RLSSpec.read_scope` | `owner`, `any_authenticated` |
 | `Cardinality` (`relationships[].cardinality`) | `one-to-many`, `many-to-one`, `one-to-one`, `many-to-many` |
 | `LazyStrategy` (`relationships[].lazy`) | `select`, `joined`, `selectin`, `subquery`, `raise` |
 | `FieldType` (`fields[].type`) | `string`, `integer`, `float`, `boolean`, `datetime`, `date`, `text`, `json`, `uuid` |

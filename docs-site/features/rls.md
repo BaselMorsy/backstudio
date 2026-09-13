@@ -77,28 +77,47 @@ A deeper chain (e.g. `OrderLineDiscount → OrderItem → Order → owner`) adds
 additional hop — resolved once at generation time from the declared `cascades_ownership` chain,
 not re-derived per request.
 
-### Route layer: resolving `owner_id`, including the bypass-role fix
+### Route layer: resolving `owner_id`, including the bypass-role and public-read fixes
 
-`module_routes.py.jinja` resolves `owner_id` differently depending on `identity_source.type`:
+`module_routes.py.jinja` resolves `owner_id` differently depending on `identity_source.type`,
+whether `bypass_roles` is set, and — for `list`/`read` only — `read_scope`:
 
-- **`header`**: `owner_id` is the required `Header(..., alias="<header_name>")` value directly.
-  No bypass path exists for header-sourced entities (a bypass role has no meaning without an
-  authenticated user to hold it).
-- **`auth_user`**: resolved from the JWT-authenticated caller's roles.
+- **`auth_user`**: resolved from the JWT-authenticated caller's roles. A bypass role gets
+  `owner_id = None` (unfiltered):
 
-For `list`/`get`/`update`/`delete`, a caller with a declared bypass role gets `owner_id = None`
-(unfiltered — see all rows, not just their own):
+  ```python
+  owner_id = None if set(current_user.roles or []).intersection(entity.rls.bypass_roles) else current_user.id
+  ```
 
-```python
-owner_id = None if set(current_user.roles or []).intersection(entity.rls.bypass_roles) else current_user.id
-```
+- **`header`, no `bypass_roles`**: `owner_id` is the required `Header(..., alias="<header_name>")`
+  value directly, exactly as before.
 
-**`create` is handled differently, and this is the fixed Critical bug.** The RLS design spec's
-own final whole-branch review caught that a bypass-role caller creating a row would, under the
-same `owner_id = None if bypass else current_user.id` logic used everywhere else, write a `NULL`
-owner — a row invisible to every non-bypass caller *forever*, since it belongs to nobody. The
-current `module_routes.py.jinja` template (lines 63–70) fixes this with an explicit comment
-documenting why `create` is deliberately **not** bypass-aware:
+- **`header`, with `bypass_roles`**: the `Header` param becomes *optional* (FastAPI can't make one
+  param's requiredness depend on which caller is calling), and the route resolves `owner_id`
+  itself — a bypass-role caller may omit the header entirely, but a non-bypass caller still must
+  supply it, enforced manually with a `422` rather than relying on FastAPI's own required-param
+  check:
+
+  ```python
+  if set(current_user.roles or []).intersection(entity.rls.bypass_roles):
+      owner_id = None
+  elif rls_owner_header is None:
+      raise HTTPException(
+          status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+          detail="Missing required header: <header_name>",
+      )
+  else:
+      owner_id = rls_owner_header
+  ```
+
+  This applies to `list`/`read`/`update`/`delete`. **`create` is excluded from this bypass path
+  entirely** — see below.
+
+**`create` is never bypass-aware, for either identity source.** A bypass-role caller creating a
+row under the same "`owner_id = None` means unfiltered" logic used everywhere else would write a
+`NULL` owner — a row invisible to every non-bypass caller *forever*, since it belongs to nobody.
+The current `module_routes.py.jinja` template fixes this with an explicit comment documenting why
+`create` is deliberately **not** bypass-aware:
 
 ```python
 # Deliberately NOT bypass-aware, unlike list/get/update/delete below: there,
@@ -107,12 +126,52 @@ documenting why `create` is deliberately **not** bypass-aware:
 # filter yet, only a row to stamp, and "I may act on everyone's rows" must never
 # become "the row I create belongs to nobody" (a NULL owner is invisible to every
 # non-bypass caller forever). So create always stamps the caller's own id.
-owner_id = current_user.id
+owner_id = current_user.id   # auth_user identity
 ```
 
-So today: `list`/`get`/`update`/`delete` treat a bypass role as "see/act on everyone's rows,"
-while `create` always stamps the creating caller's own id as owner, bypass role or not — there is
-no way, through the generated API, to create a row with a `NULL` or other-caller owner.
+For `header` identity, `create` always keeps the header **required**
+(`Header(..., alias="<header_name>")`, never `Optional`) and stamps `owner_id = rls_owner_header`
+regardless of `bypass_roles` — a bypass-role caller can still create a row for any tenant, they
+just have to say which one via the header, same as anyone else.
+
+So today: `list`/`read`/`update`/`delete` treat a bypass role as "see/act on everyone's rows"
+(for either identity source), while `create` always stamps a concrete owner — the creating
+caller's own id for `auth_user` identity, or the caller-supplied header value for `header`
+identity — bypass role or not. There is no way, through the generated API, to create a row with a
+`NULL` owner.
+
+## Public read: `read_scope`
+
+`rls.read_scope: "any_authenticated"` (default `"owner"`) makes `list`/`read` visible to **any**
+authenticated caller, regardless of row ownership — the classic "public blog post, owner-only
+edit" pattern that plain per-owner filtering can't express. It only ever affects `list`/`read`;
+`create`/`update`/`delete` stay owner- (or bypass-) scoped exactly as with the default
+`"owner"`:
+
+```python
+if entity.rls.read_scope == 'any_authenticated':
+    owner_id = None
+```
+
+This check runs *before* any bypass-role check on `list`/`read`, so it applies unconditionally —
+`bypass_roles`, if also set, only has independent effect on `update`/`delete` in that case (`list`/
+`read` are already unfiltered for everyone).
+
+What "any authenticated caller" requires depends on `identity_source.type`:
+
+- **`auth_user`**: the caller just needs a valid JWT — the normal `Depends(get_current_user)` (or
+  `require_roles(...)` if RBAC gates the action) dependency already provides that.
+- **`header`**: normally the request needs no authentication at all for `header` identity — but
+  `read_scope: "any_authenticated"` changes that for `list`/`read` specifically. The route drops
+  the header parameter entirely and instead requires a valid JWT
+  (`Depends(_auth_service.get_current_user)`), which is why this combination requires
+  `auth.enabled: true` (enforced by `app/erd/loader.py` — otherwise there'd be no `_auth_service`
+  to authenticate against).
+
+Real, tested example: `examples/ecommerce.yml`'s `Review` entity (`identity_source: {type:
+auth_user}`, `read_scope: any_authenticated`, `bypass_roles: [admin]`) — any authenticated
+customer can list/read every review, but only the review's own author (or an admin, via bypass)
+can update or delete it.
 
 ### Service and schema layers
 
@@ -135,11 +194,18 @@ the immediate parent's ownership already validated *its* parent.
 
 ## Bypass roles
 
-`rls.bypass_roles` (only valid with `identity_source.type: auth_user`, and requires
-`rbac.enabled: true`, since a bypass role is an RBAC role) lets specific roles — typically
-`admin` — see and act on every row, not just their own, for `list`/`get`/`update`/`delete`. As
-covered above, bypassing never applies to `create`: every created row is always owned by whoever
-created it.
+`rls.bypass_roles` (requires `rbac.enabled: true`, since a bypass role is an RBAC role) lets
+specific roles — typically `admin` — see and act on every row, not just their own, for
+`list`/`read`/`update`/`delete`. Valid with **either** `identity_source.type`: an `auth_user`
+bypass role sees across every owner; a `header` bypass role sees across every tenant without
+needing to supply the tenant header at all. As covered above, bypassing never applies to
+`create`: every created row is always owned by whoever (or whatever tenant) created it.
+
+Real, tested example: `examples/multi_tenant_saas.yml`'s `Project` entity (`identity_source:
+{type: header, header_name: X-Tenant-Id}`, `bypass_roles: [admin]`) — an `admin` caller sees and
+acts on every tenant's projects with no `X-Tenant-Id` header at all, while a non-admin caller
+stays fully isolated to whichever tenant its header names. `Task`, which inherits `Project`'s
+ownership via `cascades_ownership: true`, gets the same bypass behavior automatically.
 
 ## Error handling
 

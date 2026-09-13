@@ -54,6 +54,7 @@ Usage: backstudio [OPTIONS] COMMAND [ARGS]...
 
 Commands:
   generate   Generate a FastAPI backend from an ERD file.
+  grammar    Fast terminal reference for the ERD YAML grammar (not the...
   validate   Validate an ERD file without generating anything.
   visualize  Render an HTML ER diagram for the given ERD file.
 ```
@@ -140,7 +141,8 @@ route.
   either globally (`rbac.default_permissions`) or per entity (`endpoints.rbac`). See
   [docs-site/features/rbac.md](docs-site/features/rbac.md).
 - **Row-Level Security** — scope an entity's reads and writes to the resolved owner of each row
-  (from the authenticated user or a request header), with bypass roles for admins. See
+  (from the authenticated user or a request header), with bypass roles for admins and an opt-in
+  `read_scope: any_authenticated` for public-read/owner-only-write entities. See
   [docs-site/features/rls.md](docs-site/features/rls.md).
 - **Async, end to end** — set `database.async_mode: true` to generate an async SQLAlchemy stack
   (async engine/session, `select()`/`execute()`-based repo layer) — and the service methods and
@@ -150,7 +152,7 @@ route.
 
 ## CLI reference
 
-Three commands:
+Four commands:
 
 - `backstudio validate ERD_FILE` — parse and semantically validate an ERD file without
   generating anything.
@@ -158,6 +160,10 @@ Three commands:
   diagram for the given ERD file.
 - `backstudio generate ERD_FILE [-o/--output-dir PATH] [--force]` — generate a full FastAPI
   backend from an ERD file, into the current directory by default.
+- `backstudio grammar [TOPIC]` — fast terminal cheat sheet for the ERD YAML grammar (`project`,
+  `database`, `auth`, `rbac`, `entities`, `fields`, `relationships`, `endpoints`, `rls`,
+  `services`); omit `TOPIC` to list the top-level keys. Not the full documentation — just enough
+  to remember how to type something specific.
 
 Full flag-by-flag details and the ERD YAML format: [docs-site/cli-reference.md](docs-site/cli-reference.md).
 

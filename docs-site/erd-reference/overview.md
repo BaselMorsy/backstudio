@@ -121,6 +121,7 @@ entities:
       identity_source:
         type: auth_user              # resolve the owner from the JWT-authenticated User
       bypass_roles: [admin]          # admins see/write every row, not just their own
+      read_scope: owner              # or "any_authenticated" for public read, owner-only write
 ```
 
 `owner: true`/`cascades_ownership: true` (row-level ownership), `rls:` (where the owning identity

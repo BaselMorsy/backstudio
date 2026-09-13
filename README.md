@@ -33,7 +33,7 @@ mechanics of each piece.
 from the repo root:
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/BaselMorsy/backstudio
 cd backstudio
 
 ./install.sh          # macOS/Linux

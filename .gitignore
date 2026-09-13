@@ -8,8 +8,7 @@ workspace/
 .env
 site/
 
-# Design specs, implementation plans, and issue-tracking docs are working
-# documents for the development workflow - kept locally, never pushed.
-docs/superpowers/specs/
-docs/superpowers/plans/
+# Design specs, implementation plans, backlog, and issue-tracking docs are
+# working documents for the development workflow - kept locally, never pushed.
+docs/superpowers/
 ISSUES.md

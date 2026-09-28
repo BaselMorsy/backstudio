@@ -3,12 +3,8 @@
 from html import escape
 from typing import List
 
+from app.erd.field_types import mermaid_type
 from app.erd.schema import ERDConfig, ModelField
-
-_MERMAID_TYPE_MAP = {
-    "string": "string", "integer": "int", "float": "float", "boolean": "bool",
-    "datetime": "datetime", "date": "date", "text": "text", "json": "json", "uuid": "uuid",
-}
 
 _CARDINALITY_SYMBOLS = {
     "one-to-many": ("||", "o{"),
@@ -27,7 +23,7 @@ _AUTH_USER_DISPLAY_FIELDS: List[ModelField] = [
 def _entity_block(name: str, fields: List[ModelField]) -> str:
     lines = [f"    {name} {{"]
     for field in fields:
-        mtype = _MERMAID_TYPE_MAP.get(field.type.value, "string")
+        mtype = mermaid_type(field.type)
         markers = []
         if field.primary_key:
             markers.append("PK")

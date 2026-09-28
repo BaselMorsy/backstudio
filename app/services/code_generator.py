@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
+from app.erd import field_types
 from app.utils.file_ops import ensure_directory
 
 _DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -76,60 +77,23 @@ class CodeGenerator:
             text = re.sub('(.)([A-Z][a-z]+)', r'\1-\2', text)
             return re.sub('([a-z0-9])([A-Z])', r'\1-\2', text).lower()
 
-        def to_python_value(value: Any) -> str:
-            """Convert Python value to its string representation with correct syntax"""
-            if isinstance(value, bool):
-                return 'True' if value else 'False'
-            elif isinstance(value, str):
-                return repr(value)
-            elif value is None:
-                return 'None'
-            else:
-                return str(value)
-
         self.jinja_env.filters['snake_case'] = to_snake_case
         self.jinja_env.filters['pascal_case'] = to_pascal_case
         self.jinja_env.filters['camel_case'] = to_camel_case
         self.jinja_env.filters['kebab_case'] = to_kebab_case
-        self.jinja_env.filters['python_value'] = to_python_value
+        self.jinja_env.filters['python_value'] = field_types.python_literal
 
         # Register global functions for templates
         self.jinja_env.globals['get_sqlalchemy_type'] = self._get_sqlalchemy_type
         self.jinja_env.globals['get_python_type'] = self._get_python_type
 
     def _get_sqlalchemy_type(self, field_type: str) -> str:
-        """
-        Map FieldType enum values to SQLAlchemy column types.
-
-        Args:
-            field_type: Field type from schema (string, integer, etc.)
-
-        Returns:
-            SQLAlchemy type name
-        """
-        type_map = {
-            'string': 'String',
-            'integer': 'Integer',
-            'float': 'Float',
-            'boolean': 'Boolean',
-            'datetime': 'DateTime',
-            'date': 'Date',
-            'text': 'Text',
-            'json': 'JSON',
-            'uuid': 'String'  # UUID type would require additional import
-        }
-        return type_map.get(str(field_type).lower(), 'String')
+        """Map a FieldType value to a SQLAlchemy column type name (see app/erd/field_types.py)."""
+        return field_types.sa_type_for(field_type)
 
     def _get_python_type(self, field_type: str) -> str:
-        """Map FieldType enum values to Python/Pydantic type annotations."""
-        type_map = {
-            'string': 'str', 'integer': 'int', 'float': 'float', 'boolean': 'bool',
-            'datetime': 'datetime', 'date': 'date', 'text': 'str', 'json': 'Any', 'uuid': 'str',
-        }
-        # field_type may be a FieldType enum member (whose str() is "FieldType.X", not
-        # its value) or a plain string, depending on how the caller built the context.
-        value = field_type.value if hasattr(field_type, 'value') else field_type
-        return type_map.get(str(value).lower(), 'str')
+        """Map a FieldType value to a Python/Pydantic type annotation (see app/erd/field_types.py)."""
+        return field_types.py_type_for(field_type)
 
     def _render_template(self, template_path: str, context: Dict[str, Any]) -> str:
         """

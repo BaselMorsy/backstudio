@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session{% if has_any_m2m %}, selectinload{% endif +%}
 
 from .models import {% for model in project.data_models %}{{ model.name|pascal_case }}{{ ", " if not loop.last else "" }}{% endfor %}
 
+{% set all_actions = ['create', 'list', 'read', 'update', 'delete'] %}
 {% for model in project.data_models %}
+{% set enabled = model.enabled_actions if model.enabled_actions is defined else all_actions %}
 
 # {{ model.name|pascal_case }} Repository Functions
 
+{% if 'create' in enabled %}
 {% if project.database_config.async_mode %}
 async def create_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_data: dict) -> {{ model.name|pascal_case }}:
     """Create a new {{ model.name }}"""
@@ -35,6 +38,7 @@ def create_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
     db.commit()
     db.refresh({{ model.name|snake_case }})
     return {{ model.name|snake_case }}
+{% endif %}
 {% endif %}
 
 
@@ -102,6 +106,7 @@ def get_{{ model.name|snake_case }}_by_{{ field.name }}(db: Session, {{ field.na
 {% endif %}
 {%- endfor %}
 
+{% if 'list' in enabled %}
 {% if project.database_config.async_mode %}
 async def get_all_{{ model.plural_snake }}(
     db: AsyncSession,
@@ -163,8 +168,10 @@ def get_all_{{ model.plural_snake }}(
 {% endif %}
     return query.offset(skip).limit(limit).all()
 {% endif %}
+{% endif %}
 
 
+{% if 'update' in enabled %}
 {% if project.database_config.async_mode %}
 async def update_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int, update_data: dict{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> Optional[{{ model.name|pascal_case }}]:
     """Update {{ model.name }}"""
@@ -186,8 +193,10 @@ def update_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
         db.refresh({{ model.name|snake_case }})
     return {{ model.name|snake_case }}
 {% endif %}
+{% endif %}
 
 
+{% if 'delete' in enabled %}
 {% if project.database_config.async_mode %}
 async def delete_{{ model.name|snake_case }}(db: AsyncSession, {{ model.name|snake_case }}_id: int{% if model.rls %}, owner_id: Optional[int] = None{% endif %}) -> bool:
     """Delete {{ model.name }}"""
@@ -206,6 +215,7 @@ def delete_{{ model.name|snake_case }}(db: Session, {{ model.name|snake_case }}_
         db.commit()
         return True
     return False
+{% endif %}
 {% endif %}
 
 {% endfor %}

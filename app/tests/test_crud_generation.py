@@ -100,11 +100,10 @@ def test_custom_base_path_and_tags_used_in_routes(tmp_path):
     assert 'tags=["custom-tag"]' in routes_src
 
 
-def test_all_actions_disabled_entity_gets_schemas_and_service_but_no_routes(tmp_path):
-    """AuditLog declares endpoints.enabled: [] - it should still get full CRUD
-    schemas and service methods (those don't look at enabled_actions), but zero
-    route decorators in the shared module routes.py.
-    """
+def test_all_actions_disabled_entity_gets_schemas_but_no_service_methods_or_routes(tmp_path):
+    """AuditLog declares endpoints.enabled: [] - it still gets its schemas, but only *enabled*
+    actions get service methods (none here) and route decorators (none here). Category, which
+    keeps every action enabled, still gets full service methods."""
     erd = load_erd(f"{FIXTURES}/overrides.yml")
     state = translate(erd)
 
@@ -118,7 +117,8 @@ def test_all_actions_disabled_entity_gets_schemas_and_service_but_no_routes(tmp_
 
     service_src = (codebase_dir / "modules" / "stuff" / "service.py").read_text(encoding="utf-8")
     ast.parse(service_src)
-    assert "def create_audit_log(self, db: Session, data: dict)" in service_src
+    assert "def create_audit_log" not in service_src
+    assert "def create_category(self, db: Session, data: dict)" in service_src
 
     routes_src = (codebase_dir / "modules" / "stuff" / "routes.py").read_text(encoding="utf-8")
     ast.parse(routes_src)

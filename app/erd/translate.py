@@ -467,6 +467,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "plural_snake": _pluralize(entity.name),
             "fields": field_dicts[entity.name],
             "relationships": [],
+            "enabled_actions": list(entity.endpoints.enabled),
         }
         for entity in entities
     }

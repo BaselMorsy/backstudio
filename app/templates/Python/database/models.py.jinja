@@ -1,8 +1,15 @@
 """{{ project.name|replace('"', '\\"') }} - Database models"""
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, Text, JSON, ForeignKey, Table
+{% set sa_extras = sa_extra_imports(project) %}
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, Text, JSON, ForeignKey, Table{% for name in sa_extras %}, {{ name }}{% endfor +%}
 from sqlalchemy.orm import relationship
 from datetime import datetime
+{% if 'Numeric' in sa_extras %}
+from decimal import Decimal
+{% endif %}
+{% if project.enums %}
+from .enums import {{ project.enums|map(attribute='class_name')|join(', ') }}
+{% endif %}
 
 from .base import Base
 
@@ -13,8 +20,8 @@ from .base import Base
 {{ rel.association_table.table_name }} = Table(
     '{{ rel.association_table.table_name }}',
     Base.metadata,
-    Column('{{ rel.association_table.left_foreign_key.column }}', {{ get_sqlalchemy_type('integer') }}, ForeignKey('{{ rel.association_table.left_foreign_key.references }}'{% if rel.association_table.left_foreign_key.ondelete %}, ondelete='{{ rel.association_table.left_foreign_key.ondelete }}'{% endif %}), primary_key=True),
-    Column('{{ rel.association_table.right_foreign_key.column }}', {{ get_sqlalchemy_type('integer') }}, ForeignKey('{{ rel.association_table.right_foreign_key.references }}'{% if rel.association_table.right_foreign_key.ondelete %}, ondelete='{{ rel.association_table.right_foreign_key.ondelete }}'{% endif %}), primary_key=True)
+    Column('{{ rel.association_table.left_foreign_key.column }}', {{ get_sqlalchemy_type(rel.association_table.left_foreign_key.column_type or 'integer') }}, ForeignKey('{{ rel.association_table.left_foreign_key.references }}'{% if rel.association_table.left_foreign_key.ondelete %}, ondelete='{{ rel.association_table.left_foreign_key.ondelete }}'{% endif %}), primary_key=True),
+    Column('{{ rel.association_table.right_foreign_key.column }}', {{ get_sqlalchemy_type(rel.association_table.right_foreign_key.column_type or 'integer') }}, ForeignKey('{{ rel.association_table.right_foreign_key.references }}'{% if rel.association_table.right_foreign_key.ondelete %}, ondelete='{{ rel.association_table.right_foreign_key.ondelete }}'{% endif %}), primary_key=True)
 )
 
 {% endif %}
@@ -33,10 +40,10 @@ class {{ model.name|pascal_case }}(Base):
     {%- set is_fk = model.relationships and model.relationships|selectattr('foreign_key')|selectattr('foreign_key.column', 'equalto', field.name)|list|length > 0 -%}
     {% if not is_fk %}
     {% if field.primary_key %}
-    {{ field.name }} = Column({{ get_sqlalchemy_type(field.type) }}, primary_key=True, index=True{% if field.default %}, default={{ field.default|python_value }}{% endif %})
+    {{ field.name }} = Column({{ sa_column_type(field, with_length=False) }}, primary_key=True, index=True{% if field.default %}, default={{ py_default(field) }}{% endif %})
     {% else %}
     {{ field.name }} = Column(
-        {{ get_sqlalchemy_type(field.type) }}{% if field.max_length and field.type == 'string' %}({{ field.max_length }}){% endif %},
+        {{ sa_column_type(field) }},
 {% if field.unique %}
         unique=True,
 {% endif %}
@@ -44,7 +51,7 @@ class {{ model.name|pascal_case }}(Base):
         nullable=False,
 {% endif %}
 {% if field.default is not none %}
-        default={{ field.default|python_value }},
+        default={{ py_default(field) }},
 {% endif %}
     )
     {% endif %}
@@ -56,7 +63,7 @@ class {{ model.name|pascal_case }}(Base):
 {% for rel in model.relationships %}
     {% if rel.cardinality == 'many-to-one' and rel.foreign_key and rel.source.model == model.name and (rel._view is not defined or rel._view == 'source') %}
     {{ rel.foreign_key.column }} = Column(
-        {{ get_sqlalchemy_type('integer') }},
+        {{ get_sqlalchemy_type(rel.foreign_key.column_type or 'integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
 {% if not rel.foreign_key.nullable %}
         nullable=False,
@@ -67,7 +74,7 @@ class {{ model.name|pascal_case }}(Base):
     )
     {% elif rel.cardinality == 'one-to-many' and rel.foreign_key and rel.target.model == model.name and (rel._view is not defined or rel._view == 'target') %}
     {{ rel.foreign_key.column }} = Column(
-        {{ get_sqlalchemy_type('integer') }},
+        {{ get_sqlalchemy_type(rel.foreign_key.column_type or 'integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
 {% if not rel.foreign_key.nullable %}
         nullable=False,
@@ -78,7 +85,7 @@ class {{ model.name|pascal_case }}(Base):
     )
     {% elif rel.cardinality == 'one-to-one' and rel.foreign_key and rel.foreign_key.model == model.name and (rel._view is not defined or rel._view == 'source') %}
     {{ rel.foreign_key.column }} = Column(
-        {{ get_sqlalchemy_type('integer') }},
+        {{ get_sqlalchemy_type(rel.foreign_key.column_type or 'integer') }},
         ForeignKey('{{ rel.foreign_key.references }}'{% if rel.foreign_key.ondelete %}, ondelete='{{ rel.foreign_key.ondelete }}'{% endif %}),
 {% if not rel.foreign_key.nullable %}
         nullable=False,

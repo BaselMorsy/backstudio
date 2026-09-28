@@ -1099,3 +1099,107 @@ def test_translate_custom_jwt_lifetimes_flow_through():
     assert sec["jwt_refresh_expiration_minutes"] == 5
     assert sec["jwt_email_verification_expiration_minutes"] == 7
     assert sec["jwt_password_reset_expiration_minutes"] == 1
+
+
+def test_translate_fk_and_association_column_types_follow_the_referenced_primary_key():
+    state = translate(load_erd(f"{FIXTURES}/field_types_showcase.yml"))
+    rels = {r["name"]: r for r in state["relationships"]}
+    assert rels["ledger_entry"]["foreign_key"]["column_type"] == "bigint"
+    assoc = rels["ledger_tags"]["association_table"]
+    assert assoc["left_foreign_key"]["column_type"] == "bigint"
+    assert assoc["right_foreign_key"]["column_type"] == "bigint"
+
+
+def test_translate_integer_primary_keys_and_user_targets_stay_integer():
+    state = translate(load_erd(f"{FIXTURES}/valid_full.yml"))
+    for rel in state["relationships"]:
+        assert rel["foreign_key"]["column_type"] == "integer"
+    customer = next(r for r in translate(load_erd("examples/ecommerce.yml"))["relationships"] if r["name"] == "customer")
+    assert customer["target"]["model"] == "User" and customer["foreign_key"]["column_type"] == "integer"
+    state = translate(load_erd(f"{FIXTURES}/many_to_many.yml"))
+    m2m = next(r for r in state["relationships"] if r["cardinality"] == "many-to-many")
+    assert m2m["association_table"]["left_foreign_key"]["column_type"] == "integer"
+    assert m2m["association_table"]["right_foreign_key"]["column_type"] == "integer"
+
+
+def test_translate_annotates_enum_fields_and_lists_enums():
+    state = translate(load_erd(f"{FIXTURES}/field_types_showcase.yml"))
+    assert state["enums"] == [
+        {
+            "class_name": "LedgerEntryStatus",
+            "values": ["PENDING", "POSTED", "VOIDED"],
+            "entity": "LedgerEntry",
+            "field": "status",
+        }
+    ]
+    model = next(m for m in state["data_models"] if m["name"] == "LedgerEntry")
+    status = next(f for f in model["fields"] if f["name"] == "status")
+    assert status["enum_class"] == "LedgerEntryStatus"
+    assert status["enum_constraint"] == "ck_ledger_entries_status"
+    entity = next(e for m in state["modules"] for e in m["entities"] if e["name"] == "LedgerEntry")
+    assert next(f for f in entity["fields"] if f["name"] == "status")["enum_class"] == "LedgerEntryStatus"
+
+
+def test_translate_without_enums_has_an_empty_enums_list():
+    assert translate(load_erd(f"{FIXTURES}/valid_minimal.yml"))["enums"] == []
+
+
+def test_translate_rejects_an_enum_constraint_name_over_63_characters(tmp_path):
+    import yaml
+
+    path = tmp_path / "long.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "project": {"name": "Demo"},
+                "database": {"type": "sqlite", "database_name": "d.db"},
+                "entities": [
+                    {
+                        "name": "Widget",
+                        "table_name": "a_table_name_that_is_quite_long_indeed_for_a_postgres_identifier",
+                        "fields": [
+                            {"name": "id", "type": "integer", "primary_key": True},
+                            {"name": "a_rather_long_status_column", "type": "enum", "values": ["A", "B"]},
+                        ],
+                    }
+                ],
+                "services": [{"name": "things", "entities": ["Widget"]}],
+            }
+        )
+    )
+    with pytest.raises(ERDValidationError, match="a_rather_long_status_column.*63|63.*a_rather_long_status_column"):
+        translate(load_erd(path))
+
+
+def test_auth_injected_datetime_fields_are_naive_but_declared_ones_are_not():
+    state = translate(load_erd("examples/personal_finance.yml"))
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    for name in ("created_at", "updated_at"):
+        assert next(f for f in user["fields"] if f["name"] == name)["timezone"] is False
+    txn = next(m for m in state["data_models"] if m["name"] == "Transaction")
+    assert next(f for f in txn["fields"] if f["name"] == "occurred_at").get("timezone") is None
+
+
+def test_declared_user_enum_field_is_annotated(tmp_path):
+    import yaml
+
+    path = tmp_path / "user_enum.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "project": {"name": "Demo"},
+                "database": {"type": "sqlite", "database_name": "d.db"},
+                "auth": {"enabled": True},
+                "entities": [
+                    {"name": "User", "fields": [{"name": "tier", "type": "enum", "values": ["FREE", "PRO"], "default": "FREE"}]},
+                    {"name": "Widget", "fields": [{"name": "id", "type": "integer", "primary_key": True}]},
+                ],
+                "services": [{"name": "things", "entities": ["Widget"]}, {"name": "auth", "entities": ["User"]}],
+            }
+        )
+    )
+    state = translate(load_erd(path))
+    assert [e["class_name"] for e in state["enums"]] == ["UserTier"]
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    tier = next(f for f in user["fields"] if f["name"] == "tier")
+    assert tier["enum_class"] == "UserTier" and tier["enum_constraint"] == "ck_users_tier"

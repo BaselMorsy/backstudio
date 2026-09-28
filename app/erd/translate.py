@@ -4,17 +4,20 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from app.erd.field_types import enum_class_name
 from app.erd.loader import ERDValidationError
-from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, RelationshipDecl
+from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, FieldType, ModelField, RelationshipDecl
 
+# created_at/updated_at are timezone: False because the auth code writes naive
+# datetime.utcnow() - a timezone-aware column would misread that value on PostgreSQL.
 AUTH_USER_FIELDS: List[Dict[str, Any]] = [
     {"name": "id", "type": "integer", "primary_key": True, "nullable": False, "default": None},
     {"name": "email", "type": "string", "unique": True, "nullable": False, "max_length": 255, "default": None},
     {"name": "password_hash", "type": "string", "nullable": False, "max_length": 255, "default": None},
     {"name": "roles", "type": "json", "nullable": False, "default": []},
     {"name": "is_active", "type": "boolean", "nullable": False, "default": True},
-    {"name": "created_at", "type": "datetime", "nullable": False, "default": None},
-    {"name": "updated_at", "type": "datetime", "nullable": False, "default": None},
+    {"name": "created_at", "type": "datetime", "nullable": False, "default": None, "timezone": False},
+    {"name": "updated_at", "type": "datetime", "nullable": False, "default": None, "timezone": False},
 ]
 
 
@@ -41,6 +44,46 @@ def _table_name(erd: ERDConfig, entity_name: str) -> str:
     if entity and entity.table_name:
         return entity.table_name
     return _pluralize(entity_name)
+
+
+_MAX_IDENTIFIER_LENGTH = 63
+
+
+def _pk_type(erd: ERDConfig, entity_name: str) -> str:
+    """'bigint' when the entity's primary-key field is bigint, else 'integer'. The injected
+    User's id is always integer. (Only integer/bigint PKs are supported for FK typing.)"""
+    entity = next((e for e in erd.entities if e.name == entity_name), None)
+    if entity is None or entity_name == "User":
+        return "integer"
+    pk = next((f for f in entity.fields if f.primary_key), None)
+    return "bigint" if pk is not None and pk.type == FieldType.BIGINT else "integer"
+
+
+def _field_dicts(
+    entity_name: str, table_name: str, fields: List[ModelField], enums: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """model_dump each field; enum fields also get their generated class and CHECK
+    constraint names, and are recorded in `enums` (rendered into database/enums.py)."""
+    dicts: List[Dict[str, Any]] = []
+    for field in fields:
+        data = field.model_dump(mode="json")
+        if field.type == FieldType.ENUM:
+            constraint = f"ck_{table_name}_{field.name}"
+            if len(constraint) > _MAX_IDENTIFIER_LENGTH:
+                raise ERDValidationError(
+                    f"Entity '{entity_name}' field '{field.name}': the enum CHECK constraint name "
+                    f"'{constraint}' is {len(constraint)} characters, over the "
+                    f"{_MAX_IDENTIFIER_LENGTH}-character identifier limit - shorten the entity's "
+                    "table_name or the field name."
+                )
+            class_name = enum_class_name(entity_name, field.name)
+            data["enum_class"] = class_name
+            data["enum_constraint"] = constraint
+            enums.append(
+                {"class_name": class_name, "values": list(field.values), "entity": entity_name, "field": field.name}
+            )
+        dicts.append(data)
+    return dicts
 
 
 def _build_relationship(
@@ -109,11 +152,13 @@ def _build_relationship(
                 "model": entity.name,
                 "column": f"{_snake_case(entity.name)}_id",
                 "references": f"{entity_table}.id",
+                "column_type": _pk_type(erd, entity.name),
             },
             "right_foreign_key": {
                 "model": rel.target,
                 "column": f"{_snake_case(rel.target)}_id",
                 "references": f"{target_table}.id",
+                "column_type": _pk_type(erd, rel.target),
             },
         }
         return rel_dict
@@ -122,15 +167,18 @@ def _build_relationship(
         fk_model = rel.target
         fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(entity.name)}_id")
         fk_references = f"{entity_table}.id"
+        fk_type = _pk_type(erd, entity.name)
     else:  # many-to-one or one-to-one: this entity owns the FK column
         fk_model = entity.name
         fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(rel.target)}_id")
         fk_references = f"{target_table}.id"
+        fk_type = _pk_type(erd, rel.target)
 
     rel_dict["foreign_key"] = {
         "model": fk_model,
         "column": fk_column,
         "references": fk_references,
+        "column_type": fk_type,
         "nullable": rel.nullable,
         "unique": rel.unique or rel.cardinality == "one-to-one",
         "ondelete": rel.ondelete,
@@ -347,7 +395,7 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
         resolve(model_name, frozenset())
 
 
-def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
+def _build_user_entity(erd: ERDConfig, enums: List[Dict[str, Any]]) -> Dict[str, Any]:
     declared = next((e for e in erd.entities if e.name == "User"), None)
     fields = [dict(f) for f in AUTH_USER_FIELDS]
     if erd.auth.registration.mode == "email_verification":
@@ -355,7 +403,7 @@ def _build_user_entity(erd: ERDConfig) -> Dict[str, Any]:
     elif erd.auth.registration.mode == "admin_approval":
         fields.append({"name": "is_approved", "type": "boolean", "nullable": False, "default": False})
     if declared:
-        fields.extend(f.model_dump(mode='json') for f in declared.fields)
+        fields.extend(_field_dicts("User", "users", declared.fields, enums))
     return {
         "name": "User",
         "table_name": "users",
@@ -406,19 +454,25 @@ def _resolve_modules(erd: ERDConfig, crud_entities: List[Dict[str, Any]]) -> Lis
 def translate(erd: ERDConfig) -> Dict[str, Any]:
     entities = [e for e in erd.entities if e.name != "User"]
 
+    enums: List[Dict[str, Any]] = []
+    field_dicts = {
+        entity.name: _field_dicts(entity.name, _table_name(erd, entity.name), entity.fields, enums)
+        for entity in entities
+    }
+
     data_models: Dict[str, Dict[str, Any]] = {
         entity.name: {
             "name": entity.name,
             "table_name": _table_name(erd, entity.name),
             "plural_snake": _pluralize(entity.name),
-            "fields": [f.model_dump(mode='json') for f in entity.fields],
+            "fields": field_dicts[entity.name],
             "relationships": [],
         }
         for entity in entities
     }
 
     if erd.auth.enabled:
-        data_models["User"] = _build_user_entity(erd)
+        data_models["User"] = _build_user_entity(erd, enums)
 
     relationships: List[Dict[str, Any]] = []
     for entity in entities:
@@ -480,7 +534,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "tags": entity.endpoints.tags or [plural_snake],
             "enabled_actions": entity.endpoints.enabled,
             "rbac": _resolve_rbac(erd, entity),
-            "fields": [f.model_dump(mode='json') for f in entity.fields],
+            "fields": [dict(f) for f in field_dicts[entity.name]],
             "owned_relationships": data_models[entity.name]["owned_relationships"],
             "many_to_many_relationships": data_models[entity.name]["many_to_many_relationships"],
             "rls": data_models[entity.name]["rls"],
@@ -508,6 +562,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "framework": "fastapi",
         "checksum": "",
         "data_models": list(data_models.values()),
+        "enums": enums,
         "relationships": relationships,
         "middlewares": [],
         "dependencies": [],

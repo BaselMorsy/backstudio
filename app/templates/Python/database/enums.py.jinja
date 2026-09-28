@@ -1,0 +1,11 @@
+"""{{ project.name|replace('"', '\\"') }} - Enumerations for enum-typed fields"""
+
+from enum import Enum
+{% for enum in project.enums %}
+
+
+class {{ enum.class_name }}(str, Enum):
+{% for value in enum['values'] %}
+    {{ value }} = {{ value|python_value }}
+{% endfor %}
+{% endfor %}

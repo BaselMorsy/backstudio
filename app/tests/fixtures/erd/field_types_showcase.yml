@@ -1,0 +1,35 @@
+project:
+  name: FieldTypesShowcase
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: field_types_showcase.db
+
+entities:
+  - name: LedgerEntry
+    fields:
+      - {name: id, type: bigint, primary_key: true}
+      - {name: amount, type: decimal, precision: 18, scale: 2, nullable: false}
+      - {name: fee, type: decimal, precision: 10, scale: 4, default: 0.5}
+      - {name: ref, type: uuid}
+      - {name: booked_at, type: datetime}
+      - {name: local_note_at, type: datetime, timezone: false}
+      - {name: status, type: enum, values: [PENDING, POSTED, VOIDED], default: PENDING, nullable: false}
+
+  - name: LedgerLine
+    fields:
+      - {name: id, type: bigint, primary_key: true}
+      - {name: memo, type: string}
+    relationships:
+      - {name: ledger_entry, cardinality: many-to-one, target: LedgerEntry}
+      - {name: ledger_tags, cardinality: many-to-many, target: LedgerTag}
+
+  - name: LedgerTag
+    fields:
+      - {name: id, type: bigint, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: ledger
+    entities: [LedgerEntry, LedgerLine, LedgerTag]

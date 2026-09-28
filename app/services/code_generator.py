@@ -86,6 +86,11 @@ class CodeGenerator:
         # Register global functions for templates
         self.jinja_env.globals['get_sqlalchemy_type'] = self._get_sqlalchemy_type
         self.jinja_env.globals['get_python_type'] = self._get_python_type
+        self.jinja_env.globals['sa_column_type'] = field_types.sa_column_type
+        self.jinja_env.globals['py_type'] = field_types.py_type
+        self.jinja_env.globals['py_default'] = field_types.py_default
+        self.jinja_env.globals['sa_extra_imports'] = field_types.sa_extra_imports
+        self.jinja_env.globals['schema_type_imports'] = field_types.schema_type_imports
 
     def _get_sqlalchemy_type(self, field_type: str) -> str:
         """Map a FieldType value to a SQLAlchemy column type name (see app/erd/field_types.py)."""
@@ -180,6 +185,11 @@ class CodeGenerator:
             db_dir / "models.py",
             self._render_template("Python/database/models.py.jinja", context)
         )
+        if state.get('enums'):
+            self._write_file(
+                db_dir / "enums.py",
+                self._render_template("Python/database/enums.py.jinja", context)
+            )
         self._write_file(
             db_dir / "repo.py",
             self._render_template("Python/database/repo.py.jinja", context)

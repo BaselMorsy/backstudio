@@ -80,7 +80,10 @@ Concretely, `translate()`:
 - Builds `data_models`: one dict per entity (keyed by name), each with `name`, `table_name`
   (`_table_name()` — the entity's explicit `table_name` or a pluralized snake-case default via
   `_pluralize()`/`_snake_case()`), `plural_snake`, `fields` (each `ModelField` dumped to a plain
-  dict via `model_dump(mode='json')`), and `relationships`.
+  dict via `model_dump(mode='json')` — an `enum` field's dict also gets `enum_class`/
+  `enum_constraint`, and is appended to the top-level `enums` list), `relationships`,
+  `enabled_actions` (declared entities only — the injected `User` has no such key, and templates
+  treat a missing key as "all five enabled"), and `description`.
 - If `erd.auth.enabled`, injects a synthetic `User` model via `_build_user_entity()`: the seven
   fixed `AUTH_USER_FIELDS` (`id`, `email`, `password_hash`, `roles`, `is_active`, `created_at`,
   `updated_at`), plus `is_verified` when `auth.registration.mode == "email_verification"` or
@@ -90,8 +93,12 @@ Concretely, `translate()`:
   column names, and (for many-to-many) association-table shape, using `rel.name` as the naming
   basis instead of the generic target-derived default whenever an entity declares more than one
   relationship to the same target, or the relationship is self-referential (`use_name_basis`).
-  `_validate_relationship_uniqueness()` then raises `ERDValidationError` if two relationships on
-  the same entity would still derive a colliding attribute or FK column name.
+  Each `foreign_key` dict (and each association table's `left_foreign_key`/`right_foreign_key`)
+  also carries `column_type` (`"integer"` or `"bigint"`, via `_pk_type()`) — the referenced
+  entity's primary-key type, so a `bigint`-keyed entity gets matching FK/association columns
+  instead of always-`integer` ones. `_validate_relationship_uniqueness()` then raises
+  `ERDValidationError` if two relationships on the same entity would still derive a colliding
+  attribute or FK column name.
 - Derives `owned_relationships` (`_owned_relationships_for()`) and
   `many_to_many_relationships` (`_many_to_many_relationships_for()`) per model, then resolves
   row-level-security ownership for every model via `_resolve_rls()` — walking `owner: true` and
@@ -99,8 +106,8 @@ Concretely, `translate()`:
   join chain, identity source, bypass roles) to each model, or `None` if the entity isn't
   RLS-governed.
 - Builds `crud_entities`: one dict per non-`User` entity carrying everything the CRUD
-  service/route/schema templates need — `base_path`, `tags`, `enabled_actions`, resolved
-  per-action `rbac` (via `_resolve_rbac()`, which layers `endpoints.rbac` overrides over
+  service/route/schema templates need — `base_path`, `tags`, `enabled_actions`, `description`,
+  resolved per-action `rbac` (via `_resolve_rbac()`, which layers `endpoints.rbac` overrides over
   `rbac.default_permissions` over "all declared roles if RBAC is enabled" over "no roles"), and
   the model's `owned_relationships`/`many_to_many_relationships`/`rls`.
 - Builds `modules`: one dict per `services:` entry *other than* the auth (`User`-only) service,
@@ -112,10 +119,13 @@ Concretely, `translate()`:
   settings) when `auth.enabled`, else `None`.
 
 The returned `state` dict's top-level keys (verified against the real `return` statement) are:
-`name`, `description`, `version`, `framework`, `checksum`, `data_models`, `relationships`,
-`middlewares`, `dependencies`, `database_config`, `security_config`, `modules`,
-`auth_module_name`, `auth_enabled`, `rbac_enabled`, `rbac_roles`, `registration_mode`. This dict
-is what `CodeGenerator.generate_project()` receives — it never sees an `ERDConfig`.
+`name`, `description`, `version`, `framework`, `checksum`, `data_models`, `enums`,
+`relationships`, `middlewares`, `dependencies`, `database_config`, `security_config`, `modules`,
+`auth_module_name`, `auth_enabled`, `rbac_enabled`, `rbac_roles`, `registration_mode`. `enums` is
+a flat list of `{class_name, values, entity, field}` dicts, one per `enum`-typed field across the
+whole ERD (empty when none exist) — `database/enums.py.jinja` is only rendered when it's
+non-empty. This dict is what `CodeGenerator.generate_project()` receives — it never sees an
+`ERDConfig`.
 
 ## Stage 3: `app/services/code_generator.py` — `state` to rendered files
 

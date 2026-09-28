@@ -33,6 +33,7 @@ app/templates/Python/
 │   └── service.py.jinja
 ├── database/
 │   ├── base.py.jinja
+│   ├── enums.py.jinja         # only rendered when the ERD declares an enum field
 │   ├── models.py.jinja
 │   └── repo.py.jinja
 ├── rbac/
@@ -68,10 +69,19 @@ trailing newline instead of Jinja's default of stripping it (so generated files 
 with exactly one newline, not zero).
 
 `_register_filters()` (called from `__init__`) adds custom filters — `snake_case`,
-`pascal_case`, `camel_case`, `kebab_case`, `python_value` — and two globals,
-`get_sqlalchemy_type` and `get_python_type` (both used by `database/models.py.jinja` and friends
-to map an ERD `FieldType` to a SQLAlchemy column type / Python type annotation). The
-`snake_case` filter's implementation is a byte-for-byte duplicate of `_snake_case()` in
+`pascal_case`, `camel_case`, `kebab_case`, `python_value` — and several globals. Field-type
+mapping lives in one place, `app/erd/field_types.py` (imported as `field_types` by
+`CodeGenerator`), which both the generator's Jinja globals and `app/erd/visualize.py` delegate
+to instead of each keeping their own copy. `CodeGenerator` exposes the simple maps as
+`get_sqlalchemy_type` / `get_python_type` (used for FK/association column types, which are
+always plain `integer`/`bigint`), plus the richer `sa_column_type`, `py_type`, `py_default`,
+`sa_extra_imports` and `schema_type_imports` (used for a field's own type — these know about
+`decimal`'s `Numeric(precision, scale)`, `enum`'s generated class, and the SQLite-friendly
+`bigint` primary-key variant, none of which the simple maps can express). `python_value` is the
+`repr`-based filter that all free text (descriptions, database credentials, and similar) must
+render through — never `tojson`, which corrupts non-BMP characters (emoji) into invalid Python
+when embedded in generated source. The `snake_case` filter's implementation is a byte-for-byte
+duplicate of `_snake_case()` in
 `app/erd/translate.py` — a comment at both call sites flags that the two must stay identical,
 since generated code mixes names computed by `translate.py` (e.g. `repo.get_<target_snake>_by_id`
 calls baked into `crud_entities`/relationship dicts) with names the `snake_case` filter computes

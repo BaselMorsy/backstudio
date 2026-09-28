@@ -171,6 +171,7 @@ Each entry is an `EntitySpec`:
 | `relationships` | `List[RelationshipDecl]` | default `[]` | Relationships to other entities — see `RelationshipDecl` below. |
 | `endpoints` | `EndpointSpec` | default `EndpointSpec()` | Which CRUD endpoints to generate and their RBAC overrides — see `EndpointSpec` below. |
 | `rls` | `Optional[RLSSpec]` | default `None` | Row-level security identity source, required when the entity has an `owner: true` relationship — see `RLSSpec` below. |
+| `description` | `Optional[str]` | default `None` | Emitted as the SQL table `comment`. |
 
 **Cross-field rules (loader):**
 
@@ -188,13 +189,38 @@ Each entry is an `EntitySpec`:
 | Field | Type | Required/default | Description |
 |---|---|---|---|
 | `name` | `str` | required | Field name. |
-| `type` | `FieldType` enum: `string`, `integer`, `float`, `boolean`, `datetime`, `date`, `text`, `json`, `uuid` | required | Field data type. |
+| `type` | `FieldType` enum: `string`, `integer`, `bigint`, `float`, `decimal`, `boolean`, `datetime`, `date`, `text`, `json`, `uuid`, `enum` | required | Field data type. |
 | `nullable` | `bool` | default `True` | Whether field can be null. |
 | `unique` | `bool` | default `False` | Whether field must be unique. |
 | `default` | `Optional[Any]` | default `None` | Default value. |
 | `primary_key` | `bool` | default `False` | Whether this is a primary key. |
 | `index` | `bool` | default `False` | Whether to create an index. |
 | `max_length` | `Optional[int]` | default `None` | Max length for string fields. |
+| `precision` | `Optional[int]` | default `None` | `decimal` only: total digits. Required together with `scale` for `decimal`; rejected on every other type. |
+| `scale` | `Optional[int]` | default `None` | `decimal` only: digits after the decimal point (`0 <= scale <= precision`). |
+| `values` | `Optional[List[str]]` | default `None` | `enum` only, required and non-empty: the allowed values, unique. Each must start with a letter, contain only letters/digits/underscores, not be a Python keyword, and not shadow a `str`/`Enum` attribute (`name`, `value`, `mro`, `count`, `upper`, ...). UPPER_SNAKE_CASE is always safe. |
+| `timezone` | `Optional[bool]` | default `None` | `datetime` only. Unset or `true` generates `DateTime(timezone=True)`; `false` opts a field out. The auth-injected `User` timestamps are always naive. |
+| `description` | `Optional[str]` | default `None` | Any type. Becomes the SQL column `comment`, the Pydantic `Field(description=...)` (so it appears in OpenAPI) and a note in `backstudio visualize`. |
+
+**Cross-field rules (schema-level, `ModelField.type_specific_attributes_are_valid`):**
+
+- `decimal` requires both `precision` and `scale` (`precision >= 1`, `0 <= scale <= precision`); `precision`/`scale` are rejected on every other type.
+- `decimal` and `enum` fields may not be `primary_key`.
+- A `decimal` field's `default`, if set, must parse as a `Decimal` (a bare `"abc"`, `"NaN"` or a `bool` is rejected).
+- `enum` requires a non-empty, unique `values` list, each value identifier-safe (see above); `values` is rejected on every other type.
+- An `enum` field's `default`, if set, must be one of its `values`.
+- `timezone` is only valid on `datetime` fields.
+
+**Type notes:** `bigint` maps to `BigInteger` (a primary key uses a SQLite-friendly variant so it
+autoincrements); FK columns and many-to-many association columns take their type from the
+referenced entity's primary key (`integer` or `bigint`); `decimal` maps to `Numeric(precision,
+scale)` / Pydantic `Decimal`, serialized as a JSON string, and is stored as REAL on SQLite
+(exactness is guaranteed only on PostgreSQL/MySQL); `uuid` maps to `Uuid(as_uuid=True)` /
+`uuid.UUID` (native on PostgreSQL, `CHAR(32)` elsewhere); `enum` generates `database/enums.py`
+(`class <Entity><Field>(str, Enum)`), a non-native `Enum` with a named CHECK constraint
+`ck_<table>_<column>` (must be <= 63 characters; `generate` reports a longer one), and a typed
+Pydantic field (invalid values return 422); the generated class name must not equal another enum
+class or any entity's model class (the loader rejects it).
 
 ### `RelationshipDecl`
 
@@ -202,7 +228,7 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Relationship attribute name. |
+| `name` | `str` | required | Identifies the relationship. It drives the generated attribute and `<name>_id` FK column **only** when the entity has two or more relationships to the same target (or the relationship is self-referential); otherwise they are derived from the target, and `validate`/`generate` warn. Set `attribute` / `foreign_key_column` to choose them explicitly. |
 | `cardinality` | `Cardinality` enum: `one-to-many`, `many-to-one`, `one-to-one`, `many-to-many` | required | Relationship cardinality. |
 | `target` | `str` | required | Name of the target entity. |
 | `attribute` | `Optional[str]` | default `None` | Overrides the attribute name on this side. |
@@ -231,7 +257,7 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `enabled` | `List[str]` | default `["create", "list", "read", "update", "delete"]` | Which CRUD actions to generate endpoints for. Values are validated against that same 5-action set. |
+| `enabled` | `List[str]` | default `["create", "list", "read", "update", "delete"]` | Which CRUD actions to generate endpoints for. Values are validated against that same 5-action set. Also controls which repository and service functions are generated (`get_*_by_id` is always generated because FK validation depends on it). |
 | `base_path` | `Optional[str]` | default `None` | Overrides the generated route prefix. |
 | `tags` | `Optional[List[str]]` | default `None` | Overrides the OpenAPI tags for this entity's routes. |
 | `rbac` | `Optional[EndpointRBAC]` | default `None` | Per-action role overrides for this entity, taking precedence over `rbac.default_permissions` — see `EndpointRBAC` below. |
@@ -334,5 +360,5 @@ Quick lookup for every `Enum`/`Literal` type used above:
 | `RLSSpec.read_scope` | `owner`, `any_authenticated` |
 | `Cardinality` (`relationships[].cardinality`) | `one-to-many`, `many-to-one`, `one-to-one`, `many-to-many` |
 | `LazyStrategy` (`relationships[].lazy`) | `select`, `joined`, `selectin`, `subquery`, `raise` |
-| `FieldType` (`fields[].type`) | `string`, `integer`, `float`, `boolean`, `datetime`, `date`, `text`, `json`, `uuid` |
+| `FieldType` (`fields[].type`) | `string`, `integer`, `bigint`, `float`, `decimal`, `boolean`, `datetime`, `date`, `text`, `json`, `uuid`, `enum` |
 | CRUD actions (`endpoints.enabled`, `rbac.default_permissions` keys, `endpoints.rbac` fields) | `create`, `list`, `read`, `update`, `delete` |

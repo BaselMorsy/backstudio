@@ -52,9 +52,12 @@ Options:
 
 ### Behavior
 
-Loads and semantically validates the ERD via `app.erd.loader.load_erd`. On success, prints a
-one-line summary (entity count, relationship count, whether `auth` and `rbac` are enabled) in
-green and exits `0`. On an `ERDValidationError`, prints the error in red and exits with code `1`.
+Loads and semantically validates the ERD via `app.erd.loader.load_erd`. Before the summary line,
+prints one yellow `Warning: ...` line per relationship whose declared `name` will not be used
+(see `app.erd.warnings.collect_warnings`) — warnings never change the exit code. On success,
+prints a one-line summary (entity count, relationship count, whether `auth` and `rbac` are
+enabled) in green and exits `0`. On an `ERDValidationError`, prints the error in red and exits
+with code `1`.
 
 ### Example
 
@@ -135,7 +138,8 @@ Options:
 
 ### Behavior
 
-1. Loads and validates the ERD (same failure mode as `validate`/`visualize` on an invalid file).
+1. Loads and validates the ERD (same failure mode as `validate`/`visualize` on an invalid file),
+   printing the same relationship-name warnings `validate` does before generating.
 2. Translates the ERD into generator state via `app.erd.translate.translate`.
 3. Generates the project into `<output-dir>/<project.name>` via
    `app.services.code_generator.CodeGenerator` — by default, `<output-dir>` is wherever you ran
@@ -151,9 +155,14 @@ Options:
    telling you where.
 5. **Alembic autogeneration:** if the generated project has an `alembic.ini` (i.e. a database is
    configured), `generate` best-effort runs `alembic revision --autogenerate -m initial` in the
-   generated project directory (30s timeout). A failure here only prints a yellow warning — it
-   never fails the `generate` command itself — and tells you to run the migration yourself once
-   the database is reachable.
+   generated project directory (30s timeout). On failure, `generate` prints **one** yellow line —
+   `Warning: could not auto-generate the initial Alembic migration (<last line of the process
+   output>). Once the project's dependencies are installed and the database is reachable, run
+   alembic revision --autogenerate -m initial inside <dir>.` — and never fails the command itself.
+   Autogenerate runs in the CLI's own Python environment, so it cannot import a project's database
+   driver; expect this warning for PostgreSQL/MySQL projects, whose default `DATABASE_URL` now
+   points at the real database (see [`backstudio grammar database`](#backstudio-grammar) and
+   the [ERD reference](erd-reference/fields.md#database-databasespec)).
 6. On success, prints the generated project path in bold green and a reminder to copy the
    directory into your project.
 

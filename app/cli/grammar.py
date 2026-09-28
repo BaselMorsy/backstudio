@@ -78,6 +78,7 @@ rbac:
 entities:
   - name: str                  # required; "User" is reserved unless auth.enabled: true
     table_name: str             # optional, overrides the generated table name
+    description: str              # optional; SQL table comment
     fields: [ ModelField, ... ]
     relationships: [ RelationshipDecl, ... ]
     endpoints: EndpointSpec
@@ -89,14 +90,23 @@ entities:
     "fields": """\
 fields:                                                     # ModelField
   - name: str                                                 # required
-    type: string | integer | float | boolean | datetime |
-          date | text | json | uuid                           # required
+    type: string | integer | bigint | float | decimal | boolean |
+          datetime | date | text | json | uuid | enum           # required
     nullable: bool = true
     unique: bool = false
-    default: any
-    primary_key: bool = false
+    default: any                  # decimal: number or string; enum: one of `values`
+    primary_key: bool = false     # integer or bigint; not decimal/enum
     index: bool = false
-    max_length: int              # string fields only
+    max_length: int               # string fields only
+    precision: int                # decimal only; required with scale
+    scale: int                    # decimal only; 0 <= scale <= precision
+    values: [str, ...]            # enum only; required, unique, e.g. [PENDING, POSTED]
+    timezone: bool                # datetime only; default true (timezone-aware)
+    description: str              # any type: SQL comment, OpenAPI description, diagram note
+
+# enum values: letters/digits/underscores, start with a letter, no Python keywords and no
+# names that shadow str/Enum attributes (class, None, name, value, count, ...). UPPER_SNAKE is safe.
+# decimal on SQLite is stored as REAL; exactness is guaranteed on PostgreSQL/MySQL.
 """,
     "relationships": """\
 relationships:                                              # RelationshipDecl
@@ -120,10 +130,13 @@ relationships:                                              # RelationshipDecl
 # each entity may have at most one relationship with owner: true and at most
 # one with cascades_ownership: true. Only one side of a relationship needs to
 # be declared - translate.py fills in the other side.
+# `name` only drives the attribute/FK names when the entity has 2+ relationships to the same
+# target; otherwise they are derived from the target (validate/generate warn). Set `attribute:` /
+# `foreign_key_column:` to choose them explicitly.
 """,
     "endpoints": """\
 endpoints:                                                  # EndpointSpec
-  enabled: [create, list, read, update, delete]    # default: all 5
+  enabled: [create, list, read, update, delete]    # default: all 5; also controls which repo/service functions are generated
   base_path: str          # overrides the route prefix; always wins over services[].prefix
   tags: [str, ...]        # overrides the OpenAPI tags
   rbac:                                                       # EndpointRBAC

@@ -34,3 +34,19 @@ def test_grammar_unknown_topic_exits_nonzero_and_lists_valid_topics():
     assert "Unknown topic 'bogus'" in result.output
     for topic in TOPICS:
         assert topic in result.output
+
+
+def test_grammar_fields_topic_documents_the_new_types_and_attributes():
+    output = runner.invoke(app, ["grammar", "fields"]).output
+    for token in ("bigint", "decimal", "enum", "precision", "scale", "values", "timezone", "description"):
+        assert token in output, token
+
+
+def test_grammar_entities_and_relationships_topics_document_description_and_name_rule():
+    assert "description" in runner.invoke(app, ["grammar", "entities"]).output
+    relationships = runner.invoke(app, ["grammar", "relationships"]).output
+    assert "derived from the target" in relationships and "attribute" in relationships
+
+
+def test_grammar_endpoints_topic_says_enabled_controls_generated_code():
+    assert "repo/service" in runner.invoke(app, ["grammar", "endpoints"]).output

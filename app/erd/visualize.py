@@ -1,7 +1,7 @@
 """Render a standalone HTML page with a Mermaid ER diagram for an ERDConfig."""
 
 from html import escape
-from typing import List
+from typing import List, Optional
 
 from app.erd.field_types import mermaid_type
 from app.erd.schema import ERDConfig, ModelField
@@ -20,6 +20,14 @@ _AUTH_USER_DISPLAY_FIELDS: List[ModelField] = [
 ]
 
 
+def _mermaid_comment(description: Optional[str]) -> str:
+    """Mermaid ER attribute comments cannot contain double quotes or line breaks."""
+    if not description:
+        return ""
+    text = " ".join(description.replace('"', "'").split())
+    return f' "{text}"' if text else ""
+
+
 def _entity_block(name: str, fields: List[ModelField]) -> str:
     lines = [f"    {name} {{"]
     for field in fields:
@@ -30,7 +38,7 @@ def _entity_block(name: str, fields: List[ModelField]) -> str:
         if field.unique and not field.primary_key:
             markers.append("UK")
         marker = " " + ",".join(markers) if markers else ""
-        lines.append(f"        {mtype} {field.name}{marker}")
+        lines.append(f"        {mtype} {field.name}{marker}{_mermaid_comment(field.description)}")
     lines.append("    }")
     return "\n".join(lines)
 

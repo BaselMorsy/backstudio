@@ -31,16 +31,19 @@ from .base import Base
 {% for model in project.data_models|sort(attribute='name') %}
 
 class {{ model.name|pascal_case }}(Base):
-    """{{ model.description or model.name + ' model' }}"""
+    """{{ model.name + ' model' }}"""
 
     __tablename__ = "{{ model.table_name }}"
+{% if model.description %}
+    __table_args__ = dict(comment={{ model.description|python_value }})
+{% endif %}
 
     # Fields
 {% for field in model.fields|sort(attribute='name') %}
     {%- set is_fk = model.relationships and model.relationships|selectattr('foreign_key')|selectattr('foreign_key.column', 'equalto', field.name)|list|length > 0 -%}
     {% if not is_fk %}
     {% if field.primary_key %}
-    {{ field.name }} = Column({{ sa_column_type(field, with_length=False) }}, primary_key=True, index=True{% if field.default %}, default={{ py_default(field) }}{% endif %})
+    {{ field.name }} = Column({{ sa_column_type(field, with_length=False) }}, primary_key=True, index=True{% if field.default %}, default={{ py_default(field) }}{% endif %}{% if field.description %}, comment={{ field.description|python_value }}{% endif %})
     {% else %}
     {{ field.name }} = Column(
         {{ sa_column_type(field) }},
@@ -52,6 +55,9 @@ class {{ model.name|pascal_case }}(Base):
 {% endif %}
 {% if field.default is not none %}
         default={{ py_default(field) }},
+{% endif %}
+{% if field.description %}
+        comment={{ field.description|python_value }},
 {% endif %}
     )
     {% endif %}

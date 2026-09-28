@@ -468,6 +468,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "fields": field_dicts[entity.name],
             "relationships": [],
             "enabled_actions": list(entity.endpoints.enabled),
+            "description": entity.description,
         }
         for entity in entities
     }
@@ -534,6 +535,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             ),
             "tags": entity.endpoints.tags or [plural_snake],
             "enabled_actions": entity.endpoints.enabled,
+            "description": entity.description,
             "rbac": _resolve_rbac(erd, entity),
             "fields": [dict(f) for f in field_dicts[entity.name]],
             "owned_relationships": data_models[entity.name]["owned_relationships"],

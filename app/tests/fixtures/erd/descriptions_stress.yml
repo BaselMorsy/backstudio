@@ -1,0 +1,27 @@
+project:
+  name: DescriptionsStress
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: descriptions_stress.db
+
+entities:
+  - name: Wallet
+    description: |-
+      Prepaid wallet: "quoted", 'single', back\slash, <b>tag</b> & ampersand 💰
+      second line
+    fields:
+      - {name: id, type: integer, primary_key: true, description: 'Primary key "id" \ path'}
+      - name: balance
+        type: decimal
+        precision: 18
+        scale: 2
+        nullable: false
+        description: "Balance in major units - wallet 💰, it's \"exact\"\nsecond line"
+      - {name: label, type: string, description: "Plain label"}
+      - {name: plain, type: string}
+
+services:
+  - name: money
+    entities: [Wallet]

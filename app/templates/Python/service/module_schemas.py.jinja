@@ -3,6 +3,7 @@
 {% set json_fields = module.entities|map(attribute='fields')|sum(start=[])|selectattr('type', 'equalto', 'json')|list %}
 {% set has_m2m = (module.entities|map(attribute='many_to_many_relationships')|map('length')|sum) > 0 %}
 {% set type_imports = schema_type_imports(module.entities|map(attribute='fields')|sum(start=[])) %}
+{% set has_desc = (module.entities|map(attribute='fields')|sum(start=[])|selectattr('description')|list|length) > 0 %}
 from typing import Optional{% if json_fields %}, Any{% endif %}{% if has_m2m %}, List{% endif +%}
 from datetime import date, datetime
 {% if type_imports.decimal %}
@@ -11,7 +12,7 @@ from decimal import Decimal
 {% if type_imports.uuid %}
 from uuid import UUID
 {% endif %}
-from pydantic import BaseModel{% if has_m2m %}, model_validator{% endif +%}
+from pydantic import BaseModel{% if has_m2m %}, model_validator{% endif %}{% if has_desc %}, Field{% endif +%}
 {% if type_imports.enums %}
 from database.enums import {{ type_imports.enums|join(', ') }}
 {% endif %}
@@ -23,7 +24,11 @@ class {{ entity.name }}Create(BaseModel):
     """Fields required to create a {{ entity.name }}."""
 {% for field in entity.fields %}
 {% if not field.primary_key %}
+{% if field.description %}
+    {{ field.name }}: {% if field.nullable %}Optional[{{ py_type(field) }}]{% else %}{{ py_type(field) }}{% endif %} = Field({% if field.default is not none %}{{ py_default(field) }}{% elif field.nullable %}None{% else %}...{% endif %}, description={{ field.description|python_value }})
+{% else %}
     {{ field.name }}: {% if field.nullable %}Optional[{{ py_type(field) }}]{% else %}{{ py_type(field) }}{% endif %}{% if field.default is not none %} = {{ py_default(field) }}{% elif field.nullable %} = None{% endif +%}
+{% endif %}
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
@@ -40,7 +45,11 @@ class {{ entity.name }}Update(BaseModel):
     """Fields that may be updated on a {{ entity.name }} (all optional)."""
 {% for field in entity.fields %}
 {% if not field.primary_key %}
+{% if field.description %}
+    {{ field.name }}: Optional[{{ py_type(field) }}] = Field(None, description={{ field.description|python_value }})
+{% else %}
     {{ field.name }}: Optional[{{ py_type(field) }}] = None
+{% endif %}
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}
@@ -57,11 +66,11 @@ class {{ entity.name }}Response(BaseModel):
     """{{ entity.name }} as returned by the API."""
 {% for field in entity.fields %}
 {% if field.primary_key %}
-    {{ field.name }}: {{ py_type(field) }}
+    {{ field.name }}: {{ py_type(field) }}{% if field.description %} = Field(..., description={{ field.description|python_value }}){% endif +%}
 {% elif field.nullable %}
-    {{ field.name }}: Optional[{{ py_type(field) }}] = None
+    {{ field.name }}: Optional[{{ py_type(field) }}] = {% if field.description %}Field(None, description={{ field.description|python_value }}){% else %}None{% endif +%}
 {% else %}
-    {{ field.name }}: {{ py_type(field) }} = None
+    {{ field.name }}: {{ py_type(field) }} = {% if field.description %}Field(None, description={{ field.description|python_value }}){% else %}None{% endif +%}
 {% endif %}
 {% endfor %}
 {% for rel in entity.owned_relationships %}

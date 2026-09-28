@@ -83,7 +83,8 @@ def test_async_postgresql_requirements_use_asyncpg_not_psycopg2(tmp_path):
     assert "psycopg2-binary" not in requirements_src
 
     config_src = (codebase_dir / "config.py").read_text(encoding="utf-8")
-    assert "postgresql+asyncpg" not in config_src  # only the sqlite default fallback is templated; see Step 3 note
+    assert "postgresql+asyncpg" in config_src  # the default URL is now built from the database block
+    assert "sqlite" not in config_src
 
 
 def test_async_mysql_requirements_use_aiomysql_not_pymysql(tmp_path):

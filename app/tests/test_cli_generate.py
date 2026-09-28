@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 from typer.testing import CliRunner
 
@@ -117,3 +118,47 @@ def test_generate_does_not_write_env_file_when_auth_disabled(tmp_path):
 
     assert result.exit_code == 0
     assert not (tmp_path / "Demo" / ".env").exists()
+
+
+def _make_alembic_fail(monkeypatch, exc):
+    def fake_run(cmd, **kwargs):
+        raise exc
+
+    monkeypatch.setattr("app.cli.main.subprocess.run", fake_run)
+
+
+def test_generate_alembic_failure_prints_one_concise_line_not_a_traceback(tmp_path, monkeypatch):
+    _make_alembic_fail(
+        monkeypatch,
+        subprocess.CalledProcessError(
+            1, ["alembic"], output=b"",
+            stderr=b"Traceback (most recent call last):\n  File \"x.py\", line 1\nModuleNotFoundError: No module named 'psycopg2'\n",
+        ),
+    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "Traceback" not in result.output
+    lines = [l for l in result.output.splitlines() if "could not auto-generate" in l]
+    assert len(lines) == 1
+    assert "ModuleNotFoundError: No module named 'psycopg2'" in lines[0]
+    assert "alembic revision --autogenerate -m initial" in lines[0]
+    assert "Generated at:" in result.output
+
+
+def test_generate_alembic_failure_falls_back_to_stdout_then_exit_code(tmp_path, monkeypatch):
+    _make_alembic_fail(monkeypatch, subprocess.CalledProcessError(2, ["alembic"], output=b"noise-line-A\nlast stdout line\n", stderr=b""))
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
+    assert "last stdout line" in result.output and "noise-line-A" not in result.output
+
+    _make_alembic_fail(monkeypatch, subprocess.CalledProcessError(3, ["alembic"], output=b"", stderr=b""))
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path), "--force"])
+    assert "exit code 3" in result.output
+
+
+def test_generate_alembic_unexpected_exception_is_also_one_line_and_never_fails_generate(tmp_path, monkeypatch):
+    _make_alembic_fail(monkeypatch, OSError("boom"))
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert len([l for l in result.output.splitlines() if "could not auto-generate" in l]) == 1
+    assert "boom" in result.output

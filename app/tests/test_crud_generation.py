@@ -359,10 +359,15 @@ def test_service_create_and_update_actually_reject_bad_fk_at_runtime(tmp_path, m
     we ever get to exercise the service. test_generated_project_runtime.py
     handles this the same way (monkeypatch.setenv("JWT_SECRET", ...)) for every
     test that imports a generated project with auth enabled.
+
+    valid_full.yml is a postgresql fixture; since the default DATABASE_URL is now
+    built from the database block (not always SQLite), DATABASE_URL is pinned to
+    SQLite here so this test doesn't require a real postgres driver/database.
     """
     from app.tests.test_generated_project_runtime import _GeneratedProjectImporter
 
     monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
 
     erd = load_erd(f"{FIXTURES}/valid_full.yml")
     state = translate(erd)

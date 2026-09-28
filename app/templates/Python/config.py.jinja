@@ -1,6 +1,11 @@
 """{{ project.name|replace('"', '\\"') }} - Configuration settings"""
 
+{% set db = project.database_config %}
+{% set scheme = ('postgresql+asyncpg' if db.async_mode else 'postgresql+psycopg2') if db.type == 'postgresql' else ('mysql+aiomysql' if db.async_mode else 'mysql+pymysql') %}
 import os
+{% if db.type in ('postgresql', 'mysql') %}
+from urllib.parse import quote
+{% endif %}
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
@@ -29,14 +34,42 @@ def _require_env(var_name: str) -> str:
 {% endif %}
 
 
+{% if db.type in ('postgresql', 'mysql') %}
+def _default_database_url() -> str:
+    """Build the default DATABASE_URL from the ERD's `database:` block.
+
+    The password is never stored in the ERD: set DB_PASSWORD (or override the whole URL
+    with DATABASE_URL). Username, password and database name are URL-quoted so special
+    characters cannot corrupt the URL.
+    """
+    username = {{ db.username|python_value }}
+    host = {{ (db.host or 'localhost')|python_value }}
+    port = {{ db.port|python_value }}
+    database_name = {{ db.database_name|python_value }}
+    credentials = ""
+    if username:
+        credentials = quote(username, safe="")
+        password = os.getenv("DB_PASSWORD")
+        if password:
+            credentials += ":" + quote(password, safe="")
+        credentials += "@"
+    port_part = f":{port}" if port else ""
+    return f"{{ scheme }}://{credentials}{host}{port_part}/{quote(database_name, safe='')}"
+
+
+{% endif %}
 class Settings(BaseSettings):
     """Application settings"""
 
     # Database
+{% if db.type in ('postgresql', 'mysql') %}
+    DATABASE_URL: str = os.getenv("DATABASE_URL") or _default_database_url()
+{% else %}
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
         {{ (("sqlite+aiosqlite" if project.database_config.async_mode else "sqlite") ~ ":///./" ~ project.name|snake_case ~ ".db")|tojson }}  # Default to SQLite for easy testing
     )
+{% endif %}
 
     {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
     # Security - JWT

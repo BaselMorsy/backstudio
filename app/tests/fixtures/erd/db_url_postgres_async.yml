@@ -1,0 +1,20 @@
+project:
+  name: DbUrlPostgresAsync
+  version: "1.0.0"
+
+database:
+  type: postgresql
+  database_name: dana finance
+  username: dana_user
+  host: db.internal
+  port: 5433
+  async_mode: true
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+
+services:
+  - name: widgets
+    entities: [Widget]

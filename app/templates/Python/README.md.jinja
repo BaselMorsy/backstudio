@@ -88,10 +88,15 @@ DATABASE_URL=mysql+aiomysql://user:password@{{ project.database_config.host or '
 DATABASE_URL=sqlite+aiosqlite:///./app.db
 {% endif %}
 {% else %}
-DATABASE_URL={{ project.database_config.type }}://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
+DATABASE_URL={{ 'mysql+pymysql' if project.database_config.type == 'mysql' else project.database_config.type }}://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
 {% endif %}
 {% else %}
 DATABASE_URL=sqlite:///./app.db
+{% endif %}
+{% if project.database_config and project.database_config.type in ('postgresql', 'mysql') %}
+# Or leave DATABASE_URL unset and set DB_PASSWORD: the default URL is built from the ERD's
+# database block (type, username, host, port, database_name) plus this password.
+# DB_PASSWORD=your-database-password
 {% endif %}
 
 {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}

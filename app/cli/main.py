@@ -17,20 +17,24 @@ from app.services.code_generator import CodeGenerator
 
 app = typer.Typer(name="backstudio", help="Generate FastAPI backends from a YAML ERD.")
 
-_MAX_SUBPROCESS_OUTPUT = 4000
+_MAX_REASON_LENGTH = 300
 
 
-def _decode_and_truncate(output: object) -> str:
-    """Decode subprocess stdout/stderr (bytes or str) and cap it to a sane length."""
+def _last_output_line(output: object) -> str:
+    """Last non-empty line of subprocess output (bytes or str), capped to a sane length."""
     if not output:
         return ""
     text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
-    text = text.strip()
-    if not text:
-        return ""
-    if len(text) > _MAX_SUBPROCESS_OUTPUT:
-        text = text[:_MAX_SUBPROCESS_OUTPUT] + "\n... (truncated)"
-    return text + "\n"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1][:_MAX_REASON_LENGTH] if lines else ""
+
+
+def _alembic_warning(reason: str, project_dir: Path) -> str:
+    return (
+        f"Warning: could not auto-generate the initial Alembic migration ({reason}). "
+        "Once the project's dependencies are installed and the database is reachable, run "
+        f"`alembic revision --autogenerate -m initial` inside {project_dir}."
+    )
 
 
 def _ensure_dev_env_secret(project_dir: Path, secret_env_var: str) -> str | None:
@@ -186,17 +190,11 @@ def generate(
                 timeout=30,
             )
         except subprocess.CalledProcessError as exc:
-            detail = _decode_and_truncate(exc.stdout) + _decode_and_truncate(exc.stderr)
-            typer.secho(
-                f"Warning: could not auto-generate the initial Alembic migration "
-                f"(exit code {exc.returncode}). You can run it yourself once the "
-                f"database is reachable.\n{detail}",
-                fg=typer.colors.YELLOW,
-            )
+            reason = _last_output_line(exc.stderr) or _last_output_line(exc.stdout) or f"exit code {exc.returncode}"
+            typer.secho(_alembic_warning(reason, project_dir), fg=typer.colors.YELLOW)
         except Exception as exc:  # best-effort: never fails `generate`
             typer.secho(
-                f"Warning: could not auto-generate the initial Alembic migration ({exc}). "
-                "You can run it yourself once the database is reachable.",
+                _alembic_warning(_last_output_line(str(exc)) or type(exc).__name__, project_dir),
                 fg=typer.colors.YELLOW,
             )
 

@@ -162,3 +162,13 @@ def test_generate_alembic_unexpected_exception_is_also_one_line_and_never_fails_
     assert result.exit_code == 0
     assert len([l for l in result.output.splitlines() if "could not auto-generate" in l]) == 1
     assert "boom" in result.output
+
+
+def test_generate_prints_the_relationship_name_warning_before_generating(tmp_path):
+    from app.tests.test_cli_validate import _write_warning_erd
+
+    erd = _write_warning_erd(tmp_path)
+    result = runner.invoke(app, ["generate", str(erd), "--output-dir", str(tmp_path / "out")])
+    assert result.exit_code == 0, result.output
+    assert "Warning: Order.customer -> Person" in result.output
+    assert result.output.index("Warning: Order.customer") < result.output.index("Generated at:")

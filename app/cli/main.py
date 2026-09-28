@@ -13,6 +13,7 @@ from app.cli.grammar import TOP_LEVEL, TOPICS
 from app.erd.loader import ERDValidationError, load_erd
 from app.erd.translate import translate
 from app.erd.visualize import render_html
+from app.erd.warnings import collect_warnings
 from app.services.code_generator import CodeGenerator
 
 app = typer.Typer(name="backstudio", help="Generate FastAPI backends from a YAML ERD.")
@@ -71,6 +72,11 @@ def main(ctx: typer.Context) -> None:
     pass
 
 
+def _print_warnings(erd) -> None:
+    for message in collect_warnings(erd):
+        typer.secho(f"Warning: {message}", fg=typer.colors.YELLOW)
+
+
 @app.command()
 def grammar(
     topic: str = typer.Argument(
@@ -104,6 +110,8 @@ def validate(
     except ERDValidationError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+    _print_warnings(erd)
 
     relationship_count = sum(len(e.relationships) for e in erd.entities)
     typer.secho(
@@ -149,6 +157,8 @@ def generate(
     except ERDValidationError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+    _print_warnings(erd)
 
     state = translate(erd)
     generator = CodeGenerator(output_dir=str(output))

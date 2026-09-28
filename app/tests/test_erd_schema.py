@@ -263,3 +263,83 @@ def test_auth_spec_registration_defaults_to_open_mode():
     from app.erd.schema import AuthSpec
     auth = AuthSpec(enabled=True)
     assert auth.registration.mode == "open"
+
+
+def _with_field(**field):
+    doc = dict(MINIMAL)
+    doc["entities"] = [
+        {
+            "name": "Widget",
+            "fields": [
+                {"name": "id", "type": "integer", "primary_key": True},
+                {"name": "f", **field},
+            ],
+        }
+    ]
+    return doc
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"type": "decimal"},
+        {"type": "decimal", "precision": 10},
+        {"type": "decimal", "scale": 2},
+        {"type": "decimal", "precision": 0, "scale": 0},
+        {"type": "decimal", "precision": 4, "scale": 5},
+        {"type": "decimal", "precision": 4, "scale": -1},
+        {"type": "integer", "precision": 4},
+        {"type": "string", "scale": 2},
+        {"type": "decimal", "precision": 10, "scale": 2, "primary_key": True},
+        {"type": "decimal", "precision": 10, "scale": 2, "default": "abc"},
+        {"type": "decimal", "precision": 10, "scale": 2, "default": True},
+        {"type": "decimal", "precision": 10, "scale": 2, "default": "NaN"},
+        {"type": "enum"},
+        {"type": "enum", "values": []},
+        {"type": "enum", "values": ["A", "A"]},
+        {"type": "enum", "values": ["A", "in-progress"]},
+        {"type": "enum", "values": ["class"]},
+        {"type": "enum", "values": ["None"]},
+        {"type": "enum", "values": ["mro"]},
+        {"type": "enum", "values": ["name"]},
+        {"type": "enum", "values": ["count"]},
+        {"type": "enum", "values": ["_hidden"]},
+        {"type": "enum", "values": ["1ST"]},
+        {"type": "enum", "values": ["A"], "primary_key": True},
+        {"type": "enum", "values": ["A", "B"], "default": "C"},
+        {"type": "string", "values": ["A"]},
+        {"type": "integer", "timezone": True},
+    ],
+)
+def test_invalid_type_specific_attributes_rejected(field):
+    with pytest.raises(ValidationError):
+        ERDConfig(**_with_field(**field))
+
+
+def test_valid_new_types_parse():
+    erd = ERDConfig(
+        **{
+            **MINIMAL,
+            "entities": [
+                {
+                    "name": "Ledger",
+                    "description": "Append-only ledger",
+                    "fields": [
+                        {"name": "id", "type": "bigint", "primary_key": True},
+                        {"name": "amount", "type": "decimal", "precision": 18, "scale": 2, "default": "0.00", "description": "Minor units"},
+                        {"name": "fee", "type": "decimal", "precision": 10, "scale": 4, "default": 0.5},
+                        {"name": "n", "type": "decimal", "precision": 5, "scale": 0, "default": 0},
+                        {"name": "status", "type": "enum", "values": ["ACTIVE", "DONE"], "default": "ACTIVE"},
+                        {"name": "at", "type": "datetime", "timezone": False},
+                        {"name": "ref", "type": "uuid"},
+                    ],
+                }
+            ],
+        }
+    )
+    entity = erd.entities[0]
+    assert entity.description == "Append-only ledger"
+    assert entity.fields[0].type.value == "bigint"
+    assert entity.fields[1].description == "Minor units"
+    assert entity.fields[5].timezone is False
+    assert entity.fields[6].timezone is None

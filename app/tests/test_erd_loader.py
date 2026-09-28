@@ -926,3 +926,57 @@ services:
     )
     with pytest.raises(ERDValidationError, match="is_verified"):
         load_erd(bad)
+
+
+def _enum_erd(tmp_path, entities, names):
+    import yaml
+
+    path = tmp_path / "enum.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "project": {"name": "Demo"},
+                "database": {"type": "sqlite", "database_name": "d.db"},
+                "entities": entities,
+                "services": [{"name": "things", "entities": names}],
+            }
+        )
+    )
+    return path
+
+
+def _entity(name, *fields):
+    return {"name": name, "fields": [{"name": "id", "type": "integer", "primary_key": True}, *fields]}
+
+
+def _enum_field(name, values):
+    return {"name": name, "type": "enum", "values": values}
+
+
+def test_enum_class_colliding_with_an_entity_model_class_rejected(tmp_path):
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Widget", _enum_field("status", ["A", "B"])), _entity("WidgetStatus")],
+        ["Widget", "WidgetStatus"],
+    )
+    with pytest.raises(ERDValidationError, match="WidgetStatus"):
+        load_erd(path)
+
+
+def test_two_enum_fields_generating_the_same_class_rejected(tmp_path):
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Order", _enum_field("item_status", ["A"])), _entity("OrderItem", _enum_field("status", ["B"]))],
+        ["Order", "OrderItem"],
+    )
+    with pytest.raises(ERDValidationError, match="OrderItemStatus"):
+        load_erd(path)
+
+
+def test_distinct_enum_classes_load(tmp_path):
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Widget", _enum_field("status", ["A", "B"]), _enum_field("kind", ["X", "Y"]))],
+        ["Widget"],
+    )
+    assert len(load_erd(path).entities[0].fields) == 3

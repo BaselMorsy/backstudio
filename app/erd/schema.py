@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.erd.field_types import is_safe_enum_member, to_decimal
+
 
 class Cardinality(str, Enum):
     """Relationship cardinality types"""
@@ -34,6 +36,9 @@ class FieldType(str, Enum):
     TEXT = "text"
     JSON = "json"
     UUID = "uuid"
+    BIGINT = "bigint"
+    DECIMAL = "decimal"
+    ENUM = "enum"
 
 
 class ModelField(BaseModel):
@@ -46,6 +51,56 @@ class ModelField(BaseModel):
     primary_key: bool = Field(default=False, description="Whether this is a primary key")
     index: bool = Field(default=False, description="Whether to create an index")
     max_length: Optional[int] = Field(None, description="Max length for string fields")
+    precision: Optional[int] = Field(None, description="Total digits (decimal fields only)")
+    scale: Optional[int] = Field(None, description="Digits after the decimal point (decimal fields only)")
+    values: Optional[List[str]] = Field(None, description="Allowed values (enum fields only)")
+    timezone: Optional[bool] = Field(None, description="Timezone-aware (datetime fields only; unset means true)")
+    description: Optional[str] = Field(None, description="Human-readable description (any type)")
+
+    @model_validator(mode="after")
+    def type_specific_attributes_are_valid(self) -> "ModelField":
+        where = f"field '{self.name}'"
+        if self.type == FieldType.DECIMAL:
+            if self.precision is None or self.scale is None:
+                raise ValueError(f"{where}: type 'decimal' requires both 'precision' and 'scale'")
+            if self.precision < 1 or self.scale < 0 or self.scale > self.precision:
+                raise ValueError(
+                    f"{where}: decimal needs precision >= 1 and 0 <= scale <= precision "
+                    f"(got precision={self.precision}, scale={self.scale})"
+                )
+            if self.primary_key:
+                raise ValueError(f"{where}: a decimal field cannot be a primary key")
+            if self.default is not None:
+                try:
+                    to_decimal(self.default)
+                except ValueError as exc:
+                    raise ValueError(f"{where}: invalid decimal default: {exc}") from exc
+        elif self.precision is not None or self.scale is not None:
+            raise ValueError(f"{where}: 'precision'/'scale' are only valid on decimal fields")
+
+        if self.type == FieldType.ENUM:
+            if not self.values:
+                raise ValueError(f"{where}: type 'enum' requires a non-empty 'values' list")
+            if len(set(self.values)) != len(self.values):
+                raise ValueError(f"{where}: enum 'values' must be unique")
+            bad = [v for v in self.values if not is_safe_enum_member(v)]
+            if bad:
+                raise ValueError(
+                    f"{where}: enum value(s) {bad} cannot be used as generated enum members - use "
+                    "letters, digits and underscores, starting with a letter, and avoid Python "
+                    "keywords and names that shadow str/Enum attributes (e.g. class, None, mro, "
+                    "name, value, count). UPPER_SNAKE_CASE is always safe."
+                )
+            if self.primary_key:
+                raise ValueError(f"{where}: an enum field cannot be a primary key")
+            if self.default is not None and self.default not in self.values:
+                raise ValueError(f"{where}: default {self.default!r} is not one of the enum values")
+        elif self.values is not None:
+            raise ValueError(f"{where}: 'values' is only valid on enum fields")
+
+        if self.timezone is not None and self.type != FieldType.DATETIME:
+            raise ValueError(f"{where}: 'timezone' is only valid on datetime fields")
+        return self
 
 
 ALL_ACTIONS = ["create", "list", "read", "update", "delete"]
@@ -257,6 +312,7 @@ class EntitySpec(BaseModel):
     relationships: List[RelationshipDecl] = Field(default_factory=list)
     endpoints: EndpointSpec = Field(default_factory=EndpointSpec)
     rls: Optional[RLSSpec] = None
+    description: Optional[str] = None
 
     @model_validator(mode="after")
     def at_most_one_owner_and_one_cascades_ownership_relationship(self) -> "EntitySpec":

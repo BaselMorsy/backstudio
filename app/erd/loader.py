@@ -6,7 +6,8 @@ from typing import Dict, List, Union
 import yaml
 from pydantic import ValidationError
 
-from app.erd.schema import ERDConfig
+from app.erd.field_types import enum_class_name, pascal_case
+from app.erd.schema import ERDConfig, FieldType
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 MODE_GATED_RESERVED_USER_FIELDS = {
@@ -140,6 +141,31 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
             )
 
 
+def _validate_enum_fields(erd: ERDConfig) -> None:
+    """Enum fields generate `database/enums.py` classes named <Entity><Field>; those names
+    must be unique and must not equal any entity's model class (models.py would silently
+    rebind the name)."""
+    model_class_names = {pascal_case(e.name) for e in erd.entities} | {"User"}
+    seen: Dict[str, str] = {}
+    for entity in erd.entities:
+        for field in entity.fields:
+            if field.type != FieldType.ENUM:
+                continue
+            class_name = enum_class_name(entity.name, field.name)
+            owner = f"{entity.name}.{field.name}"
+            if class_name in model_class_names:
+                raise ERDValidationError(
+                    f"{owner}: the generated enum class '{class_name}' has the same name as an "
+                    "entity's model class - rename the field or the entity."
+                )
+            if class_name in seen:
+                raise ERDValidationError(
+                    f"{owner} and {seen[class_name]} would both generate the enum class "
+                    f"'{class_name}' - rename one of the fields."
+                )
+            seen[class_name] = owner
+
+
 def _validate_semantics(erd: ERDConfig) -> None:
     if not erd.entities:
         raise ERDValidationError("ERD must declare at least one entity")
@@ -228,6 +254,8 @@ def _validate_semantics(erd: ERDConfig) -> None:
                         f"{', '.join(erd.rbac.roles) or 'none declared'} (add missing roles to "
                         "rbac.roles, or fix the typo)."
                     )
+
+    _validate_enum_fields(erd)
 
     _validate_services(erd)
 

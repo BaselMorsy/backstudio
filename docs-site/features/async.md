@@ -82,15 +82,17 @@ scheme to a sync driver). Generating `async_minimal.yml` and reading the actual
 | `database.type` | sync scheme | async scheme | async driver added to `requirements.txt` |
 |---|---|---|---|
 | `sqlite` | `sqlite:///...` | `sqlite+aiosqlite:///...` | `aiosqlite` |
-| `postgresql` | `postgresql://...` | `postgresql+asyncpg://...` | `asyncpg` (replaces `psycopg2-binary`) |
-| `mysql` | `mysql://...` | `mysql+aiomysql://...` | `aiomysql` (replaces `pymysql`) |
+| `postgresql` | `postgresql+psycopg2://...` | `postgresql+asyncpg://...` | `asyncpg` (replaces `psycopg2-binary`) |
+| `mysql` | `mysql+pymysql://...` | `mysql+aiomysql://...` | `aiomysql` (replaces `pymysql`) |
 
-The generated fixture's `config.py` default fallback and `README.md`'s example both rendered
-exactly as `sqlite+aiosqlite:///./async_minimal.db` / `sqlite+aiosqlite:///./app.db` — the
-`postgresql+asyncpg://...` and `mysql+aiomysql://...` forms come from the same conditional in
-`README.md.jinja`, verified by reading the template's generation logic directly (both schemes are
-built from `project.database_config.type` plus a hardcoded `+asyncpg`/`+aiomysql` driver suffix,
-gated on `async_mode`, alongside the equivalent unqualified schemes for the sync branch).
+For `sqlite`, `config.py`'s default `DATABASE_URL` fallback (used only when the `DATABASE_URL`
+env var is unset) renders exactly as `sqlite+aiosqlite:///./async_minimal.db` — a literal string
+built from the project name, gated on `async_mode`. For `postgresql`/`mysql`, `config.py` builds
+its default `DATABASE_URL` at runtime from the ERD's `database:` block (`type`, `async_mode`,
+`username`, `host`, `port`, `database_name`) plus a `DB_PASSWORD` environment variable — see
+[the `database` field reference](../erd-reference/fields.md#database-databasespec) for the exact
+rule. `README.md`'s own example line uses the same scheme table above, independently of what
+`config.py` falls back to.
 
 ## What changes for someone running the generated project
 

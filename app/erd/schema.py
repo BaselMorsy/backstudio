@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.erd.field_types import is_safe_enum_member, to_decimal
+from app.erd.field_types import is_safe_enum_member, to_decimal, to_uuid
 
 
 class Cardinality(str, Enum):
@@ -100,6 +100,12 @@ class ModelField(BaseModel):
 
         if self.timezone is not None and self.type != FieldType.DATETIME:
             raise ValueError(f"{where}: 'timezone' is only valid on datetime fields")
+
+        if self.type == FieldType.UUID and self.default is not None:
+            try:
+                to_uuid(self.default)
+            except ValueError as exc:
+                raise ValueError(f"{where}: invalid uuid default: {exc}") from exc
         return self
 
 

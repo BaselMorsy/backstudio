@@ -7,6 +7,9 @@ from datetime import datetime
 {% if 'Numeric' in sa_extras %}
 from decimal import Decimal
 {% endif %}
+{% if 'Uuid' in sa_extras %}
+from uuid import UUID
+{% endif %}
 {% if project.enums %}
 from .enums import {{ project.enums|map(attribute='class_name')|join(', ') }}
 {% endif %}

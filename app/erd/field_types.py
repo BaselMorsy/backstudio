@@ -9,6 +9,7 @@ all import it without cycles.
 import enum
 import keyword
 import re
+import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Mapping
 
@@ -108,6 +109,16 @@ def to_decimal(value: Any) -> Decimal:
     return result
 
 
+def to_uuid(value: Any) -> uuid.UUID:
+    """Parse a YAML default as a uuid.UUID. Rejects anything that isn't a valid UUID string."""
+    if not isinstance(value, str):
+        raise ValueError(f"{value!r} is not a uuid string")
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise ValueError(f"{value!r} is not a valid uuid") from exc
+
+
 def enum_class_name(entity_name: str, field_name: str) -> str:
     return pascal_case(entity_name) + pascal_case(field_name)
 
@@ -148,6 +159,8 @@ def py_default(field: Mapping[str, Any]) -> str:
     value = field.get("default")
     if _is(field, "decimal"):
         return f"Decimal({str(to_decimal(value))!r})"
+    if _is(field, "uuid"):
+        return f"UUID({str(to_uuid(value))!r})"
     if _is(field, "enum"):
         return f"{field['enum_class']}.{value}"
     return python_literal(value)

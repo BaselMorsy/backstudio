@@ -412,6 +412,7 @@ def _build_user_entity(erd: ERDConfig, enums: List[Dict[str, Any]]) -> Dict[str,
         "relationships": [],
         "owned_relationships": [],
         "many_to_many_relationships": [],
+        "description": declared.description if declared else None,
     }
 
 

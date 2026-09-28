@@ -193,3 +193,48 @@ def test_decimal_defaults_written_as_float_int_and_string_render_exactly(tmp_pat
     assert "default=Decimal('0.1')" in models_src
     assert "default=Decimal('0')" in models_src
     assert "default=Decimal('12.50')" in models_src
+
+
+def test_uuid_field_with_a_default_generates_and_inserts_without_error(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review F2: Uuid(as_uuid=True) requires a real uuid.UUID at bind time, not the raw
+    string - a naive python_value-rendered string default crashed on insert."""
+    import yaml
+
+    ref = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+    path = tmp_path / "uuid_default.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "project": {"name": "Demo"},
+                "database": {"type": "sqlite", "database_name": "d.db"},
+                "entities": [
+                    {
+                        "name": "Thing",
+                        "fields": [
+                            {"name": "id", "type": "integer", "primary_key": True},
+                            {"name": "label", "type": "string"},
+                            {"name": "ref", "type": "uuid", "default": ref},
+                        ],
+                    }
+                ],
+                "services": [{"name": "things", "entities": ["Thing"]}],
+            }
+        )
+    )
+    codebase_dir = _generate(tmp_path, str(path))
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    assert "from uuid import UUID" in models_src
+    assert f"default=UUID('{ref}')" in models_src
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'uuid_default.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            created = client.post("/things", json={"label": "x"})
+            assert created.status_code == 201, created.text
+            assert created.json()["ref"] == ref

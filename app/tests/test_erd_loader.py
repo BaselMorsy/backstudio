@@ -980,3 +980,37 @@ def test_distinct_enum_classes_load(tmp_path):
         ["Widget"],
     )
     assert len(load_erd(path).entities[0].fields) == 3
+
+
+def test_enum_class_colliding_with_a_generated_create_schema_rejected(tmp_path):
+    """Final review F3: an enum field named 'create' on entity 'Survey' would generate the
+    class 'SurveyCreate', silently rebinding the Pydantic Create schema of the same name."""
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Survey", _enum_field("create", ["A", "B"]))],
+        ["Survey"],
+    )
+    with pytest.raises(ERDValidationError, match="SurveyCreate"):
+        load_erd(path)
+
+
+def test_enum_class_colliding_with_a_generated_response_schema_rejected(tmp_path):
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Survey", _enum_field("response", ["A", "B"]))],
+        ["Survey"],
+    )
+    with pytest.raises(ERDValidationError, match="SurveyResponse"):
+        load_erd(path)
+
+
+def test_enum_class_colliding_with_an_imported_sqlalchemy_type_name_rejected(tmp_path):
+    """entity 'Date' + field 'time' would generate the class 'DateTime', colliding with the
+    imported sqlalchemy.DateTime column type."""
+    path = _enum_erd(
+        tmp_path,
+        [_entity("Date", _enum_field("time", ["A", "B"]))],
+        ["Date"],
+    )
+    with pytest.raises(ERDValidationError, match="DateTime"):
+        load_erd(path)

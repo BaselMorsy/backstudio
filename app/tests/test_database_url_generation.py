@@ -16,10 +16,10 @@ def _generate(tmp_path, fixture):
 
 
 CASES = [
-    ("db_url_postgres_sync", None, "postgresql+psycopg2://dana_user@db.internal:5433/dana%20finance"),
-    ("db_url_postgres_sync", "p@ss/w:rd%", "postgresql+psycopg2://dana_user:p%40ss%2Fw%3Ard%25@db.internal:5433/dana%20finance"),
-    ("db_url_postgres_async", None, "postgresql+asyncpg://dana_user@db.internal:5433/dana%20finance"),
-    ("db_url_postgres_async", "pw", "postgresql+asyncpg://dana_user:pw@db.internal:5433/dana%20finance"),
+    ("db_url_postgres_sync", None, "postgresql+psycopg2://dana_user@db.internal:5433/dana finance"),
+    ("db_url_postgres_sync", "p@ss/w:rd%", "postgresql+psycopg2://dana_user:p%40ss%2Fw%3Ard%25@db.internal:5433/dana finance"),
+    ("db_url_postgres_async", None, "postgresql+asyncpg://dana_user@db.internal:5433/dana finance"),
+    ("db_url_postgres_async", "pw", "postgresql+asyncpg://dana_user:pw@db.internal:5433/dana finance"),
     ("db_url_mysql_sync", None, "mysql+pymysql://root@localhost/appdb"),
     # no username in the ERD: a DB_PASSWORD alone is ignored (no half-formed credentials)
     ("async_postgresql", "ignored-without-username", "postgresql+asyncpg://localhost/async_pg.db"),
@@ -76,6 +76,24 @@ def test_special_characters_in_the_database_block_cannot_corrupt_the_generated_c
     with _GeneratedProjectImporter(codebase_dir):
         url = importlib.import_module("config").settings.DATABASE_URL
     assert url == "postgresql+psycopg2://we%22ird%5Cname%20%F0%9F%92%B0@localhost/db"
+
+
+def test_database_name_is_not_url_quoted_so_sqlalchemy_parses_it_back_exactly(tmp_path, monkeypatch, isolated_sys_path):
+    """Review Focus (final review F1): SQLAlchemy's URL parser only un-quotes the
+    username/password components, not the database name - quoting it would make the app
+    connect to a literally-percent-encoded database name instead of the real one."""
+    from sqlalchemy.engine import make_url
+
+    codebase_dir = _generate(tmp_path, "db_url_postgres_sync")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DB_PASSWORD", "p@ss/w:rd%")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        url = make_url(importlib.import_module("config").settings.DATABASE_URL)
+    assert url.database == "dana finance"
+    assert url.username == "dana_user"
+    assert url.password == "p@ss/w:rd%"
+    assert url.host == "db.internal" and url.port == 5433
 
 
 def test_non_sqlite_config_has_no_sqlite_fallback_and_sqlite_config_is_unchanged(tmp_path):

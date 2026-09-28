@@ -141,11 +141,26 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
             )
 
 
+_RESERVED_IMPORT_NAMES = {
+    "Column", "Integer", "String", "Boolean", "DateTime", "Date", "Float", "Text", "JSON",
+    "ForeignKey", "Table", "BigInteger", "Enum", "Numeric", "Uuid", "Decimal", "UUID",
+    "BaseModel", "Field", "Optional", "Any", "List", "Base",
+}
+
+
 def _validate_enum_fields(erd: ERDConfig) -> None:
     """Enum fields generate `database/enums.py` classes named <Entity><Field>; those names
-    must be unique and must not equal any entity's model class (models.py would silently
-    rebind the name)."""
+    must be unique, must not equal any entity's model class (models.py would silently rebind
+    the name), and must not collide with a generated <Entity>Create/Update/Response schema
+    class or a name the templates import (e.g. an enum field literally named "create" on
+    entity "Survey" would generate "SurveyCreate", silently rebinding the Pydantic schema
+    class of the same name and breaking every route that uses it)."""
     model_class_names = {pascal_case(e.name) for e in erd.entities} | {"User"}
+    reserved = (
+        model_class_names
+        | {name + suffix for name in model_class_names for suffix in ("Create", "Update", "Response")}
+        | _RESERVED_IMPORT_NAMES
+    )
     seen: Dict[str, str] = {}
     for entity in erd.entities:
         for field in entity.fields:
@@ -153,10 +168,11 @@ def _validate_enum_fields(erd: ERDConfig) -> None:
                 continue
             class_name = enum_class_name(entity.name, field.name)
             owner = f"{entity.name}.{field.name}"
-            if class_name in model_class_names:
+            if class_name in reserved:
                 raise ERDValidationError(
-                    f"{owner}: the generated enum class '{class_name}' has the same name as an "
-                    "entity's model class - rename the field or the entity."
+                    f"{owner}: the generated enum class '{class_name}' collides with a generated "
+                    "class or import name (an entity's model class, its Create/Update/Response "
+                    "schema, or a name the templates import) - rename the field or the entity."
                 )
             if class_name in seen:
                 raise ERDValidationError(

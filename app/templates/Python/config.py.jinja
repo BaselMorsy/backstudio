@@ -39,8 +39,11 @@ def _default_database_url() -> str:
     """Build the default DATABASE_URL from the ERD's `database:` block.
 
     The password is never stored in the ERD: set DB_PASSWORD (or override the whole URL
-    with DATABASE_URL). Username, password and database name are URL-quoted so special
-    characters cannot corrupt the URL.
+    with DATABASE_URL). Username and password are URL-quoted so special characters cannot
+    corrupt the URL. The database name is NOT quoted: SQLAlchemy's URL parser only
+    un-quotes the username/password components, so a quoted database name would be passed
+    to the driver literally (e.g. connecting to a database named "dana%20finance" instead
+    of "dana finance").
     """
     username = {{ db.username|python_value }}
     host = {{ (db.host or 'localhost')|python_value }}
@@ -54,7 +57,7 @@ def _default_database_url() -> str:
             credentials += ":" + quote(password, safe="")
         credentials += "@"
     port_part = f":{port}" if port else ""
-    return f"{{ scheme }}://{credentials}{host}{port_part}/{quote(database_name, safe='')}"
+    return f"{{ scheme }}://{credentials}{host}{port_part}/{database_name}"
 
 
 {% endif %}

@@ -50,6 +50,16 @@ Pydantic's own per-field validation.
 | `echo` | `bool` | default `False` | Whether SQLAlchemy logs all executed SQL (`echo=True`). |
 | `async_mode` | `bool` | default `False` | When `true`, generates an async SQLAlchemy engine/session stack (`asyncpg`/`aiomysql`/`aiosqlite` driver, async-aware Alembic `env.py` using `run_sync()`, async repository/service/route layers) instead of the default sync stack. See [Async database support](../features/async.md) for the full generated-code mechanics. |
 
+**Default `DATABASE_URL` for `postgresql`/`mysql`:** unlike `sqlite` (which always defaults to a
+local file), the generated `config.py` for `postgresql`/`mysql` builds its default
+`DATABASE_URL` from this block's `type`, `async_mode`, `username`, `host`, `port` and
+`database_name`. The password is never stored in the ERD — it's read from a `DB_PASSWORD`
+environment variable at runtime (and only used when `username` is set; a `DB_PASSWORD` with no
+`username` is ignored, since there'd be no complete credential to build). `username` and
+`DB_PASSWORD` are URL-quoted so special characters can't corrupt the URL; `database_name` is not
+(SQLAlchemy's URL parser doesn't un-quote it). Setting a `DATABASE_URL` environment variable
+still overrides the built default entirely, same as for `sqlite`.
+
 ## `auth` (`AuthSpec`)
 
 | Field | Type | Required/default | Description |

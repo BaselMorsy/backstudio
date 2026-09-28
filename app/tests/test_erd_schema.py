@@ -309,6 +309,8 @@ def _with_field(**field):
         {"type": "enum", "values": ["A", "B"], "default": "C"},
         {"type": "string", "values": ["A"]},
         {"type": "integer", "timezone": True},
+        {"type": "uuid", "default": "not-a-uuid"},
+        {"type": "uuid", "default": 123},
     ],
 )
 def test_invalid_type_specific_attributes_rejected(field):

@@ -73,7 +73,7 @@ with exactly one newline, not zero).
 mapping lives in one place, `app/erd/field_types.py` (imported as `field_types` by
 `CodeGenerator`), which both the generator's Jinja globals and `app/erd/visualize.py` delegate
 to instead of each keeping their own copy. `CodeGenerator` exposes the simple maps as
-`get_sqlalchemy_type` / `get_python_type` (used for FK/association column types, which are
+`get_sqlalchemy_type` (used for FK/association column types, which are
 always plain `integer`/`bigint`), plus the richer `sa_column_type`, `py_type`, `py_default`,
 `sa_extra_imports` and `schema_type_imports` (used for a field's own type — these know about
 `decimal`'s `Numeric(precision, scale)`, `enum`'s generated class, and the SQLite-friendly

@@ -45,6 +45,9 @@ database:
   pool_size: int = 10
   echo: bool = false                   # log all executed SQL
   async_mode: bool = false             # async SQLAlchemy stack (asyncpg/aiomysql/aiosqlite)
+
+# postgresql/mysql: default DATABASE_URL is built from type/username/host/port/database_name
+# + the DB_PASSWORD env var (never store a password in the ERD). DATABASE_URL env var overrides.
 """,
     "auth": """\
 auth:

@@ -92,3 +92,35 @@ def test_a_project_without_descriptions_does_not_import_pydantic_field(tmp_path)
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "w")).generate_project(state, force=True)
     schemas_src = (codebase_dir / "modules" / "widgets" / "schemas.py").read_text(encoding="utf-8")
     assert ", Field" not in schemas_src and "Field(" not in schemas_src   # ("Fields required..." docstrings are fine)
+
+
+def test_a_declared_user_entitys_description_becomes_a_table_comment(tmp_path):
+    """Final review F4: a declared User entity's description was silently dropped -
+    _build_user_entity() didn't carry it into the translate state."""
+    import yaml
+
+    path = tmp_path / "user_description.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "project": {"name": "Demo"},
+                "database": {"type": "sqlite", "database_name": "d.db"},
+                "auth": {"enabled": True},
+                "entities": [
+                    {"name": "User", "description": "Application users", "fields": []},
+                    {"name": "Widget", "fields": [{"name": "id", "type": "integer", "primary_key": True}]},
+                ],
+                "services": [{"name": "things", "entities": ["Widget"]}, {"name": "auth", "entities": ["User"]}],
+            }
+        )
+    )
+    state = translate(load_erd(path))
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    assert user["description"] == "Application users"
+
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "w")).generate_project(state, force=True)
+    models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
+    user_start = models_src.index("class User(Base):")
+    user_end = models_src.find("\nclass ", user_start + 1)
+    user_src = models_src[user_start:] if user_end == -1 else models_src[user_start:user_end]
+    assert "__table_args__ = dict(comment='Application users')" in user_src

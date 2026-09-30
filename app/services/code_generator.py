@@ -220,17 +220,25 @@ class CodeGenerator:
                 self._render_template("Python/service/module_routes.py.jinja", module_context)
             )
 
-        # Auth service (JWT register/login/refresh/me), generated as a module
+        # Auth service, generated as a module. mode: builtin gets register/login/refresh/me
+        # (JWT signed by this service); mode: external gets only JWKS verification - there is
+        # nothing to register, log in, or reset a password for.
         if state.get('auth_enabled'):
             ensure_directory(output_dir / "modules")
             (output_dir / "modules" / "__init__.py").touch()
             auth_dir = output_dir / "modules" / state.get('auth_module_name', 'auth')
             ensure_directory(auth_dir)
             (auth_dir / "__init__.py").touch()
-            self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))
-            self._write_file(auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context))
-            self._write_file(auth_dir / "routes.py", self._render_template("Python/auth/routes.py.jinja", context))
-            self._write_file(auth_dir / "email.py", self._render_template("Python/auth/email.py.jinja", context))
+            if state.get('auth_mode') == 'external':
+                self._write_file(
+                    auth_dir / "service.py",
+                    self._render_template("Python/auth/external_service.py.jinja", context)
+                )
+            else:
+                self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))
+                self._write_file(auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context))
+                self._write_file(auth_dir / "routes.py", self._render_template("Python/auth/routes.py.jinja", context))
+                self._write_file(auth_dir / "email.py", self._render_template("Python/auth/email.py.jinja", context))
 
         # RBAC dependency (only meaningful once auth exists, enforced at the ERD validation layer)
         if state.get('rbac_enabled'):

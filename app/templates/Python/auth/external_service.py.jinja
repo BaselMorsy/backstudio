@@ -1,0 +1,100 @@
+"""{{ project.name|replace('"', '\\"') }} - external JWT verification (JWKS)"""
+
+import os
+from typing import Any, Dict, List, Optional
+
+import httpx
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="", auto_error=False)
+
+_JWKS_URL_ENV_VAR = {{ project.external_auth_config.jwks_url_env_var|tojson }}
+_ISSUER = {{ project.external_auth_config.issuer|tojson }}
+_AUDIENCE = {{ project.external_auth_config.audience|python_value }}
+_ALGORITHMS = {{ project.external_auth_config.algorithms|tojson }}
+_SUBJECT_CLAIM = {{ project.external_auth_config.claims.subject|tojson }}
+_ROLES_CLAIM = {{ project.external_auth_config.claims.roles|tojson }}
+
+_jwks_cache: Dict[str, Dict[str, Any]] = {}
+
+
+class Principal:
+    def __init__(self, id: str, roles: List[str], claims: Dict[str, Any]) -> None:
+        self.id = id
+        self.roles = roles
+        self.claims = claims
+
+
+def _fetch_jwks() -> Dict[str, Any]:
+    url = os.environ.get(_JWKS_URL_ENV_VAR)
+    if not url:
+        raise RuntimeError(
+            f"Required environment variable '{_JWKS_URL_ENV_VAR}' is not set. "
+            "Set it (e.g. in a .env file) before starting the application."
+        )
+    response = httpx.get(url, timeout=10.0)
+    response.raise_for_status()
+    return response.json()
+
+
+def _key_for_kid(kid: str) -> Dict[str, Any]:
+    if kid not in _jwks_cache:
+        jwks = _fetch_jwks()
+        _jwks_cache.clear()
+        for key in jwks.get("keys", []):
+            if "kid" in key:
+                _jwks_cache[key["kid"]] = key
+    if kid not in _jwks_cache:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown signing key")
+    return _jwks_cache[kid]
+
+
+def _normalize_roles(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
+async def _verify_token(token: str) -> Principal:
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has no 'kid'")
+        key = _key_for_kid(kid)
+        decode_kwargs: Dict[str, Any] = {"algorithms": _ALGORITHMS, "issuer": _ISSUER}
+        if _AUDIENCE is not None:
+            decode_kwargs["audience"] = _AUDIENCE
+        claims = jwt.decode(token, key, **decode_kwargs)
+    except HTTPException:
+        raise
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+
+    subject = claims.get(_SUBJECT_CLAIM)
+    if subject is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is missing the subject claim")
+    return Principal(id=subject, roles=_normalize_roles(claims.get(_ROLES_CLAIM)), claims=claims)
+
+
+class ExternalAuthService:
+    """Singleton: constructed once per process (see get_{{ project.auth_module_name }}_service below)."""
+
+    async def get_current_user(self, token: Optional[str] = Depends(oauth2_scheme)) -> Principal:
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        return await _verify_token(token)
+
+
+_{{ project.auth_module_name }}_service_instance: Optional[ExternalAuthService] = None
+
+
+def get_{{ project.auth_module_name }}_service() -> ExternalAuthService:
+    global _{{ project.auth_module_name }}_service_instance
+    if _{{ project.auth_module_name }}_service_instance is None:
+        _{{ project.auth_module_name }}_service_instance = ExternalAuthService()
+    return _{{ project.auth_module_name }}_service_instance

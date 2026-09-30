@@ -590,6 +590,16 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "jwt_password_reset_expiration_minutes": erd.auth.jwt.password_reset_expiration_minutes,
         }
 
+    external_auth_config = None
+    if erd.auth.enabled and auth_mode == "external":
+        external_auth_config = {
+            "jwks_url_env_var": erd.auth.external.jwks_url_env_var,
+            "issuer": erd.auth.external.issuer,
+            "audience": erd.auth.external.audience,
+            "algorithms": list(erd.auth.external.algorithms),
+            "claims": {"subject": erd.auth.external.claims.subject, "roles": erd.auth.external.claims.roles},
+        }
+
     return {
         "name": erd.project.name,
         "description": erd.project.description,
@@ -603,6 +613,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "dependencies": [],
         "database_config": erd.database.model_dump(mode='json'),
         "security_config": security_config,
+        "external_auth_config": external_auth_config,
         "modules": modules,
         "auth_module_name": auth_module_name,
         "auth_enabled": erd.auth.enabled,

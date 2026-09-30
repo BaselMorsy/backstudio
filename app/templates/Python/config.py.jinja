@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     )
 {% endif %}
 
-    {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}
+    {% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' %}
     # Security - JWT
     #
     # The secret is read from the env var named by the ERD's auth.jwt.secret_env_var

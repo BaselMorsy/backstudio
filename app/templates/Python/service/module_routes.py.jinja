@@ -7,6 +7,7 @@
 {% set has_header_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'header')|list|length) > 0 %}
 {% set has_any_authenticated_header_rls = (rls_entities|selectattr('rls.read_scope', 'equalto', 'any_authenticated')|selectattr('rls.identity_source.type', 'equalto', 'header')|list|length) > 0 %}
 {% set has_header_bypass_rls = (rls_entities|selectattr('rls.identity_source.type', 'equalto', 'header')|selectattr('rls.bypass_roles')|list|length) > 0 %}
+{% set has_jwt_claim_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'jwt_claim')|list|length) > 0 %}
 from typing import List{% if has_owned_rel or has_header_bypass_rls %}, Optional{% endif +%}
 from fastapi import APIRouter, Depends, HTTPException, Query, status{% if has_header_rls %}, Header{% endif +%}
 {% if is_async %}
@@ -16,8 +17,8 @@ from sqlalchemy.orm import Session
 {% endif %}
 
 from database.base import get_db
-{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls %}
-from database.models import User
+{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls or has_jwt_claim_rls %}
+from {{ project.principal_import.module }} import {{ project.principal_import.name }}
 {% endif %}
 from .schemas import (
 {% for entity in module.entities %}
@@ -28,7 +29,7 @@ from .service import {{ module.name|pascal_case }}Service, get_{{ module.snake_n
 {% if project.rbac_enabled %}
 from rbac import require_roles
 {% endif %}
-{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls %}
+{% if has_auth_user_rls or has_any_authenticated_header_rls or has_header_bypass_rls or has_jwt_claim_rls %}
 from modules.{{ project.auth_module_name }}.service import get_{{ project.auth_module_name }}_service
 
 _auth_service = get_{{ project.auth_module_name }}_service()
@@ -44,7 +45,7 @@ router = APIRouter()
     status_code=status.HTTP_201_CREATED,
     summary="Create {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['create'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
+{% if project.rbac_enabled and entity.rbac['create'] and not (entity.rls and entity.rls.identity_source.type in ('auth_user', 'jwt_claim')) %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -54,9 +55,15 @@ router = APIRouter()
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
 {% if project.rbac_enabled and entity.rbac['create'] %}
-    current_user: User = Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
 {% else %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+{% if project.rbac_enabled and entity.rbac['create'] %}
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['create'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
@@ -70,6 +77,17 @@ router = APIRouter()
     # become "the row I create belongs to nobody" (a NULL owner is invisible to every
     # non-bypass caller forever). So create always stamps the caller's own id.
     owner_id = current_user.id
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+    # Same reasoning as auth_user above: create always stamps the caller's own claim
+    # value, bypass role or not - a claim isn't client-suppliable per-request like a
+    # header is, so there is no Optional-param/422 mechanic needed here.
+    _claim_value = current_user.claims.get({{ entity.rls.identity_source.claim|tojson }})
+    if _claim_value is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
+        )
+    owner_id = _claim_value
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}
@@ -89,7 +107,7 @@ router = APIRouter()
     response_model=List[{{ entity.name }}Response],
     summary="List {{ entity.name }} records",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['list'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
+{% if project.rbac_enabled and entity.rbac['list'] and not (entity.rls and entity.rls.identity_source.type in ('auth_user', 'jwt_claim')) %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -101,16 +119,22 @@ router = APIRouter()
 {% endfor %}
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
-{% if entity.rls and entity.rls.read_scope == 'any_authenticated' and entity.rls.identity_source.type == 'header' %}
-    _: User = Depends(_auth_service.get_current_user),
+{% if entity.rls and entity.rls.read_scope == 'any_authenticated' and entity.rls.identity_source.type in ('header', 'jwt_claim') %}
+    _: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
 {% if project.rbac_enabled and entity.rbac['list'] %}
-    current_user: User = Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
 {% else %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+{% if project.rbac_enabled and entity.rbac['list'] %}
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['list'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
     rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
@@ -120,6 +144,17 @@ router = APIRouter()
     owner_id = None
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    else:
+        _claim_value = current_user.claims.get({{ entity.rls.identity_source.claim|tojson }})
+        if _claim_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
+            )
+        owner_id = _claim_value
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -147,7 +182,7 @@ router = APIRouter()
     response_model={{ entity.name }}Response,
     summary="Get {{ entity.name }} by id",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['read'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
+{% if project.rbac_enabled and entity.rbac['read'] and not (entity.rls and entity.rls.identity_source.type in ('auth_user', 'jwt_claim')) %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -155,16 +190,22 @@ router = APIRouter()
     item_id: int,
     db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
-{% if entity.rls and entity.rls.read_scope == 'any_authenticated' and entity.rls.identity_source.type == 'header' %}
-    _: User = Depends(_auth_service.get_current_user),
+{% if entity.rls and entity.rls.read_scope == 'any_authenticated' and entity.rls.identity_source.type in ('header', 'jwt_claim') %}
+    _: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
 {% if project.rbac_enabled and entity.rbac['read'] %}
-    current_user: User = Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
 {% else %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+{% if project.rbac_enabled and entity.rbac['read'] %}
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['read'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
     rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
@@ -174,6 +215,17 @@ router = APIRouter()
     owner_id = None
 {% elif entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    else:
+        _claim_value = current_user.claims.get({{ entity.rls.identity_source.claim|tojson }})
+        if _claim_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
+            )
+        owner_id = _claim_value
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -204,7 +256,7 @@ router = APIRouter()
     response_model={{ entity.name }}Response,
     summary="Update {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['update'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
+{% if project.rbac_enabled and entity.rbac['update'] and not (entity.rls and entity.rls.identity_source.type in ('auth_user', 'jwt_claim')) %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -215,12 +267,18 @@ router = APIRouter()
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
 {% if project.rbac_enabled and entity.rbac['update'] %}
-    current_user: User = Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
 {% else %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+{% if project.rbac_enabled and entity.rbac['update'] %}
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['update'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
     rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
@@ -228,6 +286,17 @@ router = APIRouter()
 ) -> {{ entity.name }}Response:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    else:
+        _claim_value = current_user.claims.get({{ entity.rls.identity_source.claim|tojson }})
+        if _claim_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
+            )
+        owner_id = _claim_value
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -265,7 +334,7 @@ router = APIRouter()
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete {{ entity.name }}",
     tags={{ entity.tags|tojson }},
-{% if project.rbac_enabled and entity.rbac['delete'] and not (entity.rls and entity.rls.identity_source.type == 'auth_user') %}
+{% if project.rbac_enabled and entity.rbac['delete'] and not (entity.rls and entity.rls.identity_source.type in ('auth_user', 'jwt_claim')) %}
     dependencies=[Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %}))],
 {% endif %}
 )
@@ -275,12 +344,18 @@ router = APIRouter()
     service: {{ module.name|pascal_case }}Service = Depends(get_{{ module.snake_name }}_service),
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
 {% if project.rbac_enabled and entity.rbac['delete'] %}
-    current_user: User = Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
 {% else %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
+{% endif %}
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+{% if project.rbac_enabled and entity.rbac['delete'] %}
+    current_user: {{ project.principal_type_name }} = Depends(require_roles({% for role in entity.rbac['delete'] %}"{{ role }}"{{ ", " if not loop.last else "" }}{% endfor %})),
+{% else %}
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
 {% endif %}
 {% elif entity.rls and entity.rls.bypass_roles %}
-    current_user: User = Depends(_auth_service.get_current_user),
+    current_user: {{ project.principal_type_name }} = Depends(_auth_service.get_current_user),
     rls_owner_header: Optional[int] = Header(None, alias={{ entity.rls.identity_source.header_name|tojson }}),
 {% elif entity.rls %}
     rls_owner_header: int = Header(..., alias={{ entity.rls.identity_source.header_name|tojson }}),
@@ -288,6 +363,17 @@ router = APIRouter()
 ) -> None:
 {% if entity.rls and entity.rls.identity_source.type == 'auth_user' %}
     owner_id = None if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}) else current_user.id
+{% elif entity.rls and entity.rls.identity_source.type == 'jwt_claim' %}
+    if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
+        owner_id = None
+    else:
+        _claim_value = current_user.claims.get({{ entity.rls.identity_source.claim|tojson }})
+        if _claim_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
+            )
+        owner_id = _claim_value
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None

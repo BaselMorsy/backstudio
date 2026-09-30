@@ -815,6 +815,8 @@ def test_create_route_with_rls_and_no_owned_relationships_still_passes_owner_id(
             "database_config": {"async_mode": False},
             "rbac_enabled": False,
             "auth_module_name": "auth",
+            "principal_type_name": "User",
+            "principal_import": {"module": "database.models", "name": "User"},
         },
         module={"name": "notes", "snake_name": "notes", "entities": [entity]},
     )

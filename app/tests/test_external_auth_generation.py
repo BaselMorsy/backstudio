@@ -82,6 +82,40 @@ def _make_token(priv_pem, kid="key1", **claim_overrides):
     return jwt.encode(claims, priv_pem, algorithm="RS256", headers={"kid": kid})
 
 
+def test_jwt_claim_rls_route_bodies_render_and_byte_compile(tmp_path):
+    codebase_dir = _generate(tmp_path)
+    routes_src = (codebase_dir / "modules" / "projects" / "routes.py").read_text(encoding="utf-8")
+    ast.parse(routes_src)
+
+    # create: unconditional claim stamp, no bypass branch, 403 on a missing claim -
+    # mirrors auth_user's create exactly (see the comment in the template).
+    assert '_claim_value = current_user.claims.get("agency_id")' in routes_src
+    assert routes_src.count('_claim_value = current_user.claims.get("agency_id")') >= 4  # create/list/read/update/delete
+    assert "status.HTTP_403_FORBIDDEN" in routes_src
+    assert "Missing required claim: agency_id" in routes_src
+
+    # read (get-by-id) has rbac.default_permissions.read: [admin] in the fixture, and
+    # Project's identity is jwt_claim - so the role check and the current_user fetch
+    # must be combined into ONE Depends(require_roles(...)), not two.
+    assert 'current_user: Principal = Depends(require_roles("admin"))' in routes_src
+    # ... and NOT also duplicated as a decorator-level dependency for that same route.
+    get_route_start = routes_src.index("def get_project_route")
+    get_route_decorator = routes_src[routes_src.rindex("@router.get", 0, get_route_start):get_route_start]
+    assert "dependencies=" not in get_route_decorator
+
+    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_rbac_dependency_uses_principal_under_external_auth(tmp_path):
+    codebase_dir = _generate(tmp_path)
+    rbac_src = (codebase_dir / "rbac.py").read_text(encoding="utf-8")
+    ast.parse(rbac_src)
+    assert "from modules.auth.service import Principal" in rbac_src
+    assert "from database.models import User" not in rbac_src
+    assert "current_user: Principal = Depends(_auth_service.get_current_user)) -> Principal:" in rbac_src
+
+
 def test_get_current_user_accepts_a_valid_token_and_builds_principal(tmp_path, monkeypatch, isolated_sys_path):
     priv_pem, jwk_dict = _rsa_keypair_and_jwk()
     codebase_dir = _generate(tmp_path)

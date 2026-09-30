@@ -14,6 +14,12 @@ auth:
     issuer: authservice
     audience: jwt-claim-owner-match
 
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    read: [admin]
+
 entities:
   - name: Agency
     fields:

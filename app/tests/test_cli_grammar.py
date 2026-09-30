@@ -50,3 +50,15 @@ def test_grammar_entities_and_relationships_topics_document_description_and_name
 
 def test_grammar_endpoints_topic_says_enabled_controls_generated_code():
     assert "repo/service" in runner.invoke(app, ["grammar", "endpoints"]).output
+
+
+def test_grammar_auth_topic_documents_external_mode():
+    output = runner.invoke(app, ["grammar", "auth"]).output
+    for token in ("mode", "external", "jwks_url_env_var", "issuer", "algorithms"):
+        assert token in output, token
+
+
+def test_grammar_rls_topic_documents_jwt_claim_and_owner_match_field():
+    output = runner.invoke(app, ["grammar", "rls"]).output
+    for token in ("jwt_claim", "owner_match_field", "claim"):
+        assert token in output, token

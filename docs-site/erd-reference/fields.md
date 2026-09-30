@@ -64,9 +64,18 @@ still overrides the built default entirely, same as for `sqlite`.
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `enabled` | `bool` | default `False` | Turns on JWT authentication and the auto-injected `User` entity. Most other auth/RBAC/RLS behavior is gated on this. |
-| `jwt` | `JWTSpec` | default `JWTSpec()` | JWT signing and token-lifetime settings — see below. |
-| `registration` | `RegistrationSpec` | default `RegistrationSpec()` | Registration mode — see below. |
+| `enabled` | `bool` | default `False` | Turns on authentication. Most other auth/RBAC/RLS behavior is gated on this. |
+| `mode` | `Literal["builtin", "external"]` | default `"builtin"` | `"builtin"` auto-injects a `User` entity and generates a full JWT auth module (registration, login, refresh, `/me`). `"external"` generates only JWKS verification of tokens issued elsewhere — no `User`, no auth endpoints. See [Authentication](../features/auth.md). |
+| `jwt` | `JWTSpec` | default `JWTSpec()` | JWT signing and token-lifetime settings — `mode: "builtin"` only, see below. |
+| `registration` | `RegistrationSpec` | default `RegistrationSpec()` | Registration mode — `mode: "builtin"` only, see below. |
+| `external` | `Optional[ExternalAuthSpec]` | default `None` | JWKS verification settings, required when `mode: "external"` — see below. |
+
+!!! warning "`mode` and `external` move together"
+    `external` must be set when (and only when) `mode: "external"` — setting one without the
+    other is a schema-construction-time error (`AuthSpec.external_block_matches_mode`). Likewise,
+    under `mode: "external"` the `jwt`/`registration` blocks must be left at their defaults (the
+    loader rejects a customized `jwt` or `registration` block, and rejects any declared `User`
+    entity, under external mode — see `app/erd/loader.py`'s `_validate_external_auth`).
 
 ### `auth.jwt` (`JWTSpec`)
 
@@ -126,6 +135,34 @@ auto-injected auth fields: `id`, `email`, `password_hash`, `roles`, `is_active`,
 `updated_at` (always reserved), plus `is_verified` (only reserved when
 `registration.mode: email_verification`) or `is_approved` (only reserved when
 `registration.mode: admin_approval`).
+
+### `auth.external` (`ExternalAuthSpec`)
+
+Required when (and only when) `mode: "external"`. See
+[Authentication → External JWT verification](../features/auth.md#external-jwt-verification-authmode-external)
+for the generated verification mechanics (JWKS caching, refetch-once behavior, alg-confusion
+reasoning).
+
+| Field | Type | Required/default | Description |
+|---|---|---|---|
+| `jwks_url_env_var` | `str` | required | Name of the environment variable the generated project reads the JWKS endpoint URL from at verification time (not read at generation time). |
+| `issuer` | `str` | required | Expected `iss` claim; tokens with any other issuer are rejected. |
+| `audience` | `Optional[str]` | default `None` | Expected `aud` claim. When unset, audience validation is skipped entirely (no `audience=` kwarg passed to `jwt.decode(...)`) — `backstudio validate` emits a warning in this case, since an unset audience is easy to omit by accident. |
+| `algorithms` | `List[str]` | default `["RS256"]` | Accepted signing algorithms. Must be non-empty and **asymmetric only** — see the validator below. |
+| `claims` | `ExternalAuthClaims` | default `ExternalAuthClaims()` | Which claim names carry the subject and roles — see below. |
+
+**Schema-level validator (`ExternalAuthSpec.algorithms_must_be_non_empty_and_asymmetric`):**
+`algorithms` must be non-empty, and must not contain `"HS256"`, `"HS384"`, or `"HS512"` — a
+shared-secret (HMAC) algorithm has no place in a verify-only, JWKS-based setup (there is no shared
+secret, only published public keys), and accepting one would open an alg-confusion forgery path.
+This is enforced at ERD-construction time, not generation time.
+
+#### `auth.external.claims` (`ExternalAuthClaims`)
+
+| Field | Type | Required/default | Description |
+|---|---|---|---|
+| `subject` | `str` | default `"sub"` | Claim name read as the verified `Principal.id`. |
+| `roles` | `str` | default `"roles"` | Claim name read as `Principal.roles` (normalized to a `List[str]`: a single string becomes a one-element list, absent becomes `[]`). |
 
 ## `rbac` (`RBACSpec`)
 
@@ -290,41 +327,52 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
 | `identity_source` | `RLSIdentitySource` | required | Where the "current owner" identity is resolved from — see below. |
-| `bypass_roles` | `List[str]` | default `[]` | Roles that bypass row-level filtering entirely for this entity, on `list`/`read`/`update`/`delete`. `create` is never bypass-aware for either identity source (a new row always needs a concrete owner, never `NULL`) — see [Row-Level Security](../features/rls.md#bypass-roles). |
+| `owner_match_field` | `Optional[str]` | default `None` | `identity_source.type: jwt_claim` only. Matches the claim value against this field on the owner entity instead of the owner's primary key — must name a field that is `unique: true` and of type `string`, `uuid`, `integer`, or `bigint`. See [Row-Level Security](../features/rls.md#owner_match_field-matching-a-claim-against-a-non-pk-column). |
+| `bypass_roles` | `List[str]` | default `[]` | Roles that bypass row-level filtering entirely for this entity, on `list`/`read`/`update`/`delete`. `create` is never bypass-aware for any identity source (a new row always needs a concrete owner, never `NULL`) — see [Row-Level Security](../features/rls.md#bypass-roles). |
 | `read_scope` | `Literal["owner", "any_authenticated"]` | default `"owner"` | `"any_authenticated"` makes `list`/`read` visible to any authenticated caller regardless of row ownership (a "public read, owner-only write" entity); `create`/`update`/`delete` stay owner- (or bypass-) scoped exactly as with the default `"owner"`. See [Row-Level Security](../features/rls.md#public-read-read_scope). |
 
 !!! warning "Do you need a `User` entity for RLS?"
     Only if `identity_source.type: auth_user` — that resolves ownership from the
     JWT-authenticated `User`, so it requires `auth.enabled: true`. `identity_source.type:
     header` needs **neither** `auth.enabled` nor a `User` entity at all — it resolves ownership
-    from a request header instead. Either way, `bypass_roles` (if used) still requires
-    `rbac.enabled: true`.
+    from a request header instead. `identity_source.type: jwt_claim` needs neither a `User`
+    entity nor `mode: "builtin"` — it requires `auth.enabled: true` **and** `auth.mode:
+    "external"` instead, resolving ownership from a claim on the externally-verified token.
+    Either way, `bypass_roles` (if used) still requires `rbac.enabled: true`.
 
 #### `RLSIdentitySource`
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `type` | `Literal["auth_user", "header"]` | required | `auth_user` resolves ownership from the JWT-authenticated `User`; `header` resolves it from a request header value (e.g. for multi-tenant setups without per-row user auth). |
+| `type` | `Literal["auth_user", "header", "jwt_claim"]` | required | `auth_user` resolves ownership from the JWT-authenticated `User`; `header` resolves it from a request header value (e.g. for multi-tenant setups without per-row user auth); `jwt_claim` resolves it from a claim on an externally-verified token (requires `auth.mode: "external"`). |
 | `header_name` | `Optional[str]` | default `None` | Required when `type: header` (e.g. `X-Tenant-Id`); must not be `Authorization` (case-insensitive) since that header is already reserved for the `Bearer <token>` JWT scheme. |
+| `claim` | `Optional[str]` | default `None` | Required when `type: jwt_claim` (e.g. `agency_id`). Declared per-entity, not centrally — two entities in the same ERD may read different claims. |
 
-**Cross-field rules (loader, `app/erd/loader.py` `_validate_rls`, plus one schema-level
-validator on `RLSIdentitySource`):**
+**Cross-field rules (loader, `app/erd/loader.py` `_validate_rls`, plus schema-level validators on
+`RLSIdentitySource`):**
 
-- Schema-level: `type: header` requires `header_name` to be set, and `header_name` must not be
-  `"Authorization"` (case-insensitive).
+- Schema-level: `type: header` requires `header_name` to be set (and rejects it when
+  `type != header`); `header_name` must not be `"Authorization"` (case-insensitive). Symmetrically,
+  `type: jwt_claim` requires `claim` to be set (and rejects it when `type != jwt_claim`).
 - Any entity that has a relationship with `owner: true` **must** declare an `rls:` block.
 - `identity_source.type: auth_user` requires `auth.enabled: true`.
 - `identity_source.type: auth_user` requires the owning relationship's `target` to be `"User"`
-  (a different owner entity must use `type: header` instead).
+  (a different owner entity must use `type: header` or `type: jwt_claim` instead).
+- `identity_source.type: jwt_claim` requires `auth.enabled: true` **and** `auth.mode:
+  "external"`.
+- `owner_match_field` is only valid when `identity_source.type: jwt_claim`; when set, it must
+  name a field on the owning relationship's target entity that is `unique: true` and of type
+  `string`, `uuid`, `integer`, or `bigint`.
 - `bypass_roles` requires `rbac.enabled: true` (bypass roles are RBAC roles), and every listed
-  role must already be declared in `rbac.roles`. Valid with **either** `identity_source.type` —
-  `header`-sourced entities can declare `bypass_roles` too (a bypass-role caller still needs to be
-  an authenticated, RBAC-roled user to hold the role, even though the header itself carries no
-  role information); see [Row-Level Security](../features/rls.md#bypass-roles) for exactly which
-  actions bypass applies to.
+  role must already be declared in `rbac.roles`. Valid with **any** `identity_source.type` —
+  `header`- and `jwt_claim`-sourced entities can declare `bypass_roles` too (a bypass-role caller
+  still needs to be an authenticated, RBAC-roled user to hold the role, even though a header or
+  claim value itself carries no role information); see
+  [Row-Level Security](../features/rls.md#bypass-roles) for exactly which actions bypass applies to.
 - `read_scope: "any_authenticated"` on a `header`-identity entity requires `auth.enabled: true` —
   without it there's no `_auth_service` to authenticate the caller against, since header identity
-  alone doesn't otherwise require `auth.enabled`.
+  alone doesn't otherwise require `auth.enabled`. (`jwt_claim` identity already requires
+  `auth.enabled: true` unconditionally, so this rule has nothing extra to add there.)
 - An entity whose ownership is declared via `cascades_ownership: true` (rather than `owner:
   true` directly) must have a chain of `cascades_ownership` relationships that terminates at
   some entity with `owner: true`, with no cycles.

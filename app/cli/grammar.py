@@ -52,17 +52,29 @@ database:
     "auth": """\
 auth:
   enabled: bool = false
-  jwt:
+  mode: builtin | external                                  # default "builtin"
+  jwt:                              # mode: builtin only
     secret_env_var: str = "JWT_SECRET"
     algorithm: str = "HS256"
     expiration_minutes: int = 30
     refresh_token_expiration_minutes: int = 10080          # 7 days
     email_verification_expiration_minutes: int = 1440      # 24 hours
     password_reset_expiration_minutes: int = 30
-  registration:
+  registration:                     # mode: builtin only
     mode: open | email_verification | admin_approval        # default "open"
+  external:                         # required when mode: external, else must be omitted
+    jwks_url_env_var: str                                    # required, e.g. AUTH_JWKS_URL
+    issuer: str                                               # required
+    audience: str                   # optional; unset -> validate-time warning, no aud check
+    algorithms: [str, ...] = [RS256]  # asymmetric only - HS256/HS384/HS512 rejected
+    claims:
+      subject: str = "sub"
+      roles: str = "roles"
 
 # admin_approval requires rbac.enabled: true (the approve-user endpoint is admin-only RBAC-gated)
+# mode: builtin generates User + register/login/refresh/me; jwt/registration only apply here.
+# mode: external generates only JWKS-verifying JWT decode (no User, no auth endpoints at all) -
+#   identity comes entirely from a Principal built from the verified token's claims.
 """,
     "rbac": """\
 rbac:
@@ -153,16 +165,26 @@ endpoints:                                                  # EndpointSpec
 rls:                                                         # RLSSpec, required when an
                                                                # entity has an owner: true relationship
   identity_source:
-    type: auth_user | header                                   # required
+    type: auth_user | header | jwt_claim                       # required
     header_name: str        # required when type: header, e.g. X-Tenant-Id
                              # (must not be "Authorization")
+    claim: str               # required when type: jwt_claim, e.g. agency_id
+                             # (per-entity - two entities may read different claims)
+  owner_match_field: str     # jwt_claim only; match the claim against this field on the
+                             # owner entity instead of its primary key - must be unique: true,
+                             # type string|uuid|integer|bigint
   bypass_roles: [role, ...]     # roles that skip row filtering entirely; requires rbac.enabled
   read_scope: owner | any_authenticated    # default "owner"
 
 # auth_user: owner = the JWT-authenticated User (requires auth.enabled: true)
 # header: owner = the request header's value (no auth.enabled/User needed)
-# bypass_roles: for header identity, list/read/update/delete are bypassed;
-#   create still requires the header (a new row needs a concrete owner)
+# jwt_claim: owner = a claim on the verified external JWT (requires auth.mode: external)
+# bypass_roles: mirrors auth_user for jwt_claim (create always stamps the caller's own
+#   claim, bypass or not - a claim isn't client-suppliable per-request like a header is);
+#   for header identity, list/read/update/delete are bypassed, create still requires
+#   the header (a new row needs a concrete owner)
+# jwt_claim: a missing claim on an authenticated, non-bypass request is 403, not 422
+#   (422 is reserved for the header identity's "you forgot to supply this" case)
 # read_scope: any_authenticated: list/read open to any authenticated caller
 #   regardless of ownership; create/update/delete stay owner- (or bypass-) scoped
 """,

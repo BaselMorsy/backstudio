@@ -879,6 +879,7 @@ def test_translate_resolves_root_owned_entity():
         "is_root": True,
         "root_model": "Order",
         "owner_fk_column": "user_id",
+        "owner_id_type": "int",
         "join_chain": [],
         "identity_source": {"type": "auth_user", "header_name": None, "claim": None},
         "bypass_roles": ["admin"],
@@ -1203,3 +1204,52 @@ def test_declared_user_enum_field_is_annotated(tmp_path):
     user = next(m for m in state["data_models"] if m["name"] == "User")
     tier = next(f for f in user["fields"] if f["name"] == "tier")
     assert tier["enum_class"] == "UserTier" and tier["enum_constraint"] == "ck_users_tier"
+
+
+def test_translate_exposes_principal_type_for_builtin_and_external_auth():
+    state = translate(load_erd(f"{FIXTURES}/valid_full.yml"))
+    assert state["auth_mode"] == "builtin"
+    assert state["principal_type_name"] == "User"
+    assert state["principal_import"] == {"module": "database.models", "name": "User"}
+
+    state = translate(load_erd(f"{FIXTURES}/jwt_claim_owner_match.yml"))
+    assert state["auth_mode"] == "external"
+    assert state["principal_type_name"] == "Principal"
+    assert state["principal_import"] == {"module": "modules.auth.service", "name": "Principal"}
+    assert not any(m["name"] == "User" for m in state["data_models"])
+
+
+def test_translate_owner_match_field_retargets_root_model_and_adds_a_join_hop():
+    state = translate(load_erd(f"{FIXTURES}/jwt_claim_owner_match.yml"))
+    project = next(m for m in state["data_models"] if m["name"] == "Project")
+    rls = project["rls"]
+    assert rls["root_model"] == "Agency"
+    assert rls["owner_fk_column"] == "agency_ref"
+    assert rls["owner_id_type"] == "UUID"
+    assert rls["join_chain"] == [
+        {"from_model": "Project", "from_fk_column": "agency_id", "to_model": "Agency", "to_pk_column": "id"}
+    ]
+    assert rls["identity_source"]["type"] == "jwt_claim"
+    assert rls["identity_source"]["claim"] == "agency_id"
+
+
+def test_translate_owner_match_field_composes_with_cascade_ownership():
+    """Review Focus: the extra join hop must come AFTER the existing cascade hops, in the
+    right order (child -> ... -> FK-owning entity -> owner entity)."""
+    state = translate(load_erd(f"{FIXTURES}/jwt_claim_owner_match.yml"))
+    task = next(m for m in state["data_models"] if m["name"] == "Task")
+    rls = task["rls"]
+    assert rls["root_model"] == "Agency"
+    assert rls["owner_fk_column"] == "agency_ref"
+    assert rls["owner_id_type"] == "UUID"
+    assert rls["join_chain"] == [
+        {"from_model": "Task", "from_fk_column": "project_id", "to_model": "Project", "to_pk_column": "id"},
+        {"from_model": "Project", "from_fk_column": "agency_id", "to_model": "Agency", "to_pk_column": "id"},
+    ]
+
+
+def test_translate_owner_id_type_defaults_to_int_without_owner_match_field():
+    state = translate(load_erd(f"{FIXTURES}/valid_full.yml"))
+    for model in state["data_models"]:
+        if model.get("rls"):
+            assert model["rls"]["owner_id_type"] == "int"

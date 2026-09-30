@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
-from app.erd.field_types import enum_class_name
+from app.erd.field_types import enum_class_name, py_type_for
 from app.erd.loader import ERDValidationError
 from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, FieldType, ModelField, RelationshipDecl
 
@@ -341,15 +341,37 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
         owner_rel = owner_rel_of(model_name)
         if owner_rel is not None:
             entity = entity_by_name[model_name]
-            rls = {
-                "is_root": True,
-                "root_model": model_name,
-                "owner_fk_column": owner_rel["fk_column"],
-                "join_chain": [],
-                "identity_source": entity.rls.identity_source.model_dump(mode="json"),
-                "bypass_roles": list(entity.rls.bypass_roles),
-                "read_scope": entity.rls.read_scope,
-            }
+            match_field_name = entity.rls.owner_match_field
+            if match_field_name:
+                owner_entity_name = owner_rel["target_model"]
+                owner_model = data_models[owner_entity_name]
+                match_field = next(f for f in owner_model["fields"] if f["name"] == match_field_name)
+                rls = {
+                    "is_root": True,
+                    "root_model": owner_entity_name,
+                    "owner_fk_column": match_field_name,
+                    "owner_id_type": py_type_for(match_field["type"]),
+                    "join_chain": [{
+                        "from_model": model_name,
+                        "from_fk_column": owner_rel["fk_column"],
+                        "to_model": owner_entity_name,
+                        "to_pk_column": pk_column_of(owner_entity_name),
+                    }],
+                    "identity_source": entity.rls.identity_source.model_dump(mode="json"),
+                    "bypass_roles": list(entity.rls.bypass_roles),
+                    "read_scope": entity.rls.read_scope,
+                }
+            else:
+                rls = {
+                    "is_root": True,
+                    "root_model": model_name,
+                    "owner_fk_column": owner_rel["fk_column"],
+                    "owner_id_type": "int",
+                    "join_chain": [],
+                    "identity_source": entity.rls.identity_source.model_dump(mode="json"),
+                    "bypass_roles": list(entity.rls.bypass_roles),
+                    "read_scope": entity.rls.read_scope,
+                }
             model["rls"] = rls
             owner_rel["is_rls_link"] = True
             return rls
@@ -382,6 +404,7 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
             "is_root": False,
             "root_model": parent_rls["root_model"],
             "owner_fk_column": parent_rls["owner_fk_column"],
+            "owner_id_type": parent_rls["owner_id_type"],
             "join_chain": [hop] + parent_rls["join_chain"],
             "identity_source": parent_rls["identity_source"],
             "bypass_roles": parent_rls["bypass_roles"],
@@ -455,6 +478,14 @@ def _resolve_modules(erd: ERDConfig, crud_entities: List[Dict[str, Any]]) -> Lis
 def translate(erd: ERDConfig) -> Dict[str, Any]:
     entities = [e for e in erd.entities if e.name != "User"]
 
+    auth_mode = erd.auth.mode if erd.auth.enabled else "builtin"
+    if auth_mode == "external":
+        principal_type_name = "Principal"
+        principal_import = {"module": f"modules.{_resolve_auth_module_name(erd)}.service", "name": "Principal"}
+    else:
+        principal_type_name = "User"
+        principal_import = {"module": "database.models", "name": "User"}
+
     enums: List[Dict[str, Any]] = []
     field_dicts = {
         entity.name: _field_dicts(entity.name, _table_name(erd, entity.name), entity.fields, enums)
@@ -474,7 +505,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         for entity in entities
     }
 
-    if erd.auth.enabled:
+    if erd.auth.enabled and auth_mode != "external":
         data_models["User"] = _build_user_entity(erd, enums)
 
     relationships: List[Dict[str, Any]] = []
@@ -575,6 +606,9 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "modules": modules,
         "auth_module_name": auth_module_name,
         "auth_enabled": erd.auth.enabled,
+        "auth_mode": auth_mode,
+        "principal_type_name": principal_type_name,
+        "principal_import": principal_import,
         "rbac_enabled": erd.rbac.enabled,
         "rbac_roles": erd.rbac.roles,
         "registration_mode": erd.auth.registration.mode,

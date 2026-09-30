@@ -166,17 +166,34 @@ same generated route code works under either mode).
 
 ### JWKS verification mechanics
 
-- **Lazy, in-memory cache keyed by `kid`.** The JWKS endpoint is fetched only when a token's `kid`
-  isn't already in the cache — not eagerly at startup, not on a timer.
-- **Refetch-once on an unknown `kid`, no TTL.** If a token's `kid` isn't cached, the JWKS is
-  fetched exactly once more; if the `kid` still isn't found after that, verification fails with a
-  401. There is no periodic background refresh — a `kid` that was valid once stays resolvable for
-  the life of the process, and a genuinely rotated-out key simply stops being cached anew.
-- **Every verification failure is a 401, fail-closed**, through a single `except JWTError:` — bad
-  signature, wrong issuer, wrong (or missing, when required) audience, expired token, malformed
-  token, and an unknown `kid` all collapse to the same outcome. This was verified empirically
-  against python-jose 3.3.0 (real RSA keypair, real signed tokens), not assumed from its docs —
-  see `test_get_current_user_rejects_every_failure_mode`.
+- **Lazy, in-memory cache keyed by `kid`, fetched asynchronously.** The JWKS endpoint (via
+  `httpx.AsyncClient`) is fetched only when a token's `kid` isn't already in the cache — not
+  eagerly at startup, not on a timer, and never a blocking call inside an `async def` route.
+- **Refetch on an unknown `kid`, throttled, no TTL.** If a token's `kid` isn't cached, the JWKS
+  is refetched — but at most once every 60 seconds. The `kid` comes from the token's
+  *unverified* header, so an unauthenticated caller can trigger a cache miss with any random
+  value; without this minimum interval, that would be an unthrottled way to make the service
+  hammer the JWKS endpoint. A concurrent request that misses on the same `kid` while a fetch is
+  already in flight shares that fetch (an `asyncio.Lock`, re-checked after acquiring it) rather
+  than firing its own. If the `kid` still isn't found after a fetch, verification fails with a
+  401. There is no periodic background refresh — a genuinely rotated-out key stops being cached
+  the next time *any* unknown `kid` triggers a refetch.
+- **Every verification failure is a 401, fail-closed, except a JWKS fetch failure itself,
+  which is a 503.** Bad signature, wrong issuer, wrong (or missing, when required) audience,
+  expired token, malformed token, and an unknown `kid` all collapse to 401 through a single
+  `except JWTError:`. An unreachable JWKS endpoint, a non-2xx response, or an unset
+  `jwks_url_env_var` are a different failure class — an infrastructure problem, not "your
+  credentials are invalid" — and return 503 instead. This was verified empirically against
+  python-jose 3.3.0 (real RSA keypair, real signed tokens) and a simulated transport failure,
+  not assumed from docs — see `test_get_current_user_rejects_every_failure_mode`,
+  `test_jwks_refetch_is_throttled_within_the_minimum_interval`, and
+  `test_jwks_fetch_failure_is_503_not_401_or_a_crash`.
+- **A claim matched against `owner_match_field` is type-checked, not just cast.** A `bool`,
+  `float`, `list`, or `dict` claim value is rejected outright (403) before any type-specific
+  cast is attempted, so a boolean claim can't coerce to `0`/`1` and a float can't silently
+  truncate into coincidentally matching a real row's id — see
+  [`owner_match_field`: matching a claim against a non-PK column](rls.md#owner_match_field-matching-a-claim-against-a-non-pk-column)
+  for the exact rules per target type.
 
 ### `audience` is optional, but unset warns
 

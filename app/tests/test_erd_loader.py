@@ -1076,6 +1076,43 @@ def test_external_auth_with_audience_does_not_warn(tmp_path):
     assert not any("audience" in w for w in collect_warnings(erd))
 
 
+def test_external_auth_rejects_a_relationship_targeting_user_with_no_declared_user_entity(tmp_path):
+    """Final review F2: known_entities previously included "User" whenever auth.enabled was
+    true, regardless of mode - so a relationship targeting "User" validated cleanly under
+    mode: external even though no User table is ever generated there, producing a generated
+    app that crashes at startup with a dangling foreign key. The relationship's target must be
+    rejected as unknown, the same as targeting any other undeclared entity name."""
+    import yaml
+
+    doc = _minimal_external_auth_doc()
+    doc["entities"][0]["relationships"] = [
+        {"name": "owner", "cardinality": "many-to-one", "target": "User"}
+    ]
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="User"):
+        load_erd(path)
+
+
+def test_external_auth_rejects_auth_user_rls_identity_source(tmp_path):
+    """Final review F2: rls.identity_source.type: auth_user requires a builtin User table to
+    resolve ownership from (current_user.id), which doesn't exist under mode: external -
+    identity there comes from Principal/jwt_claim instead."""
+    import yaml
+
+    doc = _minimal_external_auth_doc()
+    doc["entities"].append({"name": "Org", "fields": [{"name": "id", "type": "integer", "primary_key": True}]})
+    doc["entities"][0]["relationships"] = [
+        {"name": "org", "cardinality": "many-to-one", "target": "Org", "owner": True}
+    ]
+    doc["entities"][0]["rls"] = {"identity_source": {"type": "auth_user"}}
+    doc["services"].append({"name": "orgs", "entities": ["Org"]})
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="auth.mode"):
+        load_erd(path)
+
+
 def test_jwt_claim_identity_requires_external_auth_mode(tmp_path):
     import yaml
 

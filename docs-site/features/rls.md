@@ -195,6 +195,11 @@ What "any authenticated caller" requires depends on `identity_source.type`:
   (`Depends(_auth_service.get_current_user)`), which is why this combination requires
   `auth.enabled: true` (enforced by `app/erd/loader.py` — otherwise there'd be no `_auth_service`
   to authenticate against).
+- **`jwt_claim`**: a valid, verified token — no claim needed at all, since `owner_id = None` is
+  set unconditionally before any claim is even read. Unlike `header`, this does **not** bypass
+  RBAC: if `endpoints.rbac` restricts `list`/`read` to specific roles, `require_roles(...)` still
+  gates the route exactly as it would under `auth_user` or the default `owner` scope — a `jwt_claim`
+  caller genuinely has roles to check, unlike a bare request header, which carries none.
 
 Real, tested example: `examples/ecommerce.yml`'s `Review` entity (`identity_source: {type:
 auth_user}`, `read_scope: any_authenticated`, `bypass_roles: [admin]`) — any authenticated
@@ -289,8 +294,13 @@ whatever root/join-chain the owner resolved to and prepends its own hop.
 
 `owner_match_field` requires the named field to be `unique: true` and of type `string`, `uuid`,
 `integer`, or `bigint` (enforced by the loader at validate time, not generation time). The matched
-column's Python type also drives how the raw claim string gets cast before comparison — see
-`_typed_jwt_claim` [above](#route-layer-resolving-owner_id-including-the-bypass-role-and-public-read-fixes).
+column's Python type also drives how the raw claim value gets cast before comparison, via a
+generated `_typed_jwt_claim` helper — a `bool`, `float`, `list`, or `dict` claim is rejected
+outright, and otherwise: `uuid` accepts only a real UUID string; `integer`/`bigint` accepts a
+Python `int` or a digit string (never a float-shaped string like `"9000000000.7"`, which would
+otherwise silently truncate into a different id); `string` accepts a string or a stringified int.
+Any claim shaped wrong for its column — the wrong JSON type, or a string that doesn't parse — is
+a clean 403, never an unhandled exception or a silently-accepted wrong-type match.
 
 ## Error handling
 

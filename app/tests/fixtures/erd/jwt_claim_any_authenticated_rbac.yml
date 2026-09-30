@@ -1,0 +1,53 @@
+project:
+  name: JwtClaimAnyAuthenticatedRbac
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: jwt_claim_any_authenticated_rbac.db
+
+auth:
+  enabled: true
+  mode: external
+  external:
+    jwks_url_env_var: AUTH_JWKS_URL
+    issuer: authservice
+    audience: jwt-claim-any-authenticated-rbac
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+
+entities:
+  - name: Agency
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: agency_ref, type: uuid, unique: true}
+
+  - name: Pub
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string}
+    relationships:
+      - {name: agency, cardinality: many-to-one, target: Agency, owner: true}
+    rls:
+      identity_source: {type: jwt_claim, claim: agency_id}
+      owner_match_field: agency_ref
+      read_scope: any_authenticated
+    endpoints:
+      rbac:
+        list: [admin]
+        read: [admin]
+
+  - name: PubChild
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+    relationships:
+      - {name: pub, cardinality: many-to-one, target: Pub, cascades_ownership: true}
+
+services:
+  - name: agencies
+    entities: [Agency]
+  - name: pubs
+    entities: [Pub, PubChild]

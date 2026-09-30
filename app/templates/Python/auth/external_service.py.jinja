@@ -1,6 +1,8 @@
 """{{ project.name|replace('"', '\\"') }} - external JWT verification (JWKS)"""
 
+import asyncio
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -17,7 +19,16 @@ _ALGORITHMS = {{ project.external_auth_config.algorithms|tojson }}
 _SUBJECT_CLAIM = {{ project.external_auth_config.claims.subject|tojson }}
 _ROLES_CLAIM = {{ project.external_auth_config.claims.roles|tojson }}
 
+# The kid used to look up a signing key comes from the token's unverified header, so any
+# caller (including an unauthenticated one) can force a cache miss with a random value.
+# Without a minimum interval between refetches, that becomes an unthrottled way to make this
+# service hammer the JWKS endpoint. 60s bounds that while still picking up a genuinely
+# rotated key within a minute of the first request that needs it.
+_MIN_REFETCH_INTERVAL_SECONDS = 60.0
+
 _jwks_cache: Dict[str, Dict[str, Any]] = {}
+_jwks_lock = asyncio.Lock()
+_last_fetch_at: Optional[float] = None
 
 
 class Principal:
@@ -27,25 +38,51 @@ class Principal:
         self.claims = claims
 
 
-def _fetch_jwks() -> Dict[str, Any]:
+async def _fetch_jwks() -> Dict[str, Any]:
     url = os.environ.get(_JWKS_URL_ENV_VAR)
     if not url:
-        raise RuntimeError(
-            f"Required environment variable '{_JWKS_URL_ENV_VAR}' is not set. "
-            "Set it (e.g. in a .env file) before starting the application."
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Required environment variable '{_JWKS_URL_ENV_VAR}' is not set. "
+                "Set it (e.g. in a .env file) before starting the application."
+            ),
         )
-    response = httpx.get(url, timeout=10.0)
-    response.raise_for_status()
-    return response.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0)
+            response.raise_for_status()
+            return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        # Unreachable endpoint, non-2xx response, or a non-JSON body: this is an
+        # infrastructure problem, not the caller's fault, and not "your credentials are
+        # invalid" either - a 401 here would be actively misleading.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to fetch signing keys",
+        ) from exc
 
 
-def _key_for_kid(kid: str) -> Dict[str, Any]:
-    if kid not in _jwks_cache:
-        jwks = _fetch_jwks()
-        _jwks_cache.clear()
-        for key in jwks.get("keys", []):
-            if "kid" in key:
-                _jwks_cache[key["kid"]] = key
+async def _key_for_kid(kid: str) -> Dict[str, Any]:
+    global _last_fetch_at
+    if kid in _jwks_cache:
+        return _jwks_cache[kid]
+    async with _jwks_lock:
+        # Re-check after acquiring the lock: a concurrent request may have already
+        # refetched while this one was waiting, so simultaneous misses on the same kid
+        # share a single outbound fetch instead of each firing their own.
+        if kid not in _jwks_cache:
+            now = time.monotonic()
+            recently_fetched = _jwks_cache and _last_fetch_at is not None and (
+                now - _last_fetch_at
+            ) < _MIN_REFETCH_INTERVAL_SECONDS
+            if not recently_fetched:
+                jwks = await _fetch_jwks()
+                _jwks_cache.clear()
+                for key in jwks.get("keys", []):
+                    if "kid" in key:
+                        _jwks_cache[key["kid"]] = key
+                _last_fetch_at = now
     if kid not in _jwks_cache:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown signing key")
     return _jwks_cache[kid]
@@ -65,7 +102,7 @@ async def _verify_token(token: str) -> Principal:
         kid = header.get("kid")
         if not kid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has no 'kid'")
-        key = _key_for_kid(kid)
+        key = await _key_for_kid(kid)
         decode_kwargs: Dict[str, Any] = {"algorithms": _ALGORITHMS, "issuer": _ISSUER}
         if _AUDIENCE is not None:
             decode_kwargs["audience"] = _AUDIENCE

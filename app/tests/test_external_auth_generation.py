@@ -82,6 +82,16 @@ def _make_token(priv_pem, kid="key1", **claim_overrides):
     return jwt.encode(claims, priv_pem, algorithm="RS256", headers={"kid": kid})
 
 
+def _async_jwks_returning(jwks_response):
+    """`_fetch_jwks` is `async def` (final review F3: httpx.AsyncClient, not a blocking
+    sync call inside an async dependency) - monkeypatch replacements must be awaitable too."""
+
+    async def _fake_fetch():
+        return jwks_response
+
+    return _fake_fetch
+
+
 def test_jwt_claim_rls_route_bodies_render_and_byte_compile(tmp_path):
     codebase_dir = _generate(tmp_path)
     routes_src = (codebase_dir / "modules" / "projects" / "routes.py").read_text(encoding="utf-8")
@@ -107,6 +117,53 @@ def test_jwt_claim_rls_route_bodies_render_and_byte_compile(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_typed_jwt_claim_rejects_wrong_json_types_and_malformed_strings(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review F4: _typed_jwt_claim was too permissive - a bool coerced to 0/1 via
+    int(True), a float silently truncated by int(...), and list/dict claims crashing with a
+    500 instead of a clean 403. Exercises every allowed owner_match_field type directly."""
+    codebase_dir = _generate(tmp_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        from fastapi import HTTPException
+
+        routes_module = importlib.import_module("modules.projects.routes")
+        claim = routes_module._typed_jwt_claim
+
+        # Universally-rejected shapes, regardless of the target type.
+        for bad in (True, False, 9000000000.7, [1, 2], {"a": 1}):
+            for type_name in ("UUID", "int", "str"):
+                try:
+                    claim(bad, type_name, "agency_id")
+                    assert False, f"{bad!r} as {type_name} should have raised"
+                except HTTPException as exc:
+                    assert exc.status_code == 403
+
+        # UUID: only a real UUID string is accepted.
+        assert str(claim("11111111-1111-1111-1111-111111111111", "UUID", "agency_id")) == "11111111-1111-1111-1111-111111111111"
+        for bad in ("not-a-uuid", 12345):
+            try:
+                claim(bad, "UUID", "agency_id")
+                assert False, f"{bad!r} should have raised"
+            except HTTPException as exc:
+                assert exc.status_code == 403
+
+        # int: a real int, or a digit string - never a float-shaped or garbage string.
+        assert claim(42, "int", "agency_id") == 42
+        assert claim("42", "int", "agency_id") == 42
+        for bad in ("not-a-number", "seven", "9000000000.7", ""):
+            try:
+                claim(bad, "int", "agency_id")
+                assert False, f"{bad!r} should have raised"
+            except HTTPException as exc:
+                assert exc.status_code == 403
+
+        # str: a plain string, or an int stringified - never a garbage type.
+        assert claim("agency-42", "str", "agency_id") == "agency-42"
+        assert claim(42, "str", "agency_id") == "42"
+
+
 def test_rbac_dependency_uses_principal_under_external_auth(tmp_path):
     codebase_dir = _generate(tmp_path)
     rbac_src = (codebase_dir / "rbac.py").read_text(encoding="utf-8")
@@ -126,7 +183,7 @@ def test_get_current_user_accepts_a_valid_token_and_builds_principal(tmp_path, m
         import importlib
 
         service_module = importlib.import_module("modules.auth.service")
-        monkeypatch.setattr(service_module, "_fetch_jwks", lambda: {"keys": [jwk_dict]})
+        monkeypatch.setattr(service_module, "_fetch_jwks", _async_jwks_returning({"keys": [jwk_dict]}))
 
         import asyncio
 
@@ -149,7 +206,7 @@ def test_get_current_user_rejects_every_failure_mode(tmp_path, monkeypatch, isol
         from fastapi import HTTPException
 
         service_module = importlib.import_module("modules.auth.service")
-        monkeypatch.setattr(service_module, "_fetch_jwks", lambda: {"keys": [jwk_dict]})
+        monkeypatch.setattr(service_module, "_fetch_jwks", _async_jwks_returning({"keys": [jwk_dict]}))
 
         for label, token in {
             "bad signature": _make_token(other_priv_pem),
@@ -163,10 +220,16 @@ def test_get_current_user_rejects_every_failure_mode(tmp_path, monkeypatch, isol
             except HTTPException as exc:
                 assert exc.status_code == 401, label
 
-        # unknown kid: one refetch, then 401
+        # unknown kid: one refetch, then 401. Reset the module's cache/throttle state first -
+        # the loop above already populated it for "key1", and final review F3's minimum
+        # refetch interval would otherwise throttle this section's own fetch (correctly - see
+        # test_jwks_refetch_is_throttled_within_the_minimum_interval below for that behavior
+        # tested directly), which isn't what this section means to exercise.
+        service_module._jwks_cache.clear()
+        service_module._last_fetch_at = None
         fetch_calls = []
 
-        def fetch_once_more():
+        async def fetch_once_more():
             fetch_calls.append(1)
             return {"keys": []}
 
@@ -177,6 +240,103 @@ def test_get_current_user_rejects_every_failure_mode(tmp_path, monkeypatch, isol
         except HTTPException as exc:
             assert exc.status_code == 401
         assert len(fetch_calls) == 1
+
+
+def test_jwks_refetch_is_throttled_within_the_minimum_interval(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review F3: the kid used to select a JWKS refetch comes from the token's
+    unverified header, so an unauthenticated caller can force a cache miss with any random
+    value. Without a minimum interval between refetches, that's an unthrottled way to make
+    this service hammer the JWKS endpoint. Confirms: repeated unknown-kid requests within the
+    interval share one fetch, not one each - and that the throttle only applies once the
+    cache has actually been populated at least once (an empty cache always fetches)."""
+    priv_pem, jwk_dict = _rsa_keypair_and_jwk()
+    codebase_dir = _generate(tmp_path)
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://authservice.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import asyncio
+        from fastapi import HTTPException
+
+        service_module = importlib.import_module("modules.auth.service")
+        fetch_calls = []
+
+        async def counting_fetch():
+            fetch_calls.append(1)
+            return {"keys": [jwk_dict]}
+
+        monkeypatch.setattr(service_module, "_fetch_jwks", counting_fetch)
+
+        # First call: cache is empty, always fetches (populates "key1", not "unknown-kid").
+        try:
+            asyncio.run(service_module._verify_token(_make_token(priv_pem, kid="unknown-kid-1")))
+        except HTTPException as exc:
+            assert exc.status_code == 401
+        assert len(fetch_calls) == 1
+
+        # Second and third calls, different unknown kids, immediately after: cache is
+        # non-empty and the minimum interval hasn't elapsed - no new fetch, straight to 401.
+        for kid in ("unknown-kid-2", "unknown-kid-3"):
+            try:
+                asyncio.run(service_module._verify_token(_make_token(priv_pem, kid=kid)))
+                assert False, f"{kid} should have raised"
+            except HTTPException as exc:
+                assert exc.status_code == 401
+        assert len(fetch_calls) == 1  # still just the one fetch, not three
+
+        # A genuinely known kid, meanwhile, is still served straight from the cache with no
+        # fetch at all - the throttle only affects the miss path.
+        principal = asyncio.run(service_module._verify_token(_make_token(priv_pem, kid="key1")))
+        assert principal.id == "user-1"
+        assert len(fetch_calls) == 1
+
+
+def test_jwks_fetch_failure_is_503_not_401_or_a_crash(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review F3: an unreachable JWKS endpoint, a non-2xx response, or a missing
+    AUTH_JWKS_URL are infrastructure problems, not the caller's fault - they must not surface
+    as 401 (implies "your credentials are bad") or as an unhandled exception (500)."""
+    priv_pem, _ = _rsa_keypair_and_jwk()
+    codebase_dir = _generate(tmp_path)
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://authservice.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import asyncio
+        import httpx
+        from fastapi import HTTPException
+
+        service_module = importlib.import_module("modules.auth.service")
+
+        # Patch at the httpx transport level, not service_module._fetch_jwks itself - the
+        # try/except that converts a transport error into a 503 lives INSIDE _fetch_jwks, so
+        # replacing that function wholesale would bypass the exact code path this test means
+        # to exercise.
+        async def failing_get(self, url, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(httpx.AsyncClient, "get", failing_get)
+        try:
+            asyncio.run(service_module._verify_token(_make_token(priv_pem)))
+            assert False, "should have raised"
+        except HTTPException as exc:
+            assert exc.status_code == 503
+
+    # Missing env var: checked separately (a fresh import, so no leftover cache to serve from).
+    codebase_dir2 = _generate(tmp_path / "b")
+    monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
+    with _GeneratedProjectImporter(codebase_dir2):
+        import importlib
+        import asyncio
+        from fastapi import HTTPException
+
+        service_module = importlib.import_module("modules.auth.service")
+        try:
+            asyncio.run(service_module._verify_token(_make_token(priv_pem)))
+            assert False, "should have raised"
+        except HTTPException as exc:
+            assert exc.status_code == 503
 
 
 def _make_token_without_agency(priv_pem, sub, roles, aud):
@@ -210,7 +370,7 @@ def test_jwt_claim_rls_end_to_end_cross_tenant_isolation_and_bypass(tmp_path, mo
         import importlib
 
         auth_service_module = importlib.import_module("modules.auth.service")
-        monkeypatch.setattr(auth_service_module, "_fetch_jwks", lambda: {"keys": [jwk_dict]})
+        monkeypatch.setattr(auth_service_module, "_fetch_jwks", _async_jwks_returning({"keys": [jwk_dict]}))
 
         server_module = importlib.import_module("server")
         database_base = importlib.import_module("database.base")
@@ -272,3 +432,44 @@ def test_jwt_claim_rls_end_to_end_cross_tenant_isolation_and_bypass(tmp_path, mo
             task_id = task_created.json()["id"]
             assert client.get(f"/tasks/{task_id}", headers=auth(member_b_token)).status_code == 404
             assert client.get(f"/tasks/{task_id}", headers=auth(member_a_token)).status_code == 200
+
+
+def test_jwt_claim_any_authenticated_still_enforces_rbac_on_list_and_read(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review F1: read_scope: any_authenticated + jwt_claim previously matched the same
+    param-block branch as read_scope: any_authenticated + header, which skips require_roles
+    entirely (header's branch only needs "some authenticated caller", since header identity
+    carries no role information to check against - but jwt_claim's Principal genuinely has
+    roles, and RBAC restricting list/read to specific roles must still be enforced). Pub
+    restricts list/read to [admin]; a member token must get 403, not 200.
+    """
+    priv_pem, jwk_dict = _rsa_keypair_and_jwk()
+    fixture = f"{FIXTURES}/jwt_claim_any_authenticated_rbac.yml"
+    state = translate(load_erd(fixture))
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://authservice.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        service_module = importlib.import_module("modules.auth.service")
+        monkeypatch.setattr(service_module, "_fetch_jwks", _async_jwks_returning({"keys": [jwk_dict]}))
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        member_token = _make_token_without_agency(priv_pem, "member-1", ["member"], "jwt-claim-any-authenticated-rbac")
+        admin_token = _make_token_without_agency(priv_pem, "admin-1", ["admin"], "jwt-claim-any-authenticated-rbac")
+
+        def auth(token):
+            return {"Authorization": f"Bearer {token}"}
+
+        with TestClient(server_module.app) as client:
+            # a member has no jwt_claim role restriction bypass and no admin role - RBAC must
+            # reject them on both list and read, exactly as it would for auth_user/header.
+            assert client.get("/pubs", headers=auth(member_token)).status_code == 403
+            assert client.get("/pubs/1", headers=auth(member_token)).status_code == 403
+
+            # an admin (has the required role) still gets through - RBAC isn't just broken shut.
+            assert client.get("/pubs", headers=auth(admin_token)).status_code == 200
+            assert client.get("/pubs/1", headers=auth(admin_token)).status_code == 404  # no row seeded, but past RBAC

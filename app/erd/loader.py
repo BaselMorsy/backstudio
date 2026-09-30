@@ -130,6 +130,13 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
                     "auth.enabled: true (there is no JWT-authenticated caller to resolve "
                     "ownership from otherwise)."
                 )
+            if erd.auth.mode == "external":
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': rls.identity_source.type 'auth_user' requires "
+                    "auth.mode: builtin — there is no injected User table under "
+                    "auth.mode: external to resolve ownership from. Use "
+                    "rls.identity_source.type: jwt_claim instead."
+                )
             if owner_rel.target != "User":
                 raise ERDValidationError(
                     f"Entity '{entity.name}': rls.identity_source.type 'auth_user' requires the "
@@ -284,7 +291,9 @@ def _validate_semantics(erd: ERDConfig) -> None:
             "are then merged into the auto-injected auth fields)."
         )
 
-    known_entities = set(entity_names) | ({"User"} if erd.auth.enabled else set())
+    known_entities = set(entity_names) | (
+        {"User"} if erd.auth.enabled and erd.auth.mode == "builtin" else set()
+    )
 
     _validate_rls(erd, known_entities)
 

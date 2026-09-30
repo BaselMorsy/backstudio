@@ -345,3 +345,53 @@ def test_valid_new_types_parse():
     assert entity.fields[1].description == "Minor units"
     assert entity.fields[5].timezone is False
     assert entity.fields[6].timezone is None
+
+
+def test_external_auth_requires_the_external_block():
+    with pytest.raises(ValidationError):
+        from app.erd.schema import AuthSpec
+        AuthSpec(mode="external")
+
+
+def test_external_auth_spec_defaults():
+    from app.erd.schema import ExternalAuthSpec
+    spec = ExternalAuthSpec(jwks_url_env_var="AUTH_JWKS_URL", issuer="authservice")
+    assert spec.algorithms == ["RS256"]
+    assert spec.audience is None
+    assert spec.claims.subject == "sub"
+    assert spec.claims.roles == "roles"
+
+
+@pytest.mark.parametrize("bad_alg", ["HS256", "HS384", "HS512"])
+def test_external_auth_rejects_hmac_algorithms(bad_alg):
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError):
+        ExternalAuthSpec(jwks_url_env_var="X", issuer="i", algorithms=[bad_alg])
+
+
+def test_external_auth_rejects_empty_algorithms():
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError):
+        ExternalAuthSpec(jwks_url_env_var="X", issuer="i", algorithms=[])
+
+
+def test_rls_identity_source_jwt_claim_requires_claim_field():
+    from app.erd.schema import RLSIdentitySource
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="jwt_claim")
+    source = RLSIdentitySource(type="jwt_claim", claim="agency_id")
+    assert source.claim == "agency_id"
+
+
+def test_rls_identity_source_claim_rejected_on_non_jwt_claim_type():
+    from app.erd.schema import RLSIdentitySource
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="auth_user", claim="agency_id")
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="header", header_name="X-Tenant-Id", claim="agency_id")
+
+
+def test_rls_header_name_still_rejected_on_jwt_claim_type():
+    from app.erd.schema import RLSIdentitySource
+    with pytest.raises(ValidationError):
+        RLSIdentitySource(type="jwt_claim", claim="agency_id", header_name="X-Tenant-Id")

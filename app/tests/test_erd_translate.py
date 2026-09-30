@@ -880,7 +880,7 @@ def test_translate_resolves_root_owned_entity():
         "root_model": "Order",
         "owner_fk_column": "user_id",
         "join_chain": [],
-        "identity_source": {"type": "auth_user", "header_name": None},
+        "identity_source": {"type": "auth_user", "header_name": None, "claim": None},
         "bypass_roles": ["admin"],
         "read_scope": "owner",
     }
@@ -926,7 +926,7 @@ def test_translate_resolves_one_hop_cascade():
     assert order_item["rls"]["join_chain"] == [
         {"from_model": "OrderItem", "from_fk_column": "order_id", "to_model": "Order", "to_pk_column": "id"}
     ]
-    assert order_item["rls"]["identity_source"] == {"type": "auth_user", "header_name": None}
+    assert order_item["rls"]["identity_source"] == {"type": "auth_user", "header_name": None, "claim": None}
     assert order_item["rls"]["bypass_roles"] == []
     # A cascade-owned entity's rls dict is a full copy propagated from its root - it has no
     # rls: block of its own to read read_scope from, so this must come from the root too.

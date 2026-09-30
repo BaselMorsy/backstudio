@@ -1014,3 +1014,189 @@ def test_enum_class_colliding_with_an_imported_sqlalchemy_type_name_rejected(tmp
     )
     with pytest.raises(ERDValidationError, match="DateTime"):
         load_erd(path)
+
+
+def _minimal_external_auth_doc(**overrides):
+    doc = {
+        "project": {"name": "Demo"},
+        "database": {"type": "sqlite", "database_name": "d.db"},
+        "auth": {
+            "enabled": True,
+            "mode": "external",
+            "external": {"jwks_url_env_var": "AUTH_JWKS_URL", "issuer": "authservice"},
+        },
+        "entities": [{"name": "Widget", "fields": [{"name": "id", "type": "integer", "primary_key": True}]}],
+        "services": [{"name": "widgets", "entities": ["Widget"]}],
+    }
+    for key, value in overrides.items():
+        doc[key] = value
+    return doc
+
+
+def test_external_auth_minimal_erd_loads_cleanly(tmp_path):
+    import yaml
+
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(_minimal_external_auth_doc()))
+    erd = load_erd(path)
+    assert erd.auth.mode == "external"
+
+
+def test_external_auth_rejects_a_declared_user_entity(tmp_path):
+    import yaml
+
+    doc = _minimal_external_auth_doc()
+    doc["entities"].append({"name": "User", "fields": [{"name": "id", "type": "integer", "primary_key": True}]})
+    doc["services"].append({"name": "auth", "entities": ["User"]})
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="User"):
+        load_erd(path)
+
+
+def test_external_auth_without_audience_warns(tmp_path):
+    import yaml
+    from app.erd.warnings import collect_warnings
+
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(_minimal_external_auth_doc()))
+    erd = load_erd(path)  # must not raise
+    assert any("audience" in w for w in collect_warnings(erd))
+
+
+def test_external_auth_with_audience_does_not_warn(tmp_path):
+    import yaml
+    from app.erd.warnings import collect_warnings
+
+    doc = _minimal_external_auth_doc()
+    doc["auth"]["external"]["audience"] = "dana-finance"
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    erd = load_erd(path)
+    assert not any("audience" in w for w in collect_warnings(erd))
+
+
+def test_jwt_claim_identity_requires_external_auth_mode(tmp_path):
+    import yaml
+
+    doc = {
+        "project": {"name": "Demo"},
+        "database": {"type": "sqlite", "database_name": "d.db"},
+        "entities": [
+            {"name": "Agency", "fields": [{"name": "id", "type": "integer", "primary_key": True}]},
+            {
+                "name": "Project",
+                "fields": [{"name": "id", "type": "integer", "primary_key": True}],
+                "relationships": [{"name": "agency", "cardinality": "many-to-one", "target": "Agency", "owner": True}],
+                "rls": {"identity_source": {"type": "jwt_claim", "claim": "agency_id"}},
+            },
+        ],
+        "services": [{"name": "things", "entities": ["Agency", "Project"]}],
+    }
+    path = tmp_path / "no_external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="external"):
+        load_erd(path)
+
+
+def _jwt_claim_erd_doc(owner_match_field=None, agency_extra_field=None):
+    agency_fields = [{"name": "id", "type": "integer", "primary_key": True}]
+    if agency_extra_field:
+        agency_fields.append(agency_extra_field)
+    rls = {"identity_source": {"type": "jwt_claim", "claim": "agency_id"}}
+    if owner_match_field:
+        rls["owner_match_field"] = owner_match_field
+    return {
+        "project": {"name": "Demo"},
+        "database": {"type": "sqlite", "database_name": "d.db"},
+        "auth": {
+            "enabled": True,
+            "mode": "external",
+            "external": {"jwks_url_env_var": "AUTH_JWKS_URL", "issuer": "authservice"},
+        },
+        "entities": [
+            {"name": "Agency", "fields": agency_fields},
+            {
+                "name": "Project",
+                "fields": [{"name": "id", "type": "integer", "primary_key": True}],
+                "relationships": [{"name": "agency", "cardinality": "many-to-one", "target": "Agency", "owner": True}],
+                "rls": rls,
+            },
+        ],
+        "services": [{"name": "things", "entities": ["Agency", "Project"]}],
+    }
+
+
+def test_owner_match_field_requires_the_target_field_to_be_unique(tmp_path):
+    import yaml
+
+    doc = _jwt_claim_erd_doc(
+        owner_match_field="agency_ref",
+        agency_extra_field={"name": "agency_ref", "type": "uuid", "unique": False},
+    )
+    path = tmp_path / "erd.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="unique"):
+        load_erd(path)
+
+
+def test_owner_match_field_requires_the_field_to_exist_on_the_owner_entity(tmp_path):
+    import yaml
+
+    doc = _jwt_claim_erd_doc(owner_match_field="does_not_exist")
+    path = tmp_path / "erd.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="does_not_exist"):
+        load_erd(path)
+
+
+@pytest.mark.parametrize("bad_type", ["decimal", "boolean", "float", "text", "json", "datetime"])
+def test_owner_match_field_rejects_unsupported_types(tmp_path, bad_type):
+    import yaml
+
+    extra = {"name": "agency_ref", "type": bad_type, "unique": True}
+    if bad_type == "decimal":
+        extra.update({"precision": 10, "scale": 2})
+    doc = _jwt_claim_erd_doc(owner_match_field="agency_ref", agency_extra_field=extra)
+    path = tmp_path / "erd.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="agency_ref"):
+        load_erd(path)
+
+
+@pytest.mark.parametrize("good_type", ["string", "uuid", "integer", "bigint"])
+def test_owner_match_field_accepts_supported_types(tmp_path, good_type):
+    import yaml
+
+    doc = _jwt_claim_erd_doc(
+        owner_match_field="agency_ref",
+        agency_extra_field={"name": "agency_ref", "type": good_type, "unique": True},
+    )
+    path = tmp_path / "erd.yml"
+    path.write_text(yaml.safe_dump(doc))
+    erd = load_erd(path)  # must not raise
+    assert erd.entities[1].rls.owner_match_field == "agency_ref"
+
+
+def test_owner_match_field_without_jwt_claim_is_rejected(tmp_path):
+    import yaml
+
+    doc = {
+        "project": {"name": "Demo"},
+        "database": {"type": "sqlite", "database_name": "d.db"},
+        "auth": {"enabled": True},
+        "entities": [
+            {"name": "User", "fields": []},
+            {
+                "name": "Project",
+                "fields": [{"name": "id", "type": "integer", "primary_key": True}],
+                "relationships": [{"name": "user", "cardinality": "many-to-one", "target": "User", "owner": True}],
+                "rls": {"identity_source": {"type": "auth_user"}, "owner_match_field": "email"},
+            },
+        ],
+        "services": [{"name": "things", "entities": ["Project"]}, {"name": "auth", "entities": ["User"]}],
+    }
+    path = tmp_path / "erd.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="owner_match_field"):
+        load_erd(path)

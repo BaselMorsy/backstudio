@@ -7,7 +7,7 @@ from app.erd.schema import ERDConfig
 from app.erd.translate import _build_relationship
 
 
-def collect_warnings(erd: ERDConfig) -> List[str]:
+def _relationship_name_warnings(erd: ERDConfig) -> List[str]:
     """Warn when a relationship's declared `name` will not be used.
 
     translate() derives attribute/FK names from the *target* unless an entity has two or
@@ -41,3 +41,20 @@ def collect_warnings(erd: ERDConfig) -> List[str]:
                     "'foreign_key_column:' to choose them, or declare two relationships to the same target."
                 )
     return warnings
+
+
+def _external_auth_warnings(erd: ERDConfig) -> List[str]:
+    """Warn when auth.mode: external omits audience - a token valid for a *different*
+    service behind the same issuer would also be accepted here without it."""
+    if erd.auth.mode == "external" and erd.auth.external is not None and erd.auth.external.audience is None:
+        return [
+            "auth.external.audience is not set - any token issued by "
+            f"'{erd.auth.external.issuer}' for a *different* service would also be accepted "
+            "here. Set audience to this service's expected value unless you're certain no "
+            "other service shares this issuer."
+        ]
+    return []
+
+
+def collect_warnings(erd: ERDConfig) -> List[str]:
+    return _relationship_name_warnings(erd) + _external_auth_warnings(erd)

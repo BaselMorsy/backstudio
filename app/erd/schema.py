@@ -150,10 +150,52 @@ class RegistrationSpec(BaseModel):
     mode: Literal["open", "email_verification", "admin_approval"] = "open"
 
 
+class ExternalAuthClaims(BaseModel):
+    subject: str = "sub"
+    roles: str = "roles"
+
+
+class ExternalAuthSpec(BaseModel):
+    jwks_url_env_var: str
+    issuer: str
+    audience: Optional[str] = None
+    algorithms: List[str] = Field(default_factory=lambda: ["RS256"])
+    claims: ExternalAuthClaims = Field(default_factory=ExternalAuthClaims)
+
+    @field_validator("algorithms")
+    @classmethod
+    def algorithms_must_be_non_empty_and_asymmetric(cls, v: List[str]) -> List[str]:
+        if not v:
+            raise ValueError("auth.external.algorithms must not be empty")
+        hmac_algs = {a for a in v if a in ("HS256", "HS384", "HS512")}
+        if hmac_algs:
+            raise ValueError(
+                f"auth.external.algorithms: {sorted(hmac_algs)} are HMAC (symmetric) algorithms - "
+                "a JWKS publishes only public (asymmetric) keys, so accepting an HMAC algorithm "
+                "here is the classic alg-confusion vulnerability: a party who can compute an HMAC "
+                "using the public key material as the shared secret could forge tokens. Use an "
+                "asymmetric algorithm (e.g. RS256, ES256)."
+            )
+        return v
+
+
 class AuthSpec(BaseModel):
     enabled: bool = False
+    mode: Literal["builtin", "external"] = "builtin"
     jwt: JWTSpec = Field(default_factory=JWTSpec)
     registration: RegistrationSpec = Field(default_factory=RegistrationSpec)
+    external: Optional[ExternalAuthSpec] = None
+
+    @model_validator(mode="after")
+    def external_block_matches_mode(self) -> "AuthSpec":
+        if self.mode == "external" and self.external is None:
+            raise ValueError("auth.mode: external requires auth.external to be set")
+        if self.mode == "builtin" and self.external is not None:
+            raise ValueError(
+                "auth.external is only valid when auth.mode: external - remove it, or set "
+                "mode: external"
+            )
+        return self
 
 
 class RBACSpec(BaseModel):
@@ -173,8 +215,9 @@ class RBACSpec(BaseModel):
 
 
 class RLSIdentitySource(BaseModel):
-    type: Literal["auth_user", "header"]
+    type: Literal["auth_user", "header", "jwt_claim"]
     header_name: Optional[str] = None
+    claim: Optional[str] = None
 
     @model_validator(mode="after")
     def header_name_required_and_valid_for_header_type(self) -> "RLSIdentitySource":
@@ -190,6 +233,14 @@ class RLSIdentitySource(BaseModel):
                     "— this codebase's generated auth already relies on that header for the "
                     "'Bearer <token>' JWT scheme"
                 )
+        elif self.header_name is not None:
+            raise ValueError("rls.identity_source.header_name is only valid when type: header")
+
+        if self.type == "jwt_claim":
+            if not self.claim:
+                raise ValueError("rls.identity_source: type 'jwt_claim' requires 'claim' to be set")
+        elif self.claim is not None:
+            raise ValueError("rls.identity_source.claim is only valid when type: jwt_claim")
         return self
 
 
@@ -197,6 +248,7 @@ class RLSSpec(BaseModel):
     identity_source: RLSIdentitySource
     bypass_roles: List[str] = Field(default_factory=list)
     read_scope: Literal["owner", "any_authenticated"] = "owner"
+    owner_match_field: Optional[str] = None
 
 
 class RelationshipDecl(BaseModel):

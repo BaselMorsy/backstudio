@@ -7,7 +7,7 @@ import yaml
 from pydantic import ValidationError
 
 from app.erd.field_types import enum_class_name, pascal_case
-from app.erd.schema import ERDConfig, FieldType
+from app.erd.schema import ERDConfig, EntitySpec, FieldType, JWTSpec, RegistrationSpec
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 MODE_GATED_RESERVED_USER_FIELDS = {
@@ -42,6 +42,69 @@ def load_erd(path: Union[str, Path]) -> ERDConfig:
 
     _validate_semantics(erd)
     return erd
+
+
+def _validate_external_auth(erd: ERDConfig) -> None:
+    if erd.auth.mode == "external":
+        if "jwt" in erd.auth.model_fields_set and erd.auth.jwt != JWTSpec():
+            raise ERDValidationError(
+                "auth.mode: external cannot be combined with a customized auth.jwt block - "
+                "JWT signing is not this service's job when identity is verified externally."
+            )
+        if "registration" in erd.auth.model_fields_set and erd.auth.registration != RegistrationSpec():
+            raise ERDValidationError(
+                "auth.mode: external cannot be combined with a customized auth.registration "
+                "block - there is no registration flow when identity is verified externally."
+            )
+        for entity in erd.entities:
+            if entity.name == "User":
+                raise ERDValidationError(
+                    "auth.mode: external does not support a declared 'User' entity - there is "
+                    "no builtin User table to merge it into (identity comes entirely from the "
+                    "verified token)."
+                )
+
+
+def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec) -> None:
+    source = entity.rls.identity_source
+    if source.type == "jwt_claim":
+        if not (erd.auth.enabled and erd.auth.mode == "external"):
+            raise ERDValidationError(
+                f"Entity '{entity.name}': rls.identity_source.type 'jwt_claim' requires "
+                "auth.enabled: true and auth.mode: external (there is no verified-claims "
+                "source to read from otherwise)."
+            )
+    elif entity.rls.owner_match_field is not None:
+        raise ERDValidationError(
+            f"Entity '{entity.name}': rls.owner_match_field is only valid when "
+            "rls.identity_source.type: jwt_claim."
+        )
+
+    if entity.rls.owner_match_field is not None:
+        owner_rel = next((r for r in entity.relationships if r.owner), None)
+        owner_entity = next((e for e in erd.entities if e.name == owner_rel.target), None)
+        if owner_entity is None:
+            return  # a different pre-existing validator reports the unknown-target error
+        match_field = next((f for f in owner_entity.fields if f.name == entity.rls.owner_match_field), None)
+        if match_field is None:
+            raise ERDValidationError(
+                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"does not name a field on owner entity '{owner_entity.name}'."
+            )
+        if not match_field.unique:
+            raise ERDValidationError(
+                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"on entity '{owner_entity.name}' must be declared 'unique: true' - a non-unique "
+                "match field makes 'the owner row' ambiguous, which is exactly the shape of bug "
+                "that turns into a cross-tenant data leak."
+            )
+        allowed_types = {"string", "uuid", "integer", "bigint"}
+        if match_field.type.value not in allowed_types:
+            raise ERDValidationError(
+                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"on entity '{owner_entity.name}' has type '{match_field.type.value}', not one of "
+                f"{sorted(allowed_types)} - not a sensible identity-matching value."
+            )
 
 
 def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
@@ -98,6 +161,8 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
                     f"{', '.join(unknown)} — declared roles are: "
                     f"{', '.join(erd.rbac.roles) or 'none declared'}."
                 )
+
+        _validate_jwt_claim_rls(erd, entity)
 
     for entity in erd.entities:
         cascade_rel = next((r for r in entity.relationships if r.cascades_ownership), None)
@@ -272,6 +337,8 @@ def _validate_semantics(erd: ERDConfig) -> None:
                     )
 
     _validate_enum_fields(erd)
+
+    _validate_external_auth(erd)
 
     _validate_services(erd)
 

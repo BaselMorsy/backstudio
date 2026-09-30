@@ -34,7 +34,15 @@ class {{ module.name|pascal_case }}Service:
 {% if 'create' in enabled %}
     {{ 'async ' if is_async }}def create_{{ entity.snake_name }}(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, data: dict{% if entity.rls %}, owner_id: Optional[int] = None{% endif %}) -> {{ entity.name }}:
 {% for rel in entity.owned_relationships %}
-{% if rel.is_rls_link and entity.rls.is_root and entity.rls.identity_source.type == 'auth_user' %}
+{% if rel.is_rls_link and entity.rls.is_root and entity.rls.join_chain %}
+        # owner_id is a JWT claim value matched against {{ rel.target_model }}.{{ entity.rls.owner_fk_column }},
+        # not its primary key (see owner_match_field) - resolve it to the real owner
+        # row here, then stamp this entity's actual FK column with that row's primary
+        # key below, instead of writing the claim value into a column that doesn't exist.
+        _owner_row = {{ 'await ' if is_async }}repo.get_{{ rel.target_snake }}_by_{{ entity.rls.owner_fk_column }}(db, owner_id)
+        if _owner_row is None:
+            raise ValueError(f"{{ rel.target_model }} with {{ entity.rls.owner_fk_column }}={owner_id!r} not found")
+{% elif rel.is_rls_link and entity.rls.is_root and entity.rls.identity_source.type == 'auth_user' %}
 {# root-owned + auth_user: owner_id is current_user.id, already proven to be a real
    User row by the JWT auth dependency - no existence check needed (and the owner FK
    is not in `data` at all, it is stamped from owner_id below). #}
@@ -53,7 +61,9 @@ class {{ module.name|pascal_case }}Service:
             raise ValueError(f"{{ rel.target_model }} {data['{{ rel.fk_column }}']} not found")
 {% endif %}
 {% endfor %}
-{% if entity.rls and entity.rls.is_root %}
+{% if entity.rls and entity.rls.is_root and entity.rls.join_chain %}
+        data["{{ entity.rls.join_chain[0].from_fk_column }}"] = _owner_row.{{ entity.rls.join_chain[0].to_pk_column }}
+{% elif entity.rls and entity.rls.is_root %}
         data["{{ entity.rls.owner_fk_column }}"] = owner_id
 {% endif %}
         return {{ 'await ' if is_async }}repo.create_{{ entity.snake_name }}(db, data)

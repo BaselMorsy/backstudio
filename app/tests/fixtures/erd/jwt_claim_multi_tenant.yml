@@ -1,0 +1,56 @@
+project:
+  name: JwtClaimMultiTenant
+  version: "1.0.0"
+
+database:
+  type: sqlite
+  database_name: jwt_claim_multi_tenant.db
+
+auth:
+  enabled: true
+  mode: external
+  external:
+    jwks_url_env_var: AUTH_JWKS_URL
+    issuer: authservice
+    audience: dana-finance
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+  default_permissions:
+    create: [admin, member]
+    list: [admin, member]
+    read: [admin, member]
+    update: [admin, member]
+    delete: [admin, member]
+
+entities:
+  - name: Agency
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: agency_ref, type: uuid, unique: true}
+      - {name: name, type: string}
+
+  - name: Project
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: title, type: string}
+    relationships:
+      - {name: agency, cardinality: many-to-one, target: Agency, owner: true}
+    rls:
+      identity_source: {type: jwt_claim, claim: agency_id}
+      owner_match_field: agency_ref
+      bypass_roles: [admin]
+
+  - name: Task
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+    relationships:
+      - {name: project, cardinality: many-to-one, target: Project, cascades_ownership: true}
+
+services:
+  - name: agencies
+    entities: [Agency]
+  - name: projects
+    entities: [Project, Task]

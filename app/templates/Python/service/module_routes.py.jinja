@@ -8,6 +8,9 @@
 {% set has_any_authenticated_header_rls = (rls_entities|selectattr('rls.read_scope', 'equalto', 'any_authenticated')|selectattr('rls.identity_source.type', 'equalto', 'header')|list|length) > 0 %}
 {% set has_header_bypass_rls = (rls_entities|selectattr('rls.identity_source.type', 'equalto', 'header')|selectattr('rls.bypass_roles')|list|length) > 0 %}
 {% set has_jwt_claim_rls = (rls_entities|map(attribute='rls')|map(attribute='identity_source')|map(attribute='type')|select('equalto', 'jwt_claim')|list|length) > 0 %}
+{% if has_jwt_claim_rls %}
+import uuid
+{% endif %}
 from typing import List{% if has_owned_rel or has_header_bypass_rls %}, Optional{% endif +%}
 from fastapi import APIRouter, Depends, HTTPException, Query, status{% if has_header_rls %}, Header{% endif +%}
 {% if is_async %}
@@ -33,6 +36,24 @@ from rbac import require_roles
 from modules.{{ project.auth_module_name }}.service import get_{{ project.auth_module_name }}_service
 
 _auth_service = get_{{ project.auth_module_name }}_service()
+{% endif %}
+{% if has_jwt_claim_rls %}
+
+def _typed_jwt_claim(value, type_name: str, claim_name: str):
+    """Cast a raw JWT claim value to the type its owner_match_field column expects
+    (str claims need no cast; a claim shaped wrong for its column is treated the same
+    as a missing one - 403, not 500)."""
+    try:
+        if type_name == "UUID":
+            return uuid.UUID(str(value))
+        if type_name == "int":
+            return int(value)
+        return value
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Claim '{claim_name}' has an invalid value",
+        )
 {% endif %}
 
 router = APIRouter()
@@ -87,7 +108,7 @@ router = APIRouter()
             status_code=status.HTTP_403_FORBIDDEN,
             detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
         )
-    owner_id = _claim_value
+    owner_id = _typed_jwt_claim(_claim_value, {{ entity.rls.owner_id_type|tojson }}, {{ entity.rls.identity_source.claim|tojson }})
 {% elif entity.rls %}
     owner_id = rls_owner_header
 {% endif %}
@@ -154,7 +175,7 @@ router = APIRouter()
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
             )
-        owner_id = _claim_value
+        owner_id = _typed_jwt_claim(_claim_value, {{ entity.rls.owner_id_type|tojson }}, {{ entity.rls.identity_source.claim|tojson }})
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -225,7 +246,7 @@ router = APIRouter()
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
             )
-        owner_id = _claim_value
+        owner_id = _typed_jwt_claim(_claim_value, {{ entity.rls.owner_id_type|tojson }}, {{ entity.rls.identity_source.claim|tojson }})
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -296,7 +317,7 @@ router = APIRouter()
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
             )
-        owner_id = _claim_value
+        owner_id = _typed_jwt_claim(_claim_value, {{ entity.rls.owner_id_type|tojson }}, {{ entity.rls.identity_source.claim|tojson }})
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None
@@ -373,7 +394,7 @@ router = APIRouter()
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={{ ("Missing required claim: " ~ entity.rls.identity_source.claim)|tojson }},
             )
-        owner_id = _claim_value
+        owner_id = _typed_jwt_claim(_claim_value, {{ entity.rls.owner_id_type|tojson }}, {{ entity.rls.identity_source.claim|tojson }})
 {% elif entity.rls and entity.rls.bypass_roles %}
     if set(current_user.roles or []).intersection({{ entity.rls.bypass_roles|tojson }}):
         owner_id = None

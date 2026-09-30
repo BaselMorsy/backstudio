@@ -13,7 +13,7 @@ from middleware import {% for mw in project.middlewares %}{{ mw.name|snake_case 
 from modules.{{ module.snake_name }}.routes import router as {{ module.snake_name }}_router
 {% endfor %}
 {% endif %}
-{% if project.auth_enabled %}
+{% if project.auth_enabled and project.auth_mode == 'builtin' %}
 from modules.{{ project.auth_module_name }}.routes import router as auth_router
 {% endif %}
 
@@ -72,7 +72,7 @@ app.add_middleware({{ mw.name|pascal_case }})
 app.include_router({{ module.snake_name }}_router)
 {% endfor %}
 {% endif %}
-{% if project.auth_enabled %}
+{% if project.auth_enabled and project.auth_mode == 'builtin' %}
 app.include_router(auth_router, prefix="/{{ project.auth_module_name }}", tags=["{{ project.auth_module_name }}"])
 {% endif %}
 

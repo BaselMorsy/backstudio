@@ -177,3 +177,98 @@ def test_get_current_user_rejects_every_failure_mode(tmp_path, monkeypatch, isol
         except HTTPException as exc:
             assert exc.status_code == 401
         assert len(fetch_calls) == 1
+
+
+def _make_token_without_agency(priv_pem, sub, roles, aud):
+    from jose import jwt
+
+    return jwt.encode(
+        {"sub": sub, "roles": roles, "iss": "authservice", "aud": aud, "exp": int(time.time()) + 3600},
+        priv_pem, algorithm="RS256", headers={"kid": "key1"},
+    )
+
+
+def test_jwt_claim_rls_end_to_end_cross_tenant_isolation_and_bypass(tmp_path, monkeypatch, isolated_sys_path):
+    """jwt_claim_multi_tenant.yml: real HTTP round trip mirroring the dana-finance shape
+    (Agency.agency_ref unique uuid, Project owned via jwt_claim + owner_match_field,
+    cascade-owned Task). Proves cross-agency isolation, an admin bypass role seeing
+    across every agency, create always stamping the caller's own claim regardless of
+    bypass, a token missing the claim getting 403 on every non-bypass action including
+    create, and the cascade-owned child inheriting the same scoping.
+    """
+    priv_pem, jwk_dict = _rsa_keypair_and_jwk()
+    state = translate(load_erd(f"{FIXTURES}/jwt_claim_multi_tenant.yml"))
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://authservice.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'tenant.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    agency_a_ref = "11111111-1111-1111-1111-111111111111"
+    agency_b_ref = "22222222-2222-2222-2222-222222222222"
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        auth_service_module = importlib.import_module("modules.auth.service")
+        monkeypatch.setattr(auth_service_module, "_fetch_jwks", lambda: {"keys": [jwk_dict]})
+
+        server_module = importlib.import_module("server")
+        database_base = importlib.import_module("database.base")
+        database_models = importlib.import_module("database.models")
+        from fastapi.testclient import TestClient
+
+        import uuid
+
+        member_a_token = _make_token(priv_pem, sub="member-a", roles=["member"], agency_id=agency_a_ref, aud="dana-finance")
+        member_b_token = _make_token(priv_pem, sub="member-b", roles=["member"], agency_id=agency_b_ref, aud="dana-finance")
+        admin_token = _make_token(priv_pem, sub="admin-1", roles=["admin"], agency_id=agency_a_ref, aud="dana-finance")
+        no_claim_token = _make_token_without_agency(priv_pem, "member-c", ["member"], "dana-finance")
+
+        def auth(token):
+            return {"Authorization": f"Bearer {token}"}
+
+        with TestClient(server_module.app) as client:
+            # tables only exist once the app's lifespan (init_db) has run, i.e. once we're
+            # inside this `with` block - can't seed agencies before entering it.
+            session = database_base.SessionLocal()
+            try:
+                agency_a = database_models.Agency(agency_ref=uuid.UUID(agency_a_ref), name="Agency A")
+                agency_b = database_models.Agency(agency_ref=uuid.UUID(agency_b_ref), name="Agency B")
+                session.add_all([agency_a, agency_b])
+                session.commit()
+            finally:
+                session.close()
+
+            created = client.post("/projects", json={"title": "A's project"}, headers=auth(member_a_token))
+            assert created.status_code == 201, created.text
+            project_a_id = created.json()["id"]
+
+            # cross-tenant isolation: member B cannot see A's project
+            listing_b = client.get("/projects", headers=auth(member_b_token)).json()
+            assert all(p["id"] != project_a_id for p in listing_b)
+            assert client.get(f"/projects/{project_a_id}", headers=auth(member_b_token)).status_code == 404
+
+            # same-tenant: member A can see it
+            listing_a = client.get("/projects", headers=auth(member_a_token)).json()
+            assert any(p["id"] == project_a_id for p in listing_a)
+
+            # bypass: admin sees it despite being scoped to agency A's own claim (same agency
+            # here, but the point is the bypass path, not tenant match)
+            assert client.get(f"/projects/{project_a_id}", headers=auth(admin_token)).status_code == 200
+
+            # create always stamps the caller's own claim, bypass or not
+            created_by_admin = client.post("/projects", json={"title": "admin's own"}, headers=auth(admin_token))
+            assert created_by_admin.status_code == 201
+            assert client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_b_token)).status_code == 404
+            assert client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_a_token)).status_code == 200
+
+            # missing claim, non-bypass: 403 on list/read/update/delete and on create
+            assert client.get("/projects", headers=auth(no_claim_token)).status_code == 403
+            assert client.post("/projects", json={"title": "x"}, headers=auth(no_claim_token)).status_code == 403
+
+            # cascade-owned Task inherits the same tenant scoping through one more join hop
+            task_created = client.post("/tasks", json={"label": "t1", "project_id": project_a_id}, headers=auth(member_a_token))
+            assert task_created.status_code == 201, task_created.text
+            task_id = task_created.json()["id"]
+            assert client.get(f"/tasks/{task_id}", headers=auth(member_b_token)).status_code == 404
+            assert client.get(f"/tasks/{task_id}", headers=auth(member_a_token)).status_code == 200

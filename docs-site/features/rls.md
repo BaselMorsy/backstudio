@@ -112,6 +112,17 @@ whether `bypass_roles` is set, and — for `list`/`read` only — `read_scope`:
   `owner_match_field` needs (`int`/`UUID`/plain `str`); a claim that doesn't parse as that type is
   treated the same as a missing one — 403, never a 500.
 
+  !!! warning "No `owner_match_field` → the claim is always cast as `int`"
+      When `owner_match_field` is unset, `translate.py` hardcodes `owner_id_type` to `"int"` —
+      the claim is expected to *be* the owner's own primary key. If your claim actually
+      represents something else (a tenant UUID, say) rather than that integer primary key, you
+      must set `owner_match_field` explicitly (see
+      [below](#owner_match_field-matching-a-claim-against-a-non-pk-column)); otherwise the claim
+      never parses as `int` and **every** request for that entity 403s with "Claim '…' has an
+      invalid value" — a silent footgun that `validate`/`generate` do not catch, since both the
+      ERD and the generated code are internally consistent, just not consistent with what the
+      claim actually contains at runtime.
+
 - **`header`, no `bypass_roles`**: `owner_id` is the required `Header(..., alias="<header_name>")`
   value directly, exactly as before.
 

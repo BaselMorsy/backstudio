@@ -67,6 +67,15 @@ on the route decorator, wired from either the entity's `endpoints.rbac` override
 `rbac.default_permissions` for that action — whichever applies, resolved once at generation time,
 not per-request.
 
+!!! warning "No override, no default entry → every declared role, not 'any authenticated caller'"
+    If an action has neither a per-entity `endpoints.rbac` override nor an entry in
+    `rbac.default_permissions`, `_resolve_rbac` (`app/erd/translate.py`) falls through to
+    `list(erd.rbac.roles)` — **every** role declared in `rbac.roles`, which is almost never what
+    "I didn't restrict this action" is meant to express. To actually open an action to any
+    authenticated caller regardless of role, override it with an **explicit empty list**:
+    `endpoints.rbac.<action>: []`. An empty list is falsy in the generated route template, so it
+    resolves to a plain `get_current_user` dependency with no role check at all.
+
 ## First-user bootstrap
 
 RBAC gates every action behind declared roles, which creates a chicken-and-egg problem: with

@@ -62,3 +62,15 @@ def test_grammar_rls_topic_documents_jwt_claim_and_owner_match_field():
     output = runner.invoke(app, ["grammar", "rls"]).output
     for token in ("jwt_claim", "owner_match_field", "claim"):
         assert token in output, token
+
+
+def test_grammar_rbac_topic_documents_no_override_default_is_every_role():
+    output = runner.invoke(app, ["grammar", "rbac"]).output
+    assert "EVERY role" in output
+    assert "endpoints.rbac.<action>: []" in output
+
+
+def test_grammar_rls_topic_documents_owner_match_field_int_default_gotcha():
+    output = runner.invoke(app, ["grammar", "rls"]).output
+    assert "cast as an int" in output
+    assert "403s" in output

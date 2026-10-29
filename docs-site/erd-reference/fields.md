@@ -170,7 +170,7 @@ This is enforced at ERD-construction time, not generation time.
 |---|---|---|---|
 | `enabled` | `bool` | default `False` | Turns on role-based access control. |
 | `roles` | `List[str]` | default `[]` | The set of valid role names for this project. |
-| `default_permissions` | `Dict[str, List[str]]` | default `{}` | Maps a CRUD action (`create`, `list`, `read`, `update`, `delete`) to the list of roles allowed to perform it on any entity that doesn't override it via `endpoints.rbac`. Schema-level validation (`RBACSpec.actions_are_known`) rejects any key that isn't one of those 5 actions. |
+| `default_permissions` | `Dict[str, List[str]]` | default `{}` | Maps a CRUD action (`create`, `list`, `read`, `update`, `delete`) to the list of roles allowed to perform it on any entity that doesn't override it via `endpoints.rbac`. Schema-level validation (`RBACSpec.actions_are_known`) rejects any key that isn't one of those 5 actions. **An action with neither an `endpoints.rbac` override nor a `default_permissions` entry resolves to every role in `rbac.roles`** (`_resolve_rbac` in `app/erd/translate.py`) — not "any authenticated caller." Use an explicit `endpoints.rbac.<action>: []` override to open an action to any authenticated caller regardless of role. |
 
 !!! warning "RBAC needs auth, and an `admin` role"
     `rbac.enabled: true` requires **both**: `auth.enabled: true` (RBAC needs a way to identify
@@ -362,7 +362,9 @@ Only one side of a relationship needs to declare it — `translate.py` fills in 
   "external"`.
 - `owner_match_field` is only valid when `identity_source.type: jwt_claim`; when set, it must
   name a field on the owning relationship's target entity that is `unique: true` and of type
-  `string`, `uuid`, `integer`, or `bigint`.
+  `string`, `uuid`, `integer`, or `bigint`. **When unset, the claim is cast as `int` and matched
+  against the owner's own primary key directly** — if the claim actually represents something
+  else (e.g. a UUID tenant id), every request 403s unless `owner_match_field` is set explicitly.
 - `bypass_roles` requires `rbac.enabled: true` (bypass roles are RBAC roles), and every listed
   role must already be declared in `rbac.roles`. Valid with **any** `identity_source.type` —
   `header`- and `jwt_claim`-sourced entities can declare `bypass_roles` too (a bypass-role caller

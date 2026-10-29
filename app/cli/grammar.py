@@ -88,6 +88,9 @@ rbac:
     delete: [role, ...]
 
 # rbac.enabled requires auth.enabled: true AND "admin" present in rbac.roles
+# an action with NO endpoints.rbac override and NO default_permissions entry resolves to
+#   EVERY role in rbac.roles - not "any authenticated caller". To open an action to any
+#   authenticated caller, override it with an explicit empty list: endpoints.rbac.<action>: []
 """,
     "entities": """\
 entities:
@@ -187,6 +190,9 @@ rls:                                                         # RLSSpec, required
 #   (422 is reserved for the header identity's "you forgot to supply this" case)
 # read_scope: any_authenticated: list/read open to any authenticated caller
 #   regardless of ownership; create/update/delete stay owner- (or bypass-) scoped
+# jwt_claim without owner_match_field: the claim is cast as an int to match the owner's
+#   own primary key directly. If the claim represents something else (e.g. a UUID), set
+#   owner_match_field explicitly - otherwise every request 403s (claim won't parse as int)
 """,
     "services": """\
 services:                                                   # ServiceDecl

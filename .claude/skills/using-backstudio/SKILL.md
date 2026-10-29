@@ -31,10 +31,10 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 | Exact-to-the-cent money | `type: decimal` with `precision`/`scale`; pick `database.type: postgresql`/`mysql` for the exactness guarantee (SQLite stores decimal as REAL) |
 | Fixed set of string values | `type: enum`, `values: [...]` (UPPER_SNAKE, no Python-keyword collisions) |
 
-## Two gotchas `backstudio grammar` doesn't state (verified against `translate.py`/`loader.py` source — read it directly if behavior seems off)
+## Two gotchas worth knowing by heart (also now in `backstudio grammar rbac`/`rls`, and in `docs-site/features/rbac.md`/`rls.md`)
 
 1. **RBAC: no override ≠ "any authenticated user."** With `rbac.enabled: true`, an action with no per-entity `endpoints.rbac` override and no matching `rbac.default_permissions` entry resolves to **every declared role**, not "anyone logged in." To open an action to any authenticated caller, override it with an **explicit empty list**: `endpoints.rbac.<action>: []`.
-2. **Owner-match type coercion defaults to `int`.** When `rls.owner_match_field` is unset, generated code assumes the owner's primary key is an int. If the RLS claim should match a non-integer column (e.g. a UUID), you must set `owner_match_field` to that column explicitly — otherwise the claim is coerced as if it were an int.
+2. **Owner-match type coercion defaults to `int`.** When `rls.owner_match_field` is unset, generated code assumes the owner's primary key is an int. If the RLS claim should match a non-integer column (e.g. a UUID), you must set `owner_match_field` to that column explicitly — otherwise every request 403s (the claim never parses as an int).
 
 ## Common mistakes
 
@@ -44,7 +44,7 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 - An entity not assigned to exactly one `services[].entities` group.
 - `owner_match_field` target missing `unique: true`.
 - HS256/384/512 under `auth.mode: external` (rejected — asymmetric algorithms only; this mode never holds a signing secret).
-- An entity with no primary-key field. `validate` does not catch this; `generate` only surfaces it as a non-fatal Alembic-autogen warning (exit code 0) — easy to miss in automation. Give every entity an explicit `primary_key: true` field.
+- An entity with no `primary_key: true` field, or more than one (rejected at `validate` time — every entity needs exactly one, except `User`, whose PK is always the auto-injected `id`).
 
 ## Reference
 

@@ -55,6 +55,59 @@ entities:
         load_erd(bad)
 
 
+def test_entity_with_no_primary_key_field_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Widget
+    fields: [{name: title, type: string}]
+"""
+    )
+    with pytest.raises(ERDValidationError, match="no field has primary_key: true"):
+        load_erd(bad)
+
+
+def test_entity_with_two_primary_key_fields_rejected(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: alt_id, type: integer, primary_key: true}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="2 fields have primary_key: true"):
+        load_erd(bad)
+
+
+def test_user_entity_exempt_from_primary_key_check(tmp_path):
+    """User never declares its own 'id' (RESERVED_USER_FIELDS forbids it) - the auto-injected
+    id field is merged in later, at generation time, not visible to the loader's per-entity
+    field list - so the primary-key check must not apply to it."""
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true}
+entities:
+  - name: User
+    fields: [{name: display_name, type: string}]
+services:
+  - {name: auth, entities: [User]}
+"""
+    )
+    erd = load_erd(ok)
+    assert erd.entities[0].name == "User"
+
+
 def test_self_referential_many_to_many_rejected(tmp_path):
     """A self-referential many-to-many would collide on the association table's
     left/right FK column names (both derive to the same "<entity>_id" with no

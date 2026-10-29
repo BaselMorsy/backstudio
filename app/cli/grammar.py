@@ -113,7 +113,8 @@ fields:                                                     # ModelField
     nullable: bool = true
     unique: bool = false
     default: any                  # decimal: number or string; enum: one of `values`
-    primary_key: bool = false     # integer or bigint; not decimal/enum
+    primary_key: bool = false     # integer or bigint; not decimal/enum; exactly one per entity
+                                   # (none, or more than one, is rejected at validate time)
     index: bool = false
     max_length: int               # string fields only
     precision: int                # decimal only; required with scale

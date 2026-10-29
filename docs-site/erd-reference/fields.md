@@ -253,6 +253,7 @@ Each entry is an `EntitySpec`:
 
 - `decimal` requires both `precision` and `scale` (`precision >= 1`, `0 <= scale <= precision`); `precision`/`scale` are rejected on every other type.
 - `decimal` and `enum` fields may not be `primary_key`.
+- **Every entity must have exactly one `primary_key: true` field** (loader-level, `_validate_semantics` in `app/erd/loader.py`) — except `User`, whose primary key is always the auto-injected `id` field. Zero or more than one is rejected at `validate` time; without this check, zero would generate a table with no real primary key column (templates assume a field literally named `id`), and more than one would silently only use the first for relationships/lookups despite SQLAlchemy mapping all of them as primary key columns.
 - A `decimal` field's `default`, if set, must parse as a `Decimal` (a bare `"abc"`, `"NaN"` or a `bool` is rejected).
 - `enum` requires a non-empty, unique `values` list, each value identifier-safe (see above); `values` is rejected on every other type.
 - An `enum` field's `default`, if set, must be one of its `values`.

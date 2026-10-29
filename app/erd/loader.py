@@ -305,6 +305,24 @@ def _validate_semantics(erd: ERDConfig) -> None:
                 f"Entity '{entity.name}': duplicate field name(s): {', '.join(dup_fields)}"
             )
 
+        if entity.name != "User":
+            pk_fields = [f.name for f in entity.fields if f.primary_key]
+            if not pk_fields:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': no field has primary_key: true — every entity "
+                    "needs exactly one primary-key field. Without one, the generated table has "
+                    "no real primary key column (SQLAlchemy mapping and Alembic's initial-"
+                    "migration autogeneration both fail — the latter silently, with `generate` "
+                    "still exiting 0)."
+                )
+            if len(pk_fields) > 1:
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': {len(pk_fields)} fields have primary_key: true "
+                    f"({', '.join(pk_fields)}) — only one primary-key field is supported per "
+                    "entity; composite primary keys are not generated correctly (relationships "
+                    "and lookups assume a single PK column)."
+                )
+
         if entity.name == "User" and erd.auth.enabled:
             reserved = RESERVED_USER_FIELDS | MODE_GATED_RESERVED_USER_FIELDS.get(erd.auth.registration.mode, set())
             collide = sorted(set(field_names) & reserved)

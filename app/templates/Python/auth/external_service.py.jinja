@@ -1,24 +1,36 @@
-"""{{ project.name|replace('"', '\\"') }} - external JWT verification (JWKS)"""
+"""{{ project.name|replace('"', '\\"') }} - external JWT verification ({{ project.external_auth_config.verification }})"""
 
+{% if project.external_auth_config.verification == 'jwks' %}
 import asyncio
+{% endif %}
 import os
+{% if project.external_auth_config.verification == 'jwks' %}
 import time
+{% endif %}
 from typing import Any, Dict, List, Optional
 
+{% if project.external_auth_config.verification == 'jwks' %}
 import httpx
+{% endif %}
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="", auto_error=False)
 
+_VERIFICATION = {{ project.external_auth_config.verification|tojson }}
+{% if project.external_auth_config.verification == 'jwks' %}
 _JWKS_URL_ENV_VAR = {{ project.external_auth_config.jwks_url_env_var|tojson }}
+{% else %}
+_SECRET_ENV_VAR = {{ project.external_auth_config.secret_env_var|tojson }}
+{% endif %}
 _ISSUER = {{ project.external_auth_config.issuer|tojson }}
 _AUDIENCE = {{ project.external_auth_config.audience|python_value }}
 _ALGORITHMS = {{ project.external_auth_config.algorithms|tojson }}
 _SUBJECT_CLAIM = {{ project.external_auth_config.claims.subject|tojson }}
 _ROLES_CLAIM = {{ project.external_auth_config.claims.roles|tojson }}
 
+{% if project.external_auth_config.verification == 'jwks' %}
 # The kid used to look up a signing key comes from the token's unverified header, so any
 # caller (including an unauthenticated one) can force a cache miss with a random value.
 # Without a minimum interval between refetches, that becomes an unthrottled way to make this
@@ -29,6 +41,7 @@ _MIN_REFETCH_INTERVAL_SECONDS = 60.0
 _jwks_cache: Dict[str, Dict[str, Any]] = {}
 _jwks_lock = asyncio.Lock()
 _last_fetch_at: Optional[float] = None
+{% endif %}
 
 
 class Principal:
@@ -38,6 +51,7 @@ class Principal:
         self.claims = claims
 
 
+{% if project.external_auth_config.verification == 'jwks' %}
 async def _fetch_jwks() -> Dict[str, Any]:
     url = os.environ.get(_JWKS_URL_ENV_VAR)
     if not url:
@@ -86,6 +100,19 @@ async def _key_for_kid(kid: str) -> Dict[str, Any]:
     if kid not in _jwks_cache:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown signing key")
     return _jwks_cache[kid]
+{% else %}
+def _shared_secret() -> str:
+    secret = os.environ.get(_SECRET_ENV_VAR)
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Required environment variable '{_SECRET_ENV_VAR}' is not set. "
+                "Set it (e.g. in a .env file) before starting the application."
+            ),
+        )
+    return secret
+{% endif %}
 
 
 def _normalize_roles(value: Any) -> List[str]:
@@ -98,11 +125,15 @@ def _normalize_roles(value: Any) -> List[str]:
 
 async def _verify_token(token: str) -> Principal:
     try:
+        {% if project.external_auth_config.verification == 'jwks' %}
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         if not kid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has no 'kid'")
         key = await _key_for_kid(kid)
+        {% else %}
+        key = _shared_secret()
+        {% endif %}
         decode_kwargs: Dict[str, Any] = {"algorithms": _ALGORITHMS, "issuer": _ISSUER}
         if _AUDIENCE is not None:
             decode_kwargs["audience"] = _AUDIENCE

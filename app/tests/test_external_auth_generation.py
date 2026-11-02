@@ -41,6 +41,77 @@ def test_no_database_models_user_class_under_external_auth(tmp_path):
     assert "class User(Base):" not in models_src
 
 
+SHARED_SECRET_FIXTURE = f"{FIXTURES}/external_shared_secret.yml"
+
+
+def _generate_shared_secret(tmp_path):
+    state = translate(load_erd(SHARED_SECRET_FIXTURE))
+    return CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+
+def test_generation_shared_secret_external_auth_skips_jwks_fetch_code(tmp_path):
+    codebase_dir = _generate_shared_secret(tmp_path)
+    service_src = (codebase_dir / "modules" / "auth" / "service.py").read_text(encoding="utf-8")
+    ast.parse(service_src)
+    assert "httpx" not in service_src
+    assert "_fetch_jwks" not in service_src
+    assert "class Principal" in service_src
+    assert "def get_current_user" in service_src
+
+
+def test_generation_jwks_external_auth_unchanged(tmp_path):
+    codebase_dir = _generate(tmp_path)
+    service_src = (codebase_dir / "modules" / "auth" / "service.py").read_text(encoding="utf-8")
+    assert "httpx" in service_src
+    assert "_fetch_jwks" in service_src
+
+
+def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_secret(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_shared_secret(tmp_path)
+    monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        from jose import jwt as jose_jwt
+
+        server_module = importlib.import_module("server")
+        token = jose_jwt.encode(
+            {"sub": "user-123", "iss": "authservice", "roles": ["admin"]},
+            "test-only-shared-secret",
+            algorithm="HS256",
+        )
+
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            resp = client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 200, resp.text
+
+
+def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_shared_secret(tmp_path)
+    monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        from jose import jwt as jose_jwt
+
+        server_module = importlib.import_module("server")
+        token = jose_jwt.encode(
+            {"sub": "user-123", "iss": "authservice"},
+            "a-completely-different-secret",
+            algorithm="HS256",
+        )
+
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            resp = client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 401, resp.text
+
+
 def test_requirements_has_jose_and_httpx_but_not_password_deps(tmp_path):
     codebase_dir = _generate(tmp_path)
     req = (codebase_dir / "requirements.txt").read_text(encoding="utf-8")

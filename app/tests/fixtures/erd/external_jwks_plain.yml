@@ -1,0 +1,36 @@
+project:
+  name: ExternalJwksPlain
+
+database:
+  type: sqlite
+  database_name: external_jwks_plain.db
+
+auth:
+  enabled: true
+  mode: external
+  external:
+    verification: jwks
+    jwks_url_env_var: AUTH_JWKS_URL
+    issuer: authservice
+    audience: external-jwks-plain
+    algorithms: [RS256]
+
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    create: [admin]
+    list: [admin]
+    read: [admin]
+    update: [admin]
+    delete: [admin]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

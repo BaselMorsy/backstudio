@@ -591,6 +591,8 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         security_config = {
             "auth_strategy": "jwt",
             "jwt_secret_env_var": erd.auth.jwt.secret_env_var,
+            "jwt_issuer": erd.auth.jwt.issuer,
+            "jwt_audience": erd.auth.jwt.audience,
             "jwt_algorithm": erd.auth.jwt.algorithm,
             "jwt_expiration_minutes": erd.auth.jwt.expiration_minutes,
             "jwt_refresh_expiration_minutes": erd.auth.jwt.refresh_token_expiration_minutes,

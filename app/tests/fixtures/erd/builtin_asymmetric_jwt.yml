@@ -9,6 +9,8 @@ auth:
   enabled: true
   jwt:
     algorithm: RS256
+    issuer: authservice
+    audience: external-jwks-plain
     private_key_path_env_var: JWT_PRIVATE_KEY_PATH
     public_key_path_env_var: JWT_PUBLIC_KEY_PATH
     kid: v1

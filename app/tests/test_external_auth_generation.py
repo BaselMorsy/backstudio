@@ -77,7 +77,7 @@ def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_sec
 
         server_module = importlib.import_module("server")
         token = jose_jwt.encode(
-            {"sub": "user-123", "iss": "authservice", "roles": ["admin"]},
+            {"sub": "user-123", "iss": "authservice", "aud": "external-shared-secret", "roles": ["admin"]},
             "test-only-shared-secret",
             algorithm="HS256",
         )

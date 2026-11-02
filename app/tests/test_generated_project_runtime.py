@@ -2187,6 +2187,118 @@ def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monk
             # Note entity's list/read (already guaranteed pre-existing behavior, but
             # worth re-confirming it wasn't broken by this task's changes).
             assert client.get("/notes").status_code in (401, 403)
+            assert client.get(f"/notes/{note['id']}").status_code in (401, 403)
+
+
+def test_two_generated_services_shared_secret_round_trip(tmp_path, monkeypatch, isolated_sys_path):
+    """Generate a real builtin issuer and a real external shared-secret verifier as two
+    separate services, and prove a token from the issuer's own /auth/login is accepted (or
+    rejected) by the verifier based purely on whether the two share the same secret value -
+    exactly the scenario this whole sub-project exists to make possible.
+    """
+    issuer_erd = load_erd(f"{FIXTURES}/builtin_shared_secret_issuer.yml")  # builtin, secret_env_var=JWT_SECRET, issuer=authservice
+    issuer_state = translate(issuer_erd)
+    issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
+
+    verifier_erd = load_erd(f"{FIXTURES}/external_shared_secret.yml")  # secret_env_var=SHARED_SECRET
+    verifier_state = translate(verifier_erd)
+    verifier_dir = CodeGenerator(output_dir=str(tmp_path / "verifier")).generate_project(verifier_state, force=True)
+
+    monkeypatch.setenv("JWT_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'issuer.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(issuer_dir):
+        import importlib
+
+        issuer_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(issuer_server.app) as issuer_client:
+            issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            token = login_resp.json()["access_token"]
+
+    # --- matching secret: the verifier must get past JWT verification (never 401 for a
+    # secret/signature reason) - any 403 beyond that is a role-authorization detail,
+    # since this issuer's access tokens carry no "roles" claim at all. ---
+    monkeypatch.setenv("SHARED_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code != 401, resp.text
+
+    # --- mismatched secret: same token, verifier now holds a different secret value under
+    # the same env var name - must reject cleanly with 401. ---
+    monkeypatch.setenv("SHARED_SECRET", "a-totally-different-value")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 401, resp.text
+
+
+def test_two_generated_services_jwks_round_trip(tmp_path, monkeypatch, isolated_sys_path):
+    """Same proof as above, for the JWKS path: a real builtin RS256 issuer's token is
+    accepted by a real external jwks verifier, with the verifier's JWKS fetch stubbed to
+    return the issuer's own published JWKS directly (no live HTTP server needed) - the
+    established pattern this test file already uses for JWKS-consuming tests.
+    """
+    issuer_erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    issuer_state = translate(issuer_erd)
+    issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
+
+    verifier_erd = load_erd(f"{FIXTURES}/external_jwks_plain.yml")
+    verifier_state = translate(verifier_erd)
+    verifier_dir = CodeGenerator(output_dir=str(tmp_path / "verifier")).generate_project(verifier_state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'issuer.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(issuer_dir):
+        import importlib
+
+        issuer_server = importlib.import_module("server")
+        jwks_module = importlib.import_module("modules.auth.jwks")
+        from fastapi.testclient import TestClient
+
+        with TestClient(issuer_server.app) as issuer_client:
+            issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            token = login_resp.json()["access_token"]
+        issuer_jwks = jwks_module.build_jwks()
+
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+
+        verifier_service_module = importlib.import_module("modules.auth.service")
+
+        async def _stub_fetch_jwks():
+            return issuer_jwks
+
+        monkeypatch.setattr(verifier_service_module, "_fetch_jwks", _stub_fetch_jwks)
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code != 401, resp.text
 
 
 def _write_rsa_keypair(tmp_path):
@@ -2318,7 +2430,7 @@ def test_generated_jwks_endpoint_serves_a_key_that_verifies_an_issued_token(tmp_
             from jose import jwt as jose_jwt
 
             key = jwks["keys"][0]
-            decoded = jose_jwt.decode(access_token, key, algorithms=["RS256"])
+            decoded = jose_jwt.decode(access_token, key, algorithms=["RS256"], audience="external-jwks-plain")
             user_id = database_models_user_id(codebase_dir, "alice@example.com")
             assert decoded["sub"] == str(user_id)
 
@@ -2356,4 +2468,3 @@ def test_generated_builtin_asymmetric_config_corrupt_key_file_fails_fast(tmp_pat
 
         with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY_PATH"):
             importlib.import_module("config")
-            assert client.get(f"/notes/{note['id']}").status_code in (401, 403)

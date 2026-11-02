@@ -128,6 +128,40 @@ So today, deactivating a user via `POST /auth/users/{id}/deactivate` immediately
 `/auth/refresh` (no new access token can be minted) and every `get_current_user`-gated route
 (the existing access token stops working the moment it's next used) — not just future logins.
 
+## Issuing tokens another service can verify
+
+By default, `mode: builtin` signs with a plain symmetric secret (`auth.jwt.algorithm: HS256` and
+`secret_env_var`) — fine for a service that only ever verifies its own tokens, but a secret isn't
+something you'd want to copy into a second, independently-deployed service. Setting
+`auth.jwt.algorithm` to an asymmetric algorithm changes that:
+
+```yaml
+auth:
+  enabled: true
+  jwt:
+    algorithm: RS256
+    private_key_path_env_var: JWT_PRIVATE_KEY_PATH   # path to a PEM private key YOU generate
+    public_key_path_env_var: JWT_PUBLIC_KEY_PATH     # path to the matching PEM public key
+    kid: v1                                           # optional, default "default"
+```
+
+Backstudio never generates, stores, or rotates this key material — it only reads the two PEM
+files at startup (once, held in memory for the process's lifetime; rotating means replacing the
+files and restarting — there's no in-process dual-key rollover). What it generates in exchange:
+every issued token is signed with the private key and carries `kid` in its header, and a new
+route, `GET /.well-known/jwks.json` — mounted unprefixed at the app root, independent of any
+`endpoints.base_path`/`services[].prefix` — publishes the public key as a JWKS, built with
+`python-jose`'s `jwk.construct(...)`. This route only exists when the configured algorithm is
+asymmetric; a symmetric (`HS256`/`HS384`/`HS512`) builtin service has nothing to publish and the
+route 404s.
+
+Setting `auth.jwt.issuer` stamps that value as the `iss` claim on every issued token. This is
+optional (unset means no `iss` claim at all, today's default behavior, fully backward
+compatible) but required for interop: a verifying service's `auth.external.issuer` is checked
+against the token's `iss` on every request, so a builtin service meant to be verified elsewhere
+needs this set to the same value the verifier expects. `auth.jwt.audience` works the same way
+for the `aud` claim, mirroring a verifier's optional `auth.external.audience`.
+
 ## External JWT verification (`auth.mode: external`)
 
 `auth.mode: external` is for the case where some *other* service already issues JWTs (an identity
@@ -140,6 +174,7 @@ auth:
   enabled: true
   mode: external
   external:
+    verification: jwks                # default; see "Shared-secret verification" below
     jwks_url_env_var: AUTH_JWKS_URL   # env var holding the JWKS endpoint URL
     issuer: authservice
     audience: my-api                  # optional - see below
@@ -217,6 +252,47 @@ mode structurally rather than relying on every deployment to configure it correc
 For the exact schema (every field's type, default, and required/optional status), see the
 [Full field reference → `AuthSpec`](../erd-reference/fields.md#auth-authspec) and
 [`ExternalAuthSpec`](../erd-reference/fields.md#authexternal-externalauthspec).
+
+### Shared-secret verification: `verification: shared_secret`
+
+`algorithms` above only applies to the default `verification: jwks` — rejecting HS256/384/512
+there is about preventing alg-confusion against a *published public key*. When the issuing
+service is your own, on the same trust boundary, and you don't need real issuer/verifier
+separation, `verification: shared_secret` skips JWKS entirely:
+
+```yaml
+auth:
+  enabled: true
+  mode: external
+  external:
+    verification: shared_secret
+    secret_env_var: SHARED_SECRET    # must hold the SAME value as the issuer's secret_env_var
+    issuer: authservice
+    algorithms: [HS256]               # HS256/HS384/HS512 only under this verification mode
+```
+
+No `httpx`, no JWKS fetch/cache, no `kid` lookup — the generated service reads the secret
+directly from the named env var and verifies with it, otherwise going through the exact same
+`jwt.decode(...)` call and the exact same fail-closed 401 handling as the `jwks` path. Pick this
+when you'd reach for JWKS mainly out of habit and a shared secret is simpler for what you're
+actually building; pick `jwks` when the two services are genuinely independent (different
+deploys, different trust, a third party you don't control).
+
+### Interop gotchas between two backstudio-generated services
+
+None of these are things `backstudio validate` can catch — it validates one ERD file at a time,
+so it has no way to see a second project's configuration:
+
+- **The issuer must set `auth.jwt.issuer`** to the same value this service's `issuer` expects.
+  Backstudio's own builtin signing never stamped an `iss` claim until this was added — a token
+  missing `iss` fails `jwt.decode(..., issuer=...)` the same way a wrong one would: a 401. If
+  this service also sets `audience`, the issuer needs a matching `auth.jwt.audience` too — the
+  same failure mode, same fix.
+- **`verification: shared_secret` needs the same *value*, not the same *env var name***, on both
+  sides. Mismatched values are a 401; so is a correct secret under the wrong `algorithms` entry.
+- **`verification: jwks` needs a matching `kid`** between what the issuer stamps and what's in
+  its published JWKS — automatic when both sides are backstudio-generated from the same issuer
+  configuration, but worth checking if either side's templates were hand-modified.
 
 ## Full field shape
 

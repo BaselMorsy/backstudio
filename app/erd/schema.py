@@ -143,6 +143,8 @@ SYMMETRIC_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 
 class JWTSpec(BaseModel):
     secret_env_var: str = "JWT_SECRET"
+    issuer: Optional[str] = None
+    audience: Optional[str] = None
     algorithm: str = "HS256"
     expiration_minutes: int = 30
     refresh_token_expiration_minutes: int = 10080

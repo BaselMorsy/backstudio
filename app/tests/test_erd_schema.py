@@ -265,6 +265,26 @@ def test_builtin_unrecognized_algorithm_rejected():
         JWTSpec(algorithm="PS256")
 
 
+def test_jwt_spec_issuer_defaults_to_none():
+    from app.erd.schema import JWTSpec
+    assert JWTSpec().issuer is None
+
+
+def test_jwt_spec_issuer_is_overridable():
+    from app.erd.schema import JWTSpec
+    assert JWTSpec(issuer="authservice").issuer == "authservice"
+
+
+def test_jwt_spec_audience_defaults_to_none():
+    from app.erd.schema import JWTSpec
+    assert JWTSpec().audience is None
+
+
+def test_jwt_spec_audience_is_overridable():
+    from app.erd.schema import JWTSpec
+    assert JWTSpec(audience="my-api").audience == "my-api"
+
+
 def test_builtin_asymmetric_algorithm_with_both_key_paths_accepted():
     from app.erd.schema import JWTSpec
     spec = JWTSpec(

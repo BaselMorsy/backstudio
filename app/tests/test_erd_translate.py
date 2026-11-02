@@ -80,6 +80,19 @@ def test_translate_builtin_context_includes_asymmetric_jwt_fields():
     assert state["security_config"]["jwt_is_asymmetric"] is True
 
 
+def test_translate_builtin_context_includes_jwt_issuer_when_set():
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    assert state["security_config"]["jwt_issuer"] == "authservice"
+
+
+def test_translate_builtin_context_jwt_issuer_defaults_to_none():
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+    assert state["security_config"]["jwt_issuer"] is None
+    assert state["security_config"]["jwt_audience"] is None
+
+
 def test_translate_builtin_context_symmetric_jwt_is_not_asymmetric():
     erd = load_erd(f"{FIXTURES}/valid_full.yml")
     state = translate(erd)

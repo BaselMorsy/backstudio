@@ -154,6 +154,13 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY: Optional[str] = None
     {% endif %}
     JWT_KID: str = {{ project.security_config.jwt_kid|tojson }}
+    # Stamped as the "iss" claim on every issued token when set (auth.jwt.issuer) - unset
+    # by default, matching today's behavior exactly (no "iss" claim at all). An external
+    # verifier checking this service's tokens must be configured with the same value.
+    JWT_ISSUER: Optional[str] = {{ project.security_config.jwt_issuer|python_value }}
+    # Stamped as the "aud" claim when set (auth.jwt.audience) - same unset-by-default,
+    # backward-compatible behavior as JWT_ISSUER above.
+    JWT_AUDIENCE: Optional[str] = {{ project.security_config.jwt_audience|python_value }}
     JWT_ALGORITHM: str = "{{ project.security_config.jwt_algorithm }}"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_expiration_minutes }}
     REFRESH_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_refresh_expiration_minutes }}

@@ -46,6 +46,10 @@ class AuthService:
     def _create_token(self, subject: str, expires_delta: timedelta, token_type: str, extra_claims: Optional[dict] = None) -> str:
         expire = datetime.utcnow() + expires_delta
         payload = {"sub": subject, "exp": expire, "type": token_type}
+        if settings.JWT_ISSUER is not None:
+            payload["iss"] = settings.JWT_ISSUER
+        if settings.JWT_AUDIENCE is not None:
+            payload["aud"] = settings.JWT_AUDIENCE
         if extra_claims:
             payload.update(extra_claims)
         return jwt.encode(

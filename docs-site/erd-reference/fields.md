@@ -83,8 +83,13 @@ Verified directly against `app/erd/schema.py` (lines 79–85):
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `secret_env_var` | `str` | default `"JWT_SECRET"` | Name of the environment variable the generated project reads the JWT signing secret from. |
-| `algorithm` | `str` | default `"HS256"` | JWT signing algorithm. |
+| `secret_env_var` | `str` | default `"JWT_SECRET"` | Name of the environment variable the generated project reads the JWT signing secret from. Symmetric algorithms only. |
+| `issuer` | `Optional[str]` | default `None` | Stamped as the `iss` claim on every issued token when set. Unset means no `iss` claim at all (today's default, fully backward compatible) — but a verifying service's `auth.external.issuer` requires one, so interop needs this set to match. |
+| `audience` | `Optional[str]` | default `None` | Stamped as the `aud` claim when set, mirroring `issuer`. A verifying service with `auth.external.audience` configured requires a matching `aud` claim. |
+| `algorithm` | `str` | default `"HS256"` | JWT signing algorithm. One of `HS256`/`HS384`/`HS512` (symmetric) or `RS256`/`RS384`/`RS512`/`ES256`/`ES384`/`ES512` (asymmetric) — any other value is rejected at validate time. |
+| `private_key_path_env_var` | `Optional[str]` | required iff `algorithm` is asymmetric, else must be unset | Name of the environment variable holding the path to a PEM private key file. Backstudio reads this file; it never generates or stores the key itself. |
+| `public_key_path_env_var` | `Optional[str]` | required iff `algorithm` is asymmetric, else must be unset | Name of the environment variable holding the path to the matching PEM public key file, published at `/.well-known/jwks.json`. |
+| `kid` | `str` | default `"default"` | Key id embedded in the JWT header and the JWKS entry. Only meaningful when `algorithm` is asymmetric. |
 | `expiration_minutes` | `int` | default `30` | Access token lifetime, in minutes. |
 | `refresh_token_expiration_minutes` | `int` | default `10080` | Refresh token lifetime, in minutes (10080 minutes = 7 days). |
 | `email_verification_expiration_minutes` | `int` | default `1440` | Email-verification token lifetime, in minutes (1440 minutes = 24 hours). |
@@ -92,8 +97,15 @@ Verified directly against `app/erd/schema.py` (lines 79–85):
 
 These are the 4 JWT lifetime fields the model declares: `expiration_minutes`,
 `refresh_token_expiration_minutes`, `email_verification_expiration_minutes`, and
-`password_reset_expiration_minutes` (plus the non-lifetime `secret_env_var` and `algorithm`
+`password_reset_expiration_minutes` (plus the non-lifetime `secret_env_var`, `issuer`,
+`audience`, `algorithm`, `private_key_path_env_var`, `public_key_path_env_var`, and `kid`
 fields on the same model).
+
+**Cross-field rule (`JWTSpec.key_paths_match_algorithm_family`):** `algorithm` must be one of
+the recognized symmetric or asymmetric values; an asymmetric algorithm requires both
+`private_key_path_env_var` and `public_key_path_env_var` to be set, and a symmetric one requires
+both to be unset (set-but-irrelevant is rejected, not silently ignored). See
+[Authentication → Issuing tokens another service can verify](../features/auth.md#issuing-tokens-another-service-can-verify).
 
 ### `auth.registration` (`RegistrationSpec`)
 
@@ -145,17 +157,23 @@ reasoning).
 
 | Field | Type | Required/default | Description |
 |---|---|---|---|
-| `jwks_url_env_var` | `str` | required | Name of the environment variable the generated project reads the JWKS endpoint URL from at verification time (not read at generation time). |
-| `issuer` | `str` | required | Expected `iss` claim; tokens with any other issuer are rejected. |
+| `verification` | `Literal["jwks", "shared_secret"]` | default `"jwks"` | Which verification mechanism applies — picks which of `jwks_url_env_var`/`secret_env_var` is required and which `algorithms` values are accepted. |
+| `jwks_url_env_var` | `Optional[str]` | required iff `verification: "jwks"`, else must be unset | Name of the environment variable the generated project reads the JWKS endpoint URL from at verification time (not read at generation time). |
+| `secret_env_var` | `Optional[str]` | required iff `verification: "shared_secret"`, else must be unset | Name of the environment variable holding the shared secret. Must hold the same *value* as the issuing service's `auth.jwt.secret_env_var` points to — the env var *names* don't need to match. |
+| `issuer` | `str` | required | Expected `iss` claim; tokens with any other issuer (or none at all) are rejected. |
 | `audience` | `Optional[str]` | default `None` | Expected `aud` claim. When unset, audience validation is skipped entirely (no `audience=` kwarg passed to `jwt.decode(...)`) — `backstudio validate` emits a warning in this case, since an unset audience is easy to omit by accident. |
-| `algorithms` | `List[str]` | default `["RS256"]` | Accepted signing algorithms. Must be non-empty and **asymmetric only** — see the validator below. |
+| `algorithms` | `List[str]` | default `["RS256"]` | Accepted signing algorithms. Must be non-empty; **asymmetric only** under `verification: "jwks"`, **HS256/HS384/HS512 only** under `verification: "shared_secret"` — see the validator below. |
 | `claims` | `ExternalAuthClaims` | default `ExternalAuthClaims()` | Which claim names carry the subject and roles — see below. |
 
-**Schema-level validator (`ExternalAuthSpec.algorithms_must_be_non_empty_and_asymmetric`):**
-`algorithms` must be non-empty, and must not contain `"HS256"`, `"HS384"`, or `"HS512"` — a
-shared-secret (HMAC) algorithm has no place in a verify-only, JWKS-based setup (there is no shared
-secret, only published public keys), and accepting one would open an alg-confusion forgery path.
-This is enforced at ERD-construction time, not generation time.
+**Schema-level validator (`ExternalAuthSpec.algorithms_and_fields_match_verification`):** a
+`model_validator` (not a single-field validator, since it branches on `verification` against
+both `jwks_url_env_var`/`secret_env_var` and `algorithms` together). Under `verification:
+"jwks"`: `jwks_url_env_var` required, `secret_env_var` must be unset, and `algorithms` must not
+contain `"HS256"`, `"HS384"`, or `"HS512"` — a shared-secret (HMAC) algorithm has no place in a
+JWKS-based setup (there is no shared secret, only published public keys), and accepting one
+would open an alg-confusion forgery path. Under `verification: "shared_secret"`:
+`secret_env_var` required, `jwks_url_env_var` must be unset, and `algorithms` must contain only
+`"HS256"`/`"HS384"`/`"HS512"`. This is enforced at ERD-construction time, not generation time.
 
 #### `auth.external.claims` (`ExternalAuthClaims`)
 

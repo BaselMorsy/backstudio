@@ -71,6 +71,28 @@ def test_translate_full_injects_user_and_relationships():
     assert state["security_config"]["jwt_expiration_minutes"] == 30
 
 
+def test_translate_builtin_context_includes_asymmetric_jwt_fields():
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    assert state["security_config"]["jwt_private_key_path_env_var"] == "JWT_PRIVATE_KEY_PATH"
+    assert state["security_config"]["jwt_public_key_path_env_var"] == "JWT_PUBLIC_KEY_PATH"
+    assert state["security_config"]["jwt_kid"] == "v1"
+    assert state["security_config"]["jwt_is_asymmetric"] is True
+
+
+def test_translate_builtin_context_symmetric_jwt_is_not_asymmetric():
+    erd = load_erd(f"{FIXTURES}/valid_full.yml")
+    state = translate(erd)
+    assert state["security_config"]["jwt_is_asymmetric"] is False
+
+
+def test_translate_external_context_includes_verification_and_secret():
+    erd = load_erd(f"{FIXTURES}/external_shared_secret.yml")
+    state = translate(erd)
+    assert state["external_auth_config"]["verification"] == "shared_secret"
+    assert state["external_auth_config"]["secret_env_var"] == "SHARED_SECRET"
+
+
 def test_translate_one_to_many_cardinality():
     """Test one-to-many relationship: Author declares one-to-many to Book.
 

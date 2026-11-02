@@ -6,7 +6,15 @@ from typing import Any, Dict, List, Optional
 
 from app.erd.field_types import enum_class_name, py_type_for
 from app.erd.loader import ERDValidationError
-from app.erd.schema import ALL_ACTIONS, ERDConfig, EntitySpec, FieldType, ModelField, RelationshipDecl
+from app.erd.schema import (
+    ALL_ACTIONS,
+    ASYMMETRIC_JWT_ALGORITHMS,
+    ERDConfig,
+    EntitySpec,
+    FieldType,
+    ModelField,
+    RelationshipDecl,
+)
 
 # created_at/updated_at are timezone: False because the auth code writes naive
 # datetime.utcnow() - a timezone-aware column would misread that value on PostgreSQL.
@@ -588,12 +596,18 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "jwt_refresh_expiration_minutes": erd.auth.jwt.refresh_token_expiration_minutes,
             "jwt_email_verification_expiration_minutes": erd.auth.jwt.email_verification_expiration_minutes,
             "jwt_password_reset_expiration_minutes": erd.auth.jwt.password_reset_expiration_minutes,
+            "jwt_private_key_path_env_var": erd.auth.jwt.private_key_path_env_var,
+            "jwt_public_key_path_env_var": erd.auth.jwt.public_key_path_env_var,
+            "jwt_kid": erd.auth.jwt.kid,
+            "jwt_is_asymmetric": erd.auth.jwt.algorithm in ASYMMETRIC_JWT_ALGORITHMS,
         }
 
     external_auth_config = None
     if erd.auth.enabled and auth_mode == "external":
         external_auth_config = {
+            "verification": erd.auth.external.verification,
             "jwks_url_env_var": erd.auth.external.jwks_url_env_var,
+            "secret_env_var": erd.auth.external.secret_env_var,
             "issuer": erd.auth.external.issuer,
             "audience": erd.auth.external.audience,
             "algorithms": list(erd.auth.external.algorithms),

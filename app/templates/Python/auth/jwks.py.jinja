@@ -1,0 +1,25 @@
+"""{{ project.name|replace('"', '\\"') }} - JWKS publishing for this service's own signing key.
+
+Only generated when auth.jwt.algorithm is asymmetric (see config.py's JWT_PUBLIC_KEY) -
+a symmetric (HS256/384/512) builtin service has no public key to publish and this file
+does not exist for it.
+"""
+from fastapi import APIRouter
+from jose import jwk
+
+from config import settings
+
+router = APIRouter()
+
+
+def build_jwks() -> dict:
+    key = jwk.construct(settings.JWT_PUBLIC_KEY, settings.JWT_ALGORITHM)
+    jwk_dict = key.to_dict()
+    jwk_dict["kid"] = settings.JWT_KID
+    jwk_dict["use"] = "sig"
+    return {"keys": [jwk_dict]}
+
+
+@router.get("/.well-known/jwks.json")
+def get_jwks() -> dict:
+    return build_jwks()

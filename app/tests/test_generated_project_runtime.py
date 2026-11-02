@@ -2255,6 +2255,87 @@ def test_generated_builtin_asymmetric_config_missing_key_file_fails_fast(tmp_pat
             importlib.import_module("config")
 
 
+def test_generated_jwks_endpoint_returns_404_for_symmetric_builtin_auth(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # builtin, HS256 (symmetric)
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            resp = client.get("/.well-known/jwks.json")
+            assert resp.status_code == 404
+
+
+def test_generated_jwks_endpoint_serves_a_key_that_verifies_an_issued_token(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")  # builtin, RS256 (asymmetric)
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            register_resp = client.post(
+                "/auth/register",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert register_resp.status_code == 201, register_resp.text
+
+            login_resp = client.post(
+                "/auth/login",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            access_token = login_resp.json()["access_token"]
+
+            jwks_resp = client.get("/.well-known/jwks.json")
+            assert jwks_resp.status_code == 200, jwks_resp.text
+            jwks = jwks_resp.json()
+            assert jwks["keys"][0]["kid"] == "v1"
+
+            # Independently verify the token against the published key, exactly as a
+            # separate verifying service would - not via any of this project's own code.
+            from jose import jwt as jose_jwt
+
+            key = jwks["keys"][0]
+            decoded = jose_jwt.decode(access_token, key, algorithms=["RS256"])
+            user_id = database_models_user_id(codebase_dir, "alice@example.com")
+            assert decoded["sub"] == str(user_id)
+
+
+def database_models_user_id(codebase_dir, email):
+    import importlib
+
+    database_base = importlib.import_module("database.base")
+    database_models = importlib.import_module("database.models")
+    db = database_base.SessionLocal()
+    try:
+        user_row = db.query(database_models.User).filter_by(email=email).first()
+        return user_row.id
+    finally:
+        db.close()
+
+
 def test_generated_builtin_asymmetric_config_corrupt_key_file_fails_fast(tmp_path, monkeypatch, isolated_sys_path):
     erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
     state = translate(erd)

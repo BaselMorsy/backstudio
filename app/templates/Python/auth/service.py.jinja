@@ -52,6 +52,9 @@ class AuthService:
             payload,
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
+            {% if project.security_config.jwt_is_asymmetric %}
+            headers={"kid": settings.JWT_KID},
+            {% endif %}
         )
 
     def create_access_token(self, user_id: int) -> str:

@@ -7,6 +7,33 @@ from app.services.code_generator import CodeGenerator
 FIXTURES = "app/tests/fixtures/erd"
 
 
+def test_generation_skips_jwks_route_for_symmetric_builtin_auth(tmp_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # builtin, HS256 (symmetric)
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    assert not (codebase_dir / "modules" / "auth" / "jwks.py").exists()
+    server_src = (codebase_dir / "server.py").read_text(encoding="utf-8")
+    assert "jwks" not in server_src.lower()
+
+
+def test_generation_emits_jwks_route_for_asymmetric_builtin_auth(tmp_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")  # builtin, RS256 (asymmetric)
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    jwks_path = codebase_dir / "modules" / "auth" / "jwks.py"
+    assert jwks_path.exists()
+    ast.parse(jwks_path.read_text(encoding="utf-8"))
+    server_src = (codebase_dir / "server.py").read_text(encoding="utf-8")
+    assert "from modules.auth.jwks import router as jwks_router" in server_src
+    assert "app.include_router(jwks_router)" in server_src
+
+
 def test_email_dot_py_generated_whenever_auth_enabled(tmp_path):
     erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # open mode, no registration gating at all
     state = translate(erd)

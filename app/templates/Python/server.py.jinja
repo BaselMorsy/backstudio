@@ -15,6 +15,9 @@ from modules.{{ module.snake_name }}.routes import router as {{ module.snake_nam
 {% endif %}
 {% if project.auth_enabled and project.auth_mode == 'builtin' %}
 from modules.{{ project.auth_module_name }}.routes import router as auth_router
+{% if project.security_config.jwt_is_asymmetric %}
+from modules.{{ project.auth_module_name }}.jwks import router as jwks_router
+{% endif %}
 {% endif %}
 
 # Lifespan context manager for startup/shutdown events
@@ -74,6 +77,9 @@ app.include_router({{ module.snake_name }}_router)
 {% endif %}
 {% if project.auth_enabled and project.auth_mode == 'builtin' %}
 app.include_router(auth_router, prefix="/{{ project.auth_module_name }}", tags=["{{ project.auth_module_name }}"])
+{% if project.security_config.jwt_is_asymmetric %}
+app.include_router(jwks_router)
+{% endif %}
 {% endif %}
 
 @app.get("/")

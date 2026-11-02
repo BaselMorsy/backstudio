@@ -241,6 +241,40 @@ def test_jwt_spec_new_lifetime_fields_are_overridable():
     assert jwt.password_reset_expiration_minutes == 1
 
 
+def test_builtin_asymmetric_algorithm_requires_both_key_path_env_vars():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="private_key_path_env_var"):
+        JWTSpec(algorithm="RS256")
+
+
+def test_builtin_asymmetric_algorithm_missing_public_key_path_rejected():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="public_key_path_env_var"):
+        JWTSpec(algorithm="RS256", private_key_path_env_var="PRIVATE_KEY_PATH")
+
+
+def test_builtin_symmetric_algorithm_rejects_key_path_fields_set():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="private_key_path_env_var"):
+        JWTSpec(algorithm="HS256", private_key_path_env_var="PRIVATE_KEY_PATH")
+
+
+def test_builtin_unrecognized_algorithm_rejected():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="algorithm"):
+        JWTSpec(algorithm="PS256")
+
+
+def test_builtin_asymmetric_algorithm_with_both_key_paths_accepted():
+    from app.erd.schema import JWTSpec
+    spec = JWTSpec(
+        algorithm="RS256",
+        private_key_path_env_var="PRIVATE_KEY_PATH",
+        public_key_path_env_var="PUBLIC_KEY_PATH",
+    )
+    assert spec.kid == "default"
+
+
 def test_registration_spec_defaults_to_open():
     from app.erd.schema import RegistrationSpec
     reg = RegistrationSpec()

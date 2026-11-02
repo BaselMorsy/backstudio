@@ -137,6 +137,10 @@ class DatabaseSpec(BaseModel):
     async_mode: bool = False
 
 
+ASYMMETRIC_JWT_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"})
+SYMMETRIC_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
+
 class JWTSpec(BaseModel):
     secret_env_var: str = "JWT_SECRET"
     algorithm: str = "HS256"
@@ -144,6 +148,50 @@ class JWTSpec(BaseModel):
     refresh_token_expiration_minutes: int = 10080
     email_verification_expiration_minutes: int = 1440
     password_reset_expiration_minutes: int = 30
+    private_key_path_env_var: Optional[str] = None
+    public_key_path_env_var: Optional[str] = None
+    kid: str = "default"
+
+    @model_validator(mode="after")
+    def key_paths_match_algorithm_family(self) -> "JWTSpec":
+        if self.algorithm not in ASYMMETRIC_JWT_ALGORITHMS | SYMMETRIC_JWT_ALGORITHMS:
+            raise ValueError(
+                f"auth.jwt.algorithm: '{self.algorithm}' is not a recognized algorithm - "
+                f"use one of {sorted(SYMMETRIC_JWT_ALGORITHMS)} (shared secret) or "
+                f"{sorted(ASYMMETRIC_JWT_ALGORITHMS)} (key pair, publishes JWKS)."
+            )
+        if self.algorithm in ASYMMETRIC_JWT_ALGORITHMS:
+            missing = [
+                name
+                for name, value in (
+                    ("private_key_path_env_var", self.private_key_path_env_var),
+                    ("public_key_path_env_var", self.public_key_path_env_var),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"auth.jwt.algorithm: '{self.algorithm}' is asymmetric and requires "
+                    f"auth.jwt.{' and auth.jwt.'.join(missing)} to be set - backstudio reads "
+                    "the key pair from the files at those env vars' paths, it never generates "
+                    "or stores key material itself."
+                )
+        else:
+            set_fields = [
+                name
+                for name, value in (
+                    ("private_key_path_env_var", self.private_key_path_env_var),
+                    ("public_key_path_env_var", self.public_key_path_env_var),
+                )
+                if value is not None
+            ]
+            if set_fields:
+                raise ValueError(
+                    f"auth.jwt.{' and auth.jwt.'.join(set_fields)} only apply to an asymmetric "
+                    f"algorithm, but auth.jwt.algorithm is '{self.algorithm}' (symmetric) - "
+                    "remove them, or set an asymmetric algorithm."
+                )
+        return self
 
 
 class RegistrationSpec(BaseModel):

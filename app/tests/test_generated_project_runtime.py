@@ -2187,4 +2187,92 @@ def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monk
             # Note entity's list/read (already guaranteed pre-existing behavior, but
             # worth re-confirming it wasn't broken by this task's changes).
             assert client.get("/notes").status_code in (401, 403)
+
+
+def _write_rsa_keypair(tmp_path):
+    """Generate a throwaway RSA key pair and write it as two PEM files.
+
+    Mirrors what a real user would do with `openssl` before pointing
+    auth.jwt.private_key_path_env_var / public_key_path_env_var at the files -
+    backstudio itself never generates or stores this key material.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    priv_path = tmp_path / "jwt_private_key.pem"
+    pub_path = tmp_path / "jwt_public_key.pem"
+    priv_path.write_bytes(private_pem)
+    pub_path.write_bytes(public_pem)
+    return priv_path, pub_path
+
+
+def test_generated_builtin_asymmetric_config_loads_key_files_from_env(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        config_module = importlib.import_module("config")
+        assert config_module.settings.JWT_SECRET_KEY.startswith("-----BEGIN")
+        assert config_module.settings.JWT_PUBLIC_KEY.startswith("-----BEGIN")
+        assert config_module.settings.JWT_KID == "v1"
+
+
+def test_generated_builtin_asymmetric_config_missing_key_file_fails_fast(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(tmp_path / "does_not_exist.pem"))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(tmp_path / "also_missing.pem"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY_PATH"):
+            importlib.import_module("config")
+
+
+def test_generated_builtin_asymmetric_config_corrupt_key_file_fails_fast(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path = tmp_path / "corrupt_private_key.pem"
+    priv_path.write_text("this is not a PEM key")
+    pub_path = tmp_path / "corrupt_public_key.pem"
+    pub_path.write_text("this is not a PEM key either")
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY_PATH"):
+            importlib.import_module("config")
             assert client.get(f"/notes/{note['id']}").status_code in (401, 403)

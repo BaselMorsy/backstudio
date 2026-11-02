@@ -1,0 +1,23 @@
+project:
+  name: BuiltinAsymmetricEs384
+
+database:
+  type: sqlite
+  database_name: builtin_asymmetric_es384.db
+
+auth:
+  enabled: true
+  jwt:
+    algorithm: ES384
+    private_key_path_env_var: JWT_PRIVATE_KEY_PATH
+    public_key_path_env_var: JWT_PUBLIC_KEY_PATH
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

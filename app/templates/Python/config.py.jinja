@@ -58,37 +58,76 @@ def _require_env_file(var_name: str) -> str:
 {% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' and project.security_config.jwt_is_asymmetric %}
 
 
-def _load_private_key_pem(var_name: str) -> str:
+_EXPECTED_CURVE_FOR_ALGORITHM = {
+    "ES256": "secp256r1",
+    "ES384": "secp384r1",
+    "ES512": "secp521r1",
+}
+
+
+def _check_key_matches_algorithm(key, algorithm: str, var_name: str) -> None:
+    """Fail fast with a clear message when a key's actual family/curve doesn't match the
+    configured algorithm - a parseable key that's simply the wrong kind otherwise fails only
+    the first time a route tries to sign with it, or the JWKS route tries to publish it, as
+    an unhandled 500 deep inside python-jose rather than a clear startup error.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
+    if algorithm.startswith("RS"):
+        if not isinstance(key, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}' (RSA), but the key at the path from "
+                f"environment variable '{var_name}' is not an RSA key."
+            )
+    elif algorithm.startswith("ES"):
+        if not isinstance(key, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}' (EC), but the key at the path from "
+                f"environment variable '{var_name}' is not an EC key."
+            )
+        expected_curve = _EXPECTED_CURVE_FOR_ALGORITHM[algorithm]
+        if key.curve.name != expected_curve:
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}', which requires curve "
+                f"'{expected_curve}', but the key at the path from environment variable "
+                f"'{var_name}' is on curve '{key.curve.name}'."
+            )
+
+
+def _load_private_key_pem(var_name: str, algorithm: str) -> str:
     """Read and validate the private key PEM named by `var_name`, failing fast
-    with a clear message (naming the env var) if the file isn't a valid key -
-    never a raw cryptography-library parse traceback.
+    with a clear message (naming the env var) if the file isn't a valid key, or
+    is a valid key of the wrong family/curve for `algorithm` - never a raw
+    cryptography-library parse traceback or a runtime signing failure.
     """
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
     text = _require_env_file(var_name)
     try:
-        load_pem_private_key(text.encode(), password=None)
+        key = load_pem_private_key(text.encode(), password=None)
     except Exception as exc:
         raise RuntimeError(
             f"The file at the path from environment variable '{var_name}' is not a "
             f"valid private key: {exc}"
         ) from exc
+    _check_key_matches_algorithm(key, algorithm, var_name)
     return text
 
 
-def _load_public_key_pem(var_name: str) -> str:
+def _load_public_key_pem(var_name: str, algorithm: str) -> str:
     """Read and validate the public key PEM named by `var_name` (see
     `_load_private_key_pem` above)."""
     from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
     text = _require_env_file(var_name)
     try:
-        load_pem_public_key(text.encode())
+        key = load_pem_public_key(text.encode())
     except Exception as exc:
         raise RuntimeError(
             f"The file at the path from environment variable '{var_name}' is not a "
             f"valid public key: {exc}"
         ) from exc
+    _check_key_matches_algorithm(key, algorithm, var_name)
     return text
 {% endif %}
 
@@ -142,8 +181,8 @@ class Settings(BaseSettings):
     # ("{{ project.security_config.jwt_private_key_path_env_var }}"). JWT_PUBLIC_KEY holds
     # the public key's PEM text, used to publish the JWKS. Backstudio never generates or
     # stores this key material - rotating it means replacing these files and restarting.
-    JWT_SECRET_KEY: str = _load_private_key_pem("{{ project.security_config.jwt_private_key_path_env_var }}")
-    JWT_PUBLIC_KEY: Optional[str] = _load_public_key_pem("{{ project.security_config.jwt_public_key_path_env_var }}")
+    JWT_SECRET_KEY: str = _load_private_key_pem("{{ project.security_config.jwt_private_key_path_env_var }}", "{{ project.security_config.jwt_algorithm }}")
+    JWT_PUBLIC_KEY: Optional[str] = _load_public_key_pem("{{ project.security_config.jwt_public_key_path_env_var }}", "{{ project.security_config.jwt_algorithm }}")
     {% else %}
     #
     # The secret is read from the env var named by the ERD's auth.jwt.secret_env_var

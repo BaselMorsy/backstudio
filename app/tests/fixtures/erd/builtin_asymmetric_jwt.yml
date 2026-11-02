@@ -15,6 +15,16 @@ auth:
     public_key_path_env_var: JWT_PUBLIC_KEY_PATH
     kid: v1
 
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    create: [admin]
+    list: [admin]
+    read: [admin]
+    update: [admin]
+    delete: [admin]
+
 entities:
   - name: Widget
     fields:

@@ -178,6 +178,12 @@ class JWTSpec(BaseModel):
                     "the key pair from the files at those env vars' paths, it never generates "
                     "or stores key material itself."
                 )
+            if "secret_env_var" in self.model_fields_set:
+                raise ValueError(
+                    "auth.jwt.secret_env_var only applies to a symmetric algorithm, but "
+                    f"auth.jwt.algorithm is '{self.algorithm}' (asymmetric) - remove it, or "
+                    "set a symmetric algorithm."
+                )
         else:
             set_fields = [
                 name
@@ -192,6 +198,12 @@ class JWTSpec(BaseModel):
                     f"auth.jwt.{' and auth.jwt.'.join(set_fields)} only apply to an asymmetric "
                     f"algorithm, but auth.jwt.algorithm is '{self.algorithm}' (symmetric) - "
                     "remove them, or set an asymmetric algorithm."
+                )
+            if "kid" in self.model_fields_set:
+                raise ValueError(
+                    "auth.jwt.kid only applies to an asymmetric algorithm, but auth.jwt."
+                    f"algorithm is '{self.algorithm}' (symmetric) - remove it, or set an "
+                    "asymmetric algorithm."
                 )
         return self
 

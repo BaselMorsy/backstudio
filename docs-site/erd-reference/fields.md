@@ -104,7 +104,9 @@ fields on the same model).
 **Cross-field rule (`JWTSpec.key_paths_match_algorithm_family`):** `algorithm` must be one of
 the recognized symmetric or asymmetric values; an asymmetric algorithm requires both
 `private_key_path_env_var` and `public_key_path_env_var` to be set, and a symmetric one requires
-both to be unset (set-but-irrelevant is rejected, not silently ignored). See
+both to be unset. `kid` set explicitly under a symmetric algorithm, and `secret_env_var` set
+explicitly under an asymmetric one, are rejected the same way — set-but-irrelevant is always
+rejected, never silently ignored. See
 [Authentication → Issuing tokens another service can verify](../features/auth.md#issuing-tokens-another-service-can-verify).
 
 ### `auth.registration` (`RegistrationSpec`)

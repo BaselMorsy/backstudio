@@ -99,10 +99,47 @@ def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret
         from jose import jwt as jose_jwt
 
         server_module = importlib.import_module("server")
+        # Otherwise identical to the matching-secret token (final review I4) - the wrong
+        # secret must be the only thing that can cause the 401 here.
         token = jose_jwt.encode(
-            {"sub": "user-123", "iss": "authservice"},
+            {"sub": "user-123", "iss": "authservice", "aud": "external-shared-secret", "roles": ["admin"]},
             "a-completely-different-secret",
             algorithm="HS256",
+        )
+
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            resp = client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 401, resp.text
+
+
+def test_generated_shared_secret_verifier_rejects_an_asymmetrically_signed_token(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review I4 / Review Focus #4's second half: a token signed with an asymmetric
+    algorithm sent to a shared_secret verifier (which only ever decodes with HS256/384/512)
+    must be a clean 401, not an unhandled exception.
+    """
+    codebase_dir = _generate_shared_secret(tmp_path)
+    monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from jose import jwt as jose_jwt
+
+        server_module = importlib.import_module("server")
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        token = jose_jwt.encode(
+            {"sub": "user-123", "iss": "authservice", "aud": "external-shared-secret", "roles": ["admin"]},
+            private_pem,
+            algorithm="RS256",
         )
 
         from fastapi.testclient import TestClient

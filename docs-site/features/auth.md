@@ -162,6 +162,18 @@ against the token's `iss` on every request, so a builtin service meant to be ver
 needs this set to the same value the verifier expects. `auth.jwt.audience` works the same way
 for the `aud` claim, mirroring a verifier's optional `auth.external.audience`.
 
+Both are stamped **only on access tokens**, never on refresh, password-reset, or
+email-verification tokens — those never leave this service as a bearer credential, and an
+external verifier has no concept of this service's internal token `type` claim to tell them
+apart, so carrying `iss`/`aud` on every token type would let a refresh token pass as valid
+access elsewhere. Access tokens also now carry a `roles` claim (the user's current roles at
+token-issue time) — purely additive for an external verifier's own RBAC; this service's own
+RBAC never reads it back off the token, it always re-queries the `User` row.
+
+A key that parses as *some* valid PEM but is the wrong family or curve for the configured
+algorithm (an RSA key under `ES256`, a P-256 key under `ES384`) fails at startup with a clear
+message, not as an unhandled 500 the first time a route tries to sign with it.
+
 ## External JWT verification (`auth.mode: external`)
 
 `auth.mode: external` is for the case where some *other* service already issues JWTs (an identity

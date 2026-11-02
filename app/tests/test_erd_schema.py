@@ -285,6 +285,23 @@ def test_jwt_spec_audience_is_overridable():
     assert JWTSpec(audience="my-api").audience == "my-api"
 
 
+def test_jwt_spec_symmetric_algorithm_rejects_kid_set_explicitly():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="kid"):
+        JWTSpec(algorithm="HS256", kid="v1")
+
+
+def test_jwt_spec_asymmetric_algorithm_rejects_secret_env_var_set_explicitly():
+    from app.erd.schema import JWTSpec
+    with pytest.raises(ValidationError, match="secret_env_var"):
+        JWTSpec(
+            algorithm="RS256",
+            secret_env_var="SOME_SECRET",
+            private_key_path_env_var="PRIV",
+            public_key_path_env_var="PUB",
+        )
+
+
 def test_builtin_asymmetric_algorithm_with_both_key_paths_accepted():
     from app.erd.schema import JWTSpec
     spec = JWTSpec(

@@ -204,27 +204,56 @@ class ExternalAuthClaims(BaseModel):
 
 
 class ExternalAuthSpec(BaseModel):
-    jwks_url_env_var: str
+    verification: Literal["jwks", "shared_secret"] = "jwks"
+    jwks_url_env_var: Optional[str] = None
+    secret_env_var: Optional[str] = None
     issuer: str
     audience: Optional[str] = None
     algorithms: List[str] = Field(default_factory=lambda: ["RS256"])
     claims: ExternalAuthClaims = Field(default_factory=ExternalAuthClaims)
 
-    @field_validator("algorithms")
-    @classmethod
-    def algorithms_must_be_non_empty_and_asymmetric(cls, v: List[str]) -> List[str]:
-        if not v:
+    @model_validator(mode="after")
+    def algorithms_and_fields_match_verification(self) -> "ExternalAuthSpec":
+        if not self.algorithms:
             raise ValueError("auth.external.algorithms must not be empty")
-        hmac_algs = {a for a in v if a in ("HS256", "HS384", "HS512")}
-        if hmac_algs:
-            raise ValueError(
-                f"auth.external.algorithms: {sorted(hmac_algs)} are HMAC (symmetric) algorithms - "
-                "a JWKS publishes only public (asymmetric) keys, so accepting an HMAC algorithm "
-                "here is the classic alg-confusion vulnerability: a party who can compute an HMAC "
-                "using the public key material as the shared secret could forge tokens. Use an "
-                "asymmetric algorithm (e.g. RS256, ES256)."
-            )
-        return v
+        if self.verification == "jwks":
+            if self.jwks_url_env_var is None:
+                raise ValueError(
+                    "auth.external.verification: 'jwks' requires auth.external.jwks_url_env_var"
+                )
+            if self.secret_env_var is not None:
+                raise ValueError(
+                    "auth.external.secret_env_var only applies to verification: 'shared_secret' - "
+                    "remove it, or set verification: shared_secret"
+                )
+            hmac_algs = {a for a in self.algorithms if a in SYMMETRIC_JWT_ALGORITHMS}
+            if hmac_algs:
+                raise ValueError(
+                    f"auth.external.algorithms: {sorted(hmac_algs)} are HMAC (symmetric) algorithms - "
+                    "a JWKS publishes only public (asymmetric) keys, so accepting an HMAC algorithm "
+                    "here is the classic alg-confusion vulnerability: a party who can compute an HMAC "
+                    "using the public key material as the shared secret could forge tokens. Use an "
+                    "asymmetric algorithm (e.g. RS256, ES256)."
+                )
+        else:
+            if self.secret_env_var is None:
+                raise ValueError(
+                    "auth.external.verification: 'shared_secret' requires auth.external.secret_env_var"
+                )
+            if self.jwks_url_env_var is not None:
+                raise ValueError(
+                    "auth.external.jwks_url_env_var only applies to verification: 'jwks' - "
+                    "remove it, or set verification: jwks"
+                )
+            non_hmac_algs = [a for a in self.algorithms if a not in SYMMETRIC_JWT_ALGORITHMS]
+            if non_hmac_algs:
+                raise ValueError(
+                    f"auth.external.algorithms: {sorted(non_hmac_algs)} are not HMAC (symmetric) "
+                    "algorithms - verification: 'shared_secret' only supports "
+                    f"{sorted(SYMMETRIC_JWT_ALGORITHMS)}. Use verification: jwks for an asymmetric "
+                    "algorithm."
+                )
+        return self
 
 
 class AuthSpec(BaseModel):

@@ -409,6 +409,50 @@ def test_external_auth_rejects_empty_algorithms():
         ExternalAuthSpec(jwks_url_env_var="X", issuer="i", algorithms=[])
 
 
+def test_external_jwks_verification_requires_jwks_url_env_var():
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError, match="jwks_url_env_var"):
+        ExternalAuthSpec(issuer="https://issuer.example")
+
+
+def test_external_jwks_verification_rejects_secret_env_var_set():
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError, match="secret_env_var"):
+        ExternalAuthSpec(
+            issuer="https://issuer.example",
+            jwks_url_env_var="JWKS_URL",
+            secret_env_var="SHARED_SECRET",
+        )
+
+
+def test_external_shared_secret_verification_requires_secret_env_var():
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError, match="secret_env_var"):
+        ExternalAuthSpec(issuer="https://issuer.example", verification="shared_secret")
+
+
+def test_external_shared_secret_verification_rejects_asymmetric_algorithm():
+    from app.erd.schema import ExternalAuthSpec
+    with pytest.raises(ValidationError, match="HMAC|symmetric"):
+        ExternalAuthSpec(
+            issuer="https://issuer.example",
+            verification="shared_secret",
+            secret_env_var="SHARED_SECRET",
+            algorithms=["RS256"],
+        )
+
+
+def test_external_shared_secret_verification_accepted():
+    from app.erd.schema import ExternalAuthSpec
+    spec = ExternalAuthSpec(
+        issuer="https://issuer.example",
+        verification="shared_secret",
+        secret_env_var="SHARED_SECRET",
+        algorithms=["HS256"],
+    )
+    assert spec.jwks_url_env_var is None
+
+
 def test_rls_identity_source_jwt_claim_requires_claim_field():
     from app.erd.schema import RLSIdentitySource
     with pytest.raises(ValidationError):

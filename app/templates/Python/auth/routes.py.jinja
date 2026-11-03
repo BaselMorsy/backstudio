@@ -60,7 +60,7 @@ _service = get_{{ project.auth_module_name }}_service()
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
     return TokenResponse(
-        access_token=service.create_access_token(user.id),
+        access_token=service.create_access_token(user.id, roles=user.roles),
         refresh_token=service.create_refresh_token(user.id),
     )
 
@@ -82,7 +82,7 @@ _service = get_{{ project.auth_module_name }}_service()
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
     return TokenResponse(
-        access_token=service.create_access_token(user.id),
+        access_token=service.create_access_token(user.id, roles=user.roles),
         refresh_token=service.create_refresh_token(user.id),
     )
 

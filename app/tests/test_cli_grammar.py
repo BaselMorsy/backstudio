@@ -74,3 +74,15 @@ def test_grammar_rls_topic_documents_owner_match_field_int_default_gotcha():
     output = runner.invoke(app, ["grammar", "rls"]).output
     assert "cast as an int" in output
     assert "403s" in output
+
+
+def test_grammar_auth_topic_documents_asymmetric_builtin_fields():
+    output = runner.invoke(app, ["grammar", "auth"]).output
+    assert "private_key_path_env_var" in output
+    assert "public_key_path_env_var" in output
+
+
+def test_grammar_auth_topic_documents_shared_secret_verification():
+    output = runner.invoke(app, ["grammar", "auth"]).output
+    assert "shared_secret" in output
+    assert "verification" in output

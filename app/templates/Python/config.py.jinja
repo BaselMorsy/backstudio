@@ -6,6 +6,12 @@ import os
 {% if db.type in ('postgresql', 'mysql') %}
 from urllib.parse import quote
 {% endif %}
+{% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' %}
+from typing import Optional
+{% if project.security_config.jwt_is_asymmetric %}
+from pathlib import Path
+{% endif %}
+{% endif %}
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
@@ -31,6 +37,98 @@ def _require_env(var_name: str) -> str:
             "Set it (e.g. in a .env file) before starting the application."
         )
     return value
+
+
+def _require_env_file(var_name: str) -> str:
+    """Read a required env var naming a file path, and return that file's text.
+
+    Used for user-supplied JWT key material. Backstudio never generates or
+    stores key material itself (see auth.jwt.private_key_path_env_var /
+    public_key_path_env_var) - this only reads the file the env var points at.
+    """
+    path = _require_env(var_name)
+    try:
+        return Path(path).read_text()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Could not read the file at '{path}' (from environment variable "
+            f"'{var_name}'): {exc}. Set the env var to a path to a real PEM key file."
+        ) from exc
+{% endif %}
+{% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' and project.security_config.jwt_is_asymmetric %}
+
+
+_EXPECTED_CURVE_FOR_ALGORITHM = {
+    "ES256": "secp256r1",
+    "ES384": "secp384r1",
+    "ES512": "secp521r1",
+}
+
+
+def _check_key_matches_algorithm(key, algorithm: str, var_name: str) -> None:
+    """Fail fast with a clear message when a key's actual family/curve doesn't match the
+    configured algorithm - a parseable key that's simply the wrong kind otherwise fails only
+    the first time a route tries to sign with it, or the JWKS route tries to publish it, as
+    an unhandled 500 deep inside python-jose rather than a clear startup error.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
+    if algorithm.startswith("RS"):
+        if not isinstance(key, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}' (RSA), but the key at the path from "
+                f"environment variable '{var_name}' is not an RSA key."
+            )
+    elif algorithm.startswith("ES"):
+        if not isinstance(key, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}' (EC), but the key at the path from "
+                f"environment variable '{var_name}' is not an EC key."
+            )
+        expected_curve = _EXPECTED_CURVE_FOR_ALGORITHM[algorithm]
+        if key.curve.name != expected_curve:
+            raise RuntimeError(
+                f"auth.jwt.algorithm is '{algorithm}', which requires curve "
+                f"'{expected_curve}', but the key at the path from environment variable "
+                f"'{var_name}' is on curve '{key.curve.name}'."
+            )
+
+
+def _load_private_key_pem(var_name: str, algorithm: str) -> str:
+    """Read and validate the private key PEM named by `var_name`, failing fast
+    with a clear message (naming the env var) if the file isn't a valid key, or
+    is a valid key of the wrong family/curve for `algorithm` - never a raw
+    cryptography-library parse traceback or a runtime signing failure.
+    """
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+    text = _require_env_file(var_name)
+    try:
+        key = load_pem_private_key(text.encode(), password=None)
+    except Exception as exc:
+        raise RuntimeError(
+            f"The file at the path from environment variable '{var_name}' is not a "
+            f"valid private key: {exc}"
+        ) from exc
+    _check_key_matches_algorithm(key, algorithm, var_name)
+    return text
+
+
+def _load_public_key_pem(var_name: str, algorithm: str) -> str:
+    """Read and validate the public key PEM named by `var_name` (see
+    `_load_private_key_pem` above)."""
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+    text = _require_env_file(var_name)
+    try:
+        key = load_pem_public_key(text.encode())
+    except Exception as exc:
+        raise RuntimeError(
+            f"The file at the path from environment variable '{var_name}' is not a "
+            f"valid public key: {exc}"
+        ) from exc
+    _check_key_matches_algorithm(key, algorithm, var_name)
+    return text
 {% endif %}
 
 
@@ -76,12 +174,32 @@ class Settings(BaseSettings):
 
     {% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' %}
     # Security - JWT
+    {% if project.security_config.jwt_is_asymmetric %}
+    #
+    # Asymmetric algorithm: JWT_SECRET_KEY holds the *private* key's PEM text (used to
+    # sign), read from the file at the path in the ERD's auth.jwt.private_key_path_env_var
+    # ("{{ project.security_config.jwt_private_key_path_env_var }}"). JWT_PUBLIC_KEY holds
+    # the public key's PEM text, used to publish the JWKS. Backstudio never generates or
+    # stores this key material - rotating it means replacing these files and restarting.
+    JWT_SECRET_KEY: str = _load_private_key_pem("{{ project.security_config.jwt_private_key_path_env_var }}", "{{ project.security_config.jwt_algorithm }}")
+    JWT_PUBLIC_KEY: Optional[str] = _load_public_key_pem("{{ project.security_config.jwt_public_key_path_env_var }}", "{{ project.security_config.jwt_algorithm }}")
+    {% else %}
     #
     # The secret is read from the env var named by the ERD's auth.jwt.secret_env_var
     # ("{{ project.security_config.jwt_secret_env_var }}"). There is no hardcoded
     # fallback secret: an unset env var fails fast at import time instead of silently
     # signing tokens with a well-known, repo-visible default.
     JWT_SECRET_KEY: str = _require_env("{{ project.security_config.jwt_secret_env_var }}")
+    JWT_PUBLIC_KEY: Optional[str] = None
+    {% endif %}
+    JWT_KID: str = {{ project.security_config.jwt_kid|tojson }}
+    # Stamped as the "iss" claim on every issued token when set (auth.jwt.issuer) - unset
+    # by default, matching today's behavior exactly (no "iss" claim at all). An external
+    # verifier checking this service's tokens must be configured with the same value.
+    JWT_ISSUER: Optional[str] = {{ project.security_config.jwt_issuer|python_value }}
+    # Stamped as the "aud" claim when set (auth.jwt.audience) - same unset-by-default,
+    # backward-compatible behavior as JWT_ISSUER above.
+    JWT_AUDIENCE: Optional[str] = {{ project.security_config.jwt_audience|python_value }}
     JWT_ALGORITHM: str = "{{ project.security_config.jwt_algorithm }}"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_expiration_minutes }}
     REFRESH_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_refresh_expiration_minutes }}

@@ -46,16 +46,36 @@ class AuthService:
     def _create_token(self, subject: str, expires_delta: timedelta, token_type: str, extra_claims: Optional[dict] = None) -> str:
         expire = datetime.utcnow() + expires_delta
         payload = {"sub": subject, "exp": expire, "type": token_type}
+        if token_type == "access":
+            # iss/aud identify this service to an external verifier. Only an access token is
+            # ever meant to leave this service as a bearer credential - stamping them on
+            # refresh/password_reset/email_verification tokens too would let a verifier that
+            # only checks iss/aud (never this service's own "type" claim) accept them as well.
+            if settings.JWT_ISSUER is not None:
+                payload["iss"] = settings.JWT_ISSUER
+            if settings.JWT_AUDIENCE is not None:
+                payload["aud"] = settings.JWT_AUDIENCE
         if extra_claims:
             payload.update(extra_claims)
         return jwt.encode(
             payload,
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
+            {% if project.security_config.jwt_is_asymmetric %}
+            headers={"kid": settings.JWT_KID},
+            {% endif %}
         )
 
-    def create_access_token(self, user_id: int) -> str:
-        return self._create_token(str(user_id), timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), "access")
+    def create_access_token(self, user_id: int, roles: Optional[List[str]] = None) -> str:
+        # roles is carried so an external verifier (which has no User table of its own to
+        # look up) can make RBAC decisions - this service's own RBAC never reads it back off
+        # the token, it always re-queries the User row via get_current_user above.
+        return self._create_token(
+            str(user_id),
+            timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+            "access",
+            extra_claims={"roles": roles or []},
+        )
 
     def create_refresh_token(self, user_id: int) -> str:
         return self._create_token(str(user_id), timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES), "refresh")
@@ -142,8 +162,18 @@ class AuthService:
         return user
 
     def decode_token(self, token: str, expected_type: str = "access", return_payload: bool = False):
+        decode_kwargs = {"algorithms": [settings.JWT_ALGORITHM]}
+        if expected_type == "access":
+            # Only an access token ever carries iss/aud (see _create_token) - unlike aud,
+            # jose's issuer check requires the claim to be PRESENT whenever `issuer=` is
+            # passed, so requesting it here for a refresh/password_reset/email_verification
+            # token (which never has one) would reject every one of those unconditionally.
+            if settings.JWT_ISSUER is not None:
+                decode_kwargs["issuer"] = settings.JWT_ISSUER
+            if settings.JWT_AUDIENCE is not None:
+                decode_kwargs["audience"] = settings.JWT_AUDIENCE
         try:
-            payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+            payload = jwt.decode(token, settings.JWT_SECRET_KEY, **decode_kwargs)
         except JWTError:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
         subject = payload.get("sub")

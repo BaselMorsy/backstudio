@@ -2188,3 +2188,493 @@ def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monk
             # worth re-confirming it wasn't broken by this task's changes).
             assert client.get("/notes").status_code in (401, 403)
             assert client.get(f"/notes/{note['id']}").status_code in (401, 403)
+
+
+def test_builtin_issuer_own_routes_work_when_issuer_and_audience_are_configured(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review C1: setting auth.jwt.issuer/audience (exactly what the interop docs tell
+    you to do) must not break the issuing service's OWN protected routes. decode_token's
+    jwt.decode call never passed issuer=/audience=, so once a token carried "aud"/"iss",
+    python-jose's claim validation rejected it regardless - /auth/me and /auth/refresh both
+    401'd on every token this service itself issued.
+    """
+    erd = load_erd(f"{FIXTURES}/builtin_shared_secret_issuer.yml")  # has both issuer and audience set
+    state = translate(erd)
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            tokens = login_resp.json()
+
+            me_resp = client.get("/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+            assert me_resp.status_code == 200, me_resp.text
+
+            refresh_resp = client.post("/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+            assert refresh_resp.status_code == 200, refresh_resp.text
+
+
+def test_generated_verifier_rejects_a_refresh_token_from_the_issuer(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review C2: a refresh/password-reset/email-verification token must not pass as a
+    bearer credential on a separate verifying service. The verifier has no concept of token
+    "type" (external services never issue those types themselves), so stamping iss/aud on
+    every token type - not just access - opened exactly that path once builtin tokens became
+    verifiable elsewhere. Fix: iss/aud are only stamped on access tokens.
+    """
+    issuer_erd = load_erd(f"{FIXTURES}/builtin_shared_secret_issuer.yml")
+    issuer_state = translate(issuer_erd)
+    issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
+
+    verifier_erd = load_erd(f"{FIXTURES}/external_shared_secret.yml")
+    verifier_state = translate(verifier_erd)
+    verifier_dir = CodeGenerator(output_dir=str(tmp_path / "verifier")).generate_project(verifier_state, force=True)
+
+    monkeypatch.setenv("JWT_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'issuer.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(issuer_dir):
+        import importlib
+
+        issuer_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(issuer_server.app) as issuer_client:
+            issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            refresh_token = login_resp.json()["refresh_token"]
+
+    monkeypatch.setenv("SHARED_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {refresh_token}"})
+            assert resp.status_code == 401, resp.text
+
+
+def test_two_generated_services_shared_secret_round_trip(tmp_path, monkeypatch, isolated_sys_path):
+    """Generate a real builtin issuer and a real external shared-secret verifier as two
+    separate services, and prove a token from the issuer's own /auth/login is accepted (or
+    rejected) by the verifier based purely on whether the two share the same secret value -
+    exactly the scenario this whole sub-project exists to make possible.
+    """
+    issuer_erd = load_erd(f"{FIXTURES}/builtin_shared_secret_issuer.yml")  # builtin, secret_env_var=JWT_SECRET, issuer=authservice
+    issuer_state = translate(issuer_erd)
+    issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
+
+    verifier_erd = load_erd(f"{FIXTURES}/external_shared_secret.yml")  # secret_env_var=SHARED_SECRET
+    verifier_state = translate(verifier_erd)
+    verifier_dir = CodeGenerator(output_dir=str(tmp_path / "verifier")).generate_project(verifier_state, force=True)
+
+    monkeypatch.setenv("JWT_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'issuer.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(issuer_dir):
+        import importlib
+
+        issuer_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(issuer_server.app) as issuer_client:
+            register_resp = issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            issuer_user_id = register_resp.json()["id"]
+            assert register_resp.json()["roles"] == ["admin"]  # first user bootstrapped to admin
+            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            token = login_resp.json()["access_token"]
+
+    # --- matching secret, and the issuer's bootstrapped "admin" role now actually carried on
+    # the token: the verifier's own admin-only RBAC check passes, not just JWT verification. ---
+    monkeypatch.setenv("SHARED_SECRET", "same-shared-value")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+        import asyncio
+
+        verifier_server = importlib.import_module("server")
+        verifier_service_module = importlib.import_module("modules.auth.service")
+        principal = asyncio.run(verifier_service_module._verify_token(token))
+        assert principal.id == str(issuer_user_id)
+        assert principal.roles == ["admin"]
+
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 200, resp.text
+
+    # --- mismatched secret: same token, verifier now holds a different secret value under
+    # the same env var name - must reject cleanly with 401. ---
+    monkeypatch.setenv("SHARED_SECRET", "a-totally-different-value")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 401, resp.text
+
+
+def test_two_generated_services_jwks_round_trip(tmp_path, monkeypatch, isolated_sys_path):
+    """Same proof as above, for the JWKS path: a real builtin RS256 issuer's token is
+    accepted by a real external jwks verifier, with the verifier's JWKS fetch stubbed to
+    return the issuer's own published JWKS directly (no live HTTP server needed) - the
+    established pattern this test file already uses for JWKS-consuming tests.
+    """
+    issuer_erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    issuer_state = translate(issuer_erd)
+    issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
+
+    verifier_erd = load_erd(f"{FIXTURES}/external_jwks_plain.yml")
+    verifier_state = translate(verifier_erd)
+    verifier_dir = CodeGenerator(output_dir=str(tmp_path / "verifier")).generate_project(verifier_state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'issuer.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(issuer_dir):
+        import importlib
+
+        issuer_server = importlib.import_module("server")
+        jwks_module = importlib.import_module("modules.auth.jwks")
+        from fastapi.testclient import TestClient
+
+        with TestClient(issuer_server.app) as issuer_client:
+            register_resp = issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            issuer_user_id = register_resp.json()["id"]
+            assert register_resp.json()["roles"] == ["admin"]  # first user bootstrapped to admin
+            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            token = login_resp.json()["access_token"]
+        issuer_jwks = jwks_module.build_jwks()
+
+    monkeypatch.setenv("AUTH_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
+    with _GeneratedProjectImporter(verifier_dir):
+        import importlib
+        import asyncio
+
+        verifier_service_module = importlib.import_module("modules.auth.service")
+
+        async def _stub_fetch_jwks():
+            return issuer_jwks
+
+        monkeypatch.setattr(verifier_service_module, "_fetch_jwks", _stub_fetch_jwks)
+
+        principal = asyncio.run(verifier_service_module._verify_token(token))
+        assert principal.id == str(issuer_user_id)
+        assert principal.roles == ["admin"]
+
+        verifier_server = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(verifier_server.app) as verifier_client:
+            resp = verifier_client.get("/widgets", headers={"Authorization": f"Bearer {token}"})
+            assert resp.status_code == 200, resp.text
+
+
+def _write_rsa_keypair(tmp_path):
+    """Generate a throwaway RSA key pair and write it as two PEM files.
+
+    Mirrors what a real user would do with `openssl` before pointing
+    auth.jwt.private_key_path_env_var / public_key_path_env_var at the files -
+    backstudio itself never generates or stores this key material.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    priv_path = tmp_path / "jwt_private_key.pem"
+    pub_path = tmp_path / "jwt_public_key.pem"
+    priv_path.write_bytes(private_pem)
+    pub_path.write_bytes(public_pem)
+    return priv_path, pub_path
+
+
+def _write_ec_keypair(tmp_path, curve_name="secp256r1", suffix=""):
+    """Same as _write_rsa_keypair, but an EC key pair on the named curve
+    (cryptography's curve names: secp256r1=P-256, secp384r1=P-384)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    curve = {"secp256r1": ec.SECP256R1(), "secp384r1": ec.SECP384R1()}[curve_name]
+    private_key = ec.generate_private_key(curve)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    priv_path = tmp_path / f"jwt_ec_private_key{suffix}.pem"
+    pub_path = tmp_path / f"jwt_ec_public_key{suffix}.pem"
+    priv_path.write_bytes(private_pem)
+    pub_path.write_bytes(public_pem)
+    return priv_path, pub_path
+
+
+def test_generated_builtin_asymmetric_config_loads_key_files_from_env(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        config_module = importlib.import_module("config")
+        assert config_module.settings.JWT_SECRET_KEY.startswith("-----BEGIN")
+        assert config_module.settings.JWT_PUBLIC_KEY.startswith("-----BEGIN")
+        assert config_module.settings.JWT_KID == "v1"
+
+
+def test_generated_builtin_asymmetric_config_missing_key_file_fails_fast(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(tmp_path / "does_not_exist.pem"))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(tmp_path / "also_missing.pem"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY_PATH"):
+            importlib.import_module("config")
+
+
+def test_generated_jwks_endpoint_returns_404_for_symmetric_builtin_auth(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/shophub_mini.yml")  # builtin, HS256 (symmetric)
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            resp = client.get("/.well-known/jwks.json")
+            assert resp.status_code == 404
+
+
+def test_generated_jwks_endpoint_serves_a_key_that_verifies_an_issued_token(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")  # builtin, RS256 (asymmetric)
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            register_resp = client.post(
+                "/auth/register",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert register_resp.status_code == 201, register_resp.text
+
+            login_resp = client.post(
+                "/auth/login",
+                json={"email": "alice@example.com", "password": "supersecret123"},
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            access_token = login_resp.json()["access_token"]
+
+            jwks_resp = client.get("/.well-known/jwks.json")
+            assert jwks_resp.status_code == 200, jwks_resp.text
+            jwks = jwks_resp.json()
+            assert jwks["keys"][0]["kid"] == "v1"
+
+            # Independently verify the token against the published key, exactly as a
+            # separate verifying service would - not via any of this project's own code.
+            from jose import jwt as jose_jwt
+
+            key = jwks["keys"][0]
+            decoded = jose_jwt.decode(access_token, key, algorithms=["RS256"], audience="external-jwks-plain")
+            user_id = database_models_user_id(codebase_dir, "alice@example.com")
+            assert decoded["sub"] == str(user_id)
+
+
+def test_generated_jwks_endpoint_serves_an_es256_key_that_verifies_an_issued_token(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review I2: the EC family (ES256/384/512) had no passing-case test at all - only
+    RS256 was ever proven to actually work end-to-end.
+    """
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_es256.yml")
+    state = translate(erd)
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+    priv_path, pub_path = _write_ec_keypair(tmp_path, curve_name="secp256r1")
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            assert login_resp.status_code == 200, login_resp.text
+            access_token = login_resp.json()["access_token"]
+
+            jwks_resp = client.get("/.well-known/jwks.json")
+            assert jwks_resp.status_code == 200, jwks_resp.text
+            jwks = jwks_resp.json()
+
+            from jose import jwt as jose_jwt
+
+            decoded = jose_jwt.decode(access_token, jwks["keys"][0], algorithms=["ES256"])
+            user_id = database_models_user_id(codebase_dir, "alice@example.com")
+            assert decoded["sub"] == str(user_id)
+
+
+def database_models_user_id(codebase_dir, email):
+    import importlib
+
+    database_base = importlib.import_module("database.base")
+    database_models = importlib.import_module("database.models")
+    db = database_base.SessionLocal()
+    try:
+        user_row = db.query(database_models.User).filter_by(email=email).first()
+        return user_row.id
+    finally:
+        db.close()
+
+
+def test_generated_builtin_asymmetric_config_corrupt_key_file_fails_fast(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    priv_path = tmp_path / "corrupt_private_key.pem"
+    priv_path.write_text("this is not a PEM key")
+    pub_path = tmp_path / "corrupt_public_key.pem"
+    pub_path.write_text("this is not a PEM key either")
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="JWT_PRIVATE_KEY_PATH"):
+            importlib.import_module("config")
+
+
+def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_rsa_key_under_es256(tmp_path, monkeypatch, isolated_sys_path):
+    """Final review I2: a key that parses fine but is the wrong family for the configured
+    algorithm (an RSA key under ES256, an EC key under RS256) must fail fast at config import
+    with a clear message - not a 500 the first time a route tries to sign or the JWKS route
+    tries to publish it.
+    """
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_es256.yml")  # algorithm: ES256
+    state = translate(erd)
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+    priv_path, pub_path = _write_rsa_keypair(tmp_path)  # wrong family: RSA, not EC
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="ES256"):
+            importlib.import_module("config")
+
+
+def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_ec_key_under_rs256(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")  # algorithm: RS256
+    state = translate(erd)
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+    priv_path, pub_path = _write_ec_keypair(tmp_path)  # wrong family: EC, not RSA
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="RS256"):
+            importlib.import_module("config")
+
+
+def test_generated_builtin_asymmetric_config_rejects_wrong_curve_p256_key_under_es384(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_asymmetric_es384.yml")  # algorithm: ES384, needs P-384
+    state = translate(erd)
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+    priv_path, pub_path = _write_ec_keypair(tmp_path, curve_name="secp256r1")  # right family, wrong curve
+    monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(priv_path))
+    monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(pub_path))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        with pytest.raises(RuntimeError, match="ES384"):
+            importlib.import_module("config")

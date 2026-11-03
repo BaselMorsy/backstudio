@@ -1,0 +1,36 @@
+project:
+  name: BuiltinAsymmetricJwt
+
+database:
+  type: sqlite
+  database_name: builtin_asymmetric_jwt.db
+
+auth:
+  enabled: true
+  jwt:
+    algorithm: RS256
+    issuer: authservice
+    audience: external-jwks-plain
+    private_key_path_env_var: JWT_PRIVATE_KEY_PATH
+    public_key_path_env_var: JWT_PUBLIC_KEY_PATH
+    kid: v1
+
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    create: [admin]
+    list: [admin]
+    read: [admin]
+    update: [admin]
+    delete: [admin]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

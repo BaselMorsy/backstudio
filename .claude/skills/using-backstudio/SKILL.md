@@ -30,6 +30,8 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 | Owner entity's match column isn't its primary key (e.g. a UUID claim vs. an int PK) | set `rls.owner_match_field` to that column — see gotcha #2 below |
 | Exact-to-the-cent money | `type: decimal` with `precision`/`scale`; pick `database.type: postgresql`/`mysql` for the exactness guarantee (SQLite stores decimal as REAL) |
 | Fixed set of string values | `type: enum`, `values: [...]` (UPPER_SNAKE, no Python-keyword collisions) |
+| Two backstudio services on the same trust boundary, no need for real issuer/verifier separation | `auth.external.verification: shared_secret` — simpler than JWKS, no key management, no published endpoint |
+| Two backstudio services that genuinely need separation (different deploys, a third party you don't control) | `auth.external.verification: jwks` + `auth.jwt.algorithm: RS256`/etc. on the issuer, with `private_key_path_env_var`/`public_key_path_env_var` pointing at a key pair you generate yourself |
 
 ## Two gotchas worth knowing by heart (also now in `backstudio grammar rbac`/`rls`, and in `docs-site/features/rbac.md`/`rls.md`)
 
@@ -43,8 +45,12 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 - `rbac.enabled: true` without `admin` in `rbac.roles`, or without `auth.enabled: true`.
 - An entity not assigned to exactly one `services[].entities` group.
 - `owner_match_field` target missing `unique: true`.
-- HS256/384/512 under `auth.mode: external` (rejected — asymmetric algorithms only; this mode never holds a signing secret).
+- HS256/384/512 under `auth.mode: external` with `verification: jwks` (rejected — asymmetric algorithms only; under `verification: shared_secret` it's the reverse — only HS256/384/512 are accepted).
 - An entity with no `primary_key: true` field, or more than one (rejected at `validate` time — every entity needs exactly one, except `User`, whose PK is always the auto-injected `id`).
+- Two services meant to interoperate (one issuing, one verifying) where `validate` passes on both but they still 401 each other at runtime: mismatched secret *value* (same env var name ≠ same value), mismatched `kid`, or the issuer forgetting to set `auth.jwt.issuer`/`auth.jwt.audience` to match the verifier's `auth.external.issuer`/`audience` (no `iss`/`aud` claim at all fails the same as a wrong one). `validate` can never catch this — it only ever sees one ERD file at a time.
+- Setting only one of `private_key_path_env_var`/`public_key_path_env_var` on an asymmetric builtin service (both are required together), or setting either one on a symmetric service (both must be unset — rejected, not silently ignored). Same for `kid` on a symmetric service and `secret_env_var` on an asymmetric one.
+- A key file that parses but is the wrong family/curve for the configured algorithm (RSA key + `ES256`, P-256 key + `ES384`) — rejected at startup with a clear message, not a 500 the first time something signs with it.
+- Expecting a refresh/password-reset/email-verification token to work as a bearer credential on another service — only access tokens carry `iss`/`aud`/`roles`; the others never leave the issuing service as a credential.
 
 ## Reference
 

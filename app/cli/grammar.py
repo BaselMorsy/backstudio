@@ -54,8 +54,27 @@ auth:
   enabled: bool = false
   mode: builtin | external                                  # default "builtin"
   jwt:                              # mode: builtin only
-    secret_env_var: str = "JWT_SECRET"
-    algorithm: str = "HS256"
+    secret_env_var: str = "JWT_SECRET"              # symmetric algorithms only
+    issuer: str                     # optional; stamped as the "iss" claim on every issued
+                                     #   token when set (unset -> no "iss" claim, today's
+                                     #   default behavior). Set this to the SAME value as a
+                                     #   verifying service's auth.external.issuer, or that
+                                     #   service will 401 every token this one issues.
+    audience: str                   # optional; stamped as the "aud" claim when set, mirroring
+                                     #   issuer above. A verifying service with its own
+                                     #   audience configured requires a matching "aud" claim.
+    algorithm: HS256 | HS384 | HS512 |        # symmetric: needs only secret_env_var
+               RS256 | RS384 | RS512 |        # asymmetric: needs the two key-path vars below
+               ES256 | ES384 | ES512          #   (PS*/EdDSA/OKP are not supported)
+    private_key_path_env_var: str   # required iff algorithm is asymmetric; path to a PEM
+                                     #   private key file YOU generate (e.g. openssl) - never
+                                     #   a secret value itself, and backstudio never creates
+                                     #   or stores this key material
+    public_key_path_env_var: str    # required iff algorithm is asymmetric; path to the
+                                     #   matching PEM public key - published at
+                                     #   /.well-known/jwks.json, which only exists when
+                                     #   algorithm is asymmetric
+    kid: str = "default"            # asymmetric only; embedded in the JWT header + JWKS entry
     expiration_minutes: int = 30
     refresh_token_expiration_minutes: int = 10080          # 7 days
     email_verification_expiration_minutes: int = 1440      # 24 hours
@@ -63,18 +82,31 @@ auth:
   registration:                     # mode: builtin only
     mode: open | email_verification | admin_approval        # default "open"
   external:                         # required when mode: external, else must be omitted
-    jwks_url_env_var: str                                    # required, e.g. AUTH_JWKS_URL
+    verification: jwks | shared_secret = jwks   # which half of this file applies
+    jwks_url_env_var: str            # required iff verification: jwks, e.g. AUTH_JWKS_URL
+    secret_env_var: str               # required iff verification: shared_secret - must name
+                                       #   an env var holding the SAME value as the issuing
+                                       #   service's auth.jwt.secret_env_var points to
     issuer: str                                               # required
     audience: str                   # optional; unset -> validate-time warning, no aud check
-    algorithms: [str, ...] = [RS256]  # asymmetric only - HS256/HS384/HS512 rejected
+    algorithms: [str, ...] = [RS256]  # verification: jwks -> asymmetric only; shared_secret
+                                       #   -> HS256/HS384/HS512 only
     claims:
       subject: str = "sub"
       roles: str = "roles"
 
 # admin_approval requires rbac.enabled: true (the approve-user endpoint is admin-only RBAC-gated)
 # mode: builtin generates User + register/login/refresh/me; jwt/registration only apply here.
-# mode: external generates only JWKS-verifying JWT decode (no User, no auth endpoints at all) -
-#   identity comes entirely from a Principal built from the verified token's claims.
+# mode: external generates only JWT verification (no User, no auth endpoints at all) - identity
+#   comes entirely from a Principal built from the verified token's claims.
+# shared_secret vs jwks: shared_secret is the simpler choice for two services on the same trust
+#   boundary (no key management, no published endpoint) - use jwks when you genuinely need
+#   issuer/verifier separation (an untrusted network, an independently-deployed third party).
+# asymmetric key rotation means restarting the issuer with new key files in place - there is no
+#   in-process dual-key rollover.
+# a mismatched secret value, kid, or missing "iss" between an issuer and a verifier is NOT
+#   something validate can catch (they're validated as separate ERD files) - it's a runtime
+#   401 on every request, same as any other JWT verification failure.
 """,
     "rbac": """\
 rbac:

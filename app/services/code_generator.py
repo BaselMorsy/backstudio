@@ -1,10 +1,9 @@
 """Service for generating backend code from project state using Jinja2 templates"""
 
-import os
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
+from typing import Dict, Any, Optional
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.erd import field_types
 from app.utils.file_ops import ensure_directory
@@ -59,7 +58,6 @@ class CodeGenerator:
 
         def to_pascal_case(text: str) -> str:
             """Convert text to PascalCase"""
-            import re
             # If already in PascalCase (starts with capital, has capitals in middle), return as-is
             if text and text[0].isupper() and any(c.isupper() for c in text[1:]):
                 return text

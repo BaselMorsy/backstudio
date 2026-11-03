@@ -9,7 +9,6 @@ from app.erd.schema import (
     DatabaseSpec,
     EntitySpec,
     RelationshipDecl,
-    EndpointSpec,
     AuthSpec,
     ServiceDecl,
     ModelField,
@@ -436,7 +435,6 @@ def test_translate_relationship_enums_to_strings():
     of "selectin"), breaking SQLAlchemy relationship() call generation.
     The fix is to use .value to extract the string representation.
     """
-    from app.erd.schema import LazyStrategy
 
     # Create an ERDConfig with a relationship that has lazy set
     erd = ERDConfig(
@@ -572,7 +570,8 @@ def test_translate_auth_user_fields_have_defaults():
 
     # Render models.py and verify syntax is valid
     from app.services.code_generator import CodeGenerator
-    import tempfile, ast
+    import tempfile
+    import ast
 
     with tempfile.TemporaryDirectory() as tmp:
         gen = CodeGenerator(output_dir=tmp)

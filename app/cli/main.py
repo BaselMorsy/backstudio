@@ -109,7 +109,7 @@ def validate(
         erd = load_erd(erd_file)
     except ERDValidationError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     _print_warnings(erd)
 
@@ -132,7 +132,7 @@ def visualize(
         erd = load_erd(erd_file)
     except ERDValidationError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     html = render_html(erd)
     out_path = output or erd_file.with_name(f"{erd_file.stem}-diagram.html")
@@ -156,7 +156,7 @@ def generate(
         erd = load_erd(erd_file)
     except ERDValidationError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     _print_warnings(erd)
 
@@ -176,7 +176,7 @@ def generate(
     except FileExistsError as exc:
         typer.secho(str(exc), fg=typer.colors.RED)
         typer.secho("Use --force to overwrite.", fg=typer.colors.YELLOW)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     if preserved_env_content is not None:
         (project_dir / ".env").write_text(preserved_env_content, encoding="utf-8")

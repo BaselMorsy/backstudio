@@ -55,6 +55,8 @@ dev = [
     "aiosqlite>=0.22.1",
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
+    "ruff>=0.17.3",
+    "pytest-cov>=7.1.0",
 ]
 
 [build-system]
@@ -73,4 +75,27 @@ dev = [
     "aiosqlite>=0.22.1",
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
+    "ruff>=0.17.3",
+    "pytest-cov>=7.1.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["app/templates"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "W6"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixture imports look like redefinitions; tests use assert False / short names deliberately.
+"app/tests/*" = ["F811", "B011", "E741", "E402", "B904"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/tests/*", "app/templates/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+

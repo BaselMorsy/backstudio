@@ -1,7 +1,6 @@
 """ID generation utilities"""
 
 import uuid
-from typing import Literal
 
 
 def generate_id(prefix: str = "") -> str:

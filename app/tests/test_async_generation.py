@@ -333,7 +333,7 @@ def test_async_repo_functions_actually_run_against_a_real_db(tmp_path):
         os.environ["DEBUG"] = "True"
 
         database_base = importlib.import_module("database.base")
-        database_models = importlib.import_module("database.models")
+        importlib.import_module("database.models")
         repo = importlib.import_module("database.repo")
 
         async def run():

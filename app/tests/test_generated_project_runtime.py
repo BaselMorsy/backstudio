@@ -1710,7 +1710,6 @@ def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_
             # since nobody could ever reach the /users/{id}/approve endpoint that only an
             # already-approved admin can call
             assert admin_resp.json()["is_approved"] is True
-            admin_id = admin_resp.json()["id"]
 
             admin_login = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert admin_login.status_code == 200, admin_login.text

@@ -229,7 +229,7 @@ class AuthService:
 {% else %}
         user = db.query(User).filter(User.id == user_id).first()
 {% endif %}
-        if user is None:
+        if user is None or user.password_hash is None:
             raise ValueError("Invalid or expired token")
         expected_fp = hashlib.sha256(user.password_hash.encode()).hexdigest()[:16]
         if payload.get("pwd_fp") != expected_fp:

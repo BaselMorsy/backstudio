@@ -1995,6 +1995,24 @@ def test_resend_invite_for_already_accepted_email_returns_400(tmp_path, monkeypa
             assert "already accepted" in response.json()["detail"].lower()
 
 
+def test_forgot_password_for_pending_invitee_returns_generic_200_not_500(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "forgot_password_pending_invitee_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            client.post("/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers)
+
+            response = client.post("/auth/forgot-password", json={"email": "pending@example.com"})
+            assert response.status_code == 200, response.text
+            assert response.json() == {"message": "If that email is registered, a password reset link has been sent."}
+
+
 def test_resend_invite_for_pending_email_refires_notify(tmp_path, monkeypatch, isolated_sys_path, capfd):
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_pending_test.db")
     with _GeneratedProjectImporter(codebase_dir):
@@ -2179,6 +2197,87 @@ def test_webhook_secret_configured_sends_authorization_header(tmp_path, monkeypa
 
         assert len(received) == 1
         assert received[0]["headers"]["Authorization"] == "Bearer test-only-webhook-secret"
+
+
+def test_resend_invite_reports_delivery_failure(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_webhook.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "resend_invite_delivery_failure_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://notify.example/webhook")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_SECRET", "test-only-webhook-secret")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import httpx
+
+        original_post = httpx.Client.post
+
+        def flaky_post(self, url, **kwargs):
+            if url == "https://notify.example/webhook":
+                raise httpx.ConnectError("connection refused")
+            return original_post(self, url, **kwargs)
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            monkeypatch.setattr(httpx.Client, "post", flaky_post)
+            invite_resp = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert invite_resp.json()["webhook_delivered"] is False
+
+            resend_resp = client.post("/auth/resend-invite", json={"email": "new@example.com"}, headers=admin_headers)
+            assert resend_resp.status_code == 200, resend_resp.text
+            assert resend_resp.json()["webhook_delivered"] is False
+
+
+def test_notify_catches_non_http_error_and_returns_false_not_500(tmp_path, monkeypatch, isolated_sys_path, caplog):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_webhook.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "notify_non_http_error_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://notify.example/webhook")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_SECRET", "test-only-webhook-secret")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import httpx
+        import logging
+
+        original_post = httpx.Client.post
+
+        def invalid_url_post(self, url, **kwargs):
+            if url == "https://notify.example/webhook":
+                raise httpx.InvalidURL("not actually an httpx.HTTPError subclass")
+            return original_post(self, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "post", invalid_url_post)
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            with caplog.at_level(logging.WARNING):
+                response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert response.status_code == 201, response.text
+            assert response.json()["webhook_delivered"] is False
+            assert any("notify" in rec.message.lower() for rec in caplog.records)
 
 
 def test_async_mode_invite_flow_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):

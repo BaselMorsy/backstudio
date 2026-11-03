@@ -1130,6 +1130,29 @@ def test_external_auth_minimal_erd_loads_cleanly(tmp_path):
     assert erd.auth.mode == "external"
 
 
+def test_external_auth_rejects_a_customized_invite_block(tmp_path):
+    import yaml
+
+    doc = _minimal_external_auth_doc()
+    doc["auth"]["invite"] = {"enabled": True}
+    doc["rbac"] = {"enabled": True, "roles": ["admin"]}
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="auth.invite"):
+        load_erd(path)
+
+
+def test_external_auth_rejects_a_customized_webhook_block(tmp_path):
+    import yaml
+
+    doc = _minimal_external_auth_doc()
+    doc["auth"]["webhook"] = {"url_env_var": "NOTIFY_WEBHOOK_URL"}
+    path = tmp_path / "external.yml"
+    path.write_text(yaml.safe_dump(doc))
+    with pytest.raises(ERDValidationError, match="auth.webhook"):
+        load_erd(path)
+
+
 def test_external_auth_rejects_a_declared_user_entity(tmp_path):
     import yaml
 

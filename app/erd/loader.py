@@ -7,7 +7,7 @@ import yaml
 from pydantic import ValidationError
 
 from app.erd.field_types import enum_class_name, pascal_case
-from app.erd.schema import ERDConfig, EntitySpec, FieldType, JWTSpec, RegistrationSpec
+from app.erd.schema import ERDConfig, EntitySpec, FieldType, InviteSpec, JWTSpec, RegistrationSpec, WebhookSpec
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 MODE_GATED_RESERVED_USER_FIELDS = {
@@ -55,6 +55,18 @@ def _validate_external_auth(erd: ERDConfig) -> None:
             raise ERDValidationError(
                 "auth.mode: external cannot be combined with a customized auth.registration "
                 "block - there is no registration flow when identity is verified externally."
+            )
+        if "invite" in erd.auth.model_fields_set and erd.auth.invite != InviteSpec():
+            raise ERDValidationError(
+                "auth.mode: external cannot be combined with a customized auth.invite block - "
+                "there is no local User table to invite someone into when identity is "
+                "verified externally."
+            )
+        if "webhook" in erd.auth.model_fields_set and erd.auth.webhook != WebhookSpec():
+            raise ERDValidationError(
+                "auth.mode: external cannot be combined with a customized auth.webhook block - "
+                "notification delivery only applies to builtin auth's own invite/"
+                "email-verification/password-reset flows, none of which exist under mode: external."
             )
         for entity in erd.entities:
             if entity.name == "User":

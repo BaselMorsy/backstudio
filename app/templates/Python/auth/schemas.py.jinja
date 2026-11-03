@@ -56,6 +56,11 @@ class ResendInviteRequest(BaseModel):
     email: EmailStr
 
 
+class ResendInviteResponse(BaseModel):
+    message: str
+    webhook_delivered: bool
+
+
 {% endif %}
 {% if project.registration_mode == 'email_verification' %}
 class VerifyEmailRequest(BaseModel):

@@ -263,6 +263,12 @@ def _validate_semantics(erd: ERDConfig) -> None:
             "rbac.enabled requires auth.enabled: true (RBAC needs a way to identify the current user)"
         )
 
+    if erd.auth.invite.enabled and not erd.rbac.enabled:
+        raise ERDValidationError(
+            "auth.invite.enabled requires rbac.enabled: true (inviting a user always "
+            "assigns a role, and without RBAC there is no role to assign)"
+        )
+
     if erd.rbac.enabled and "admin" not in erd.rbac.roles:
         raise ERDValidationError(
             "rbac.enabled requires 'admin' to be declared in rbac.roles — the auto-generated "

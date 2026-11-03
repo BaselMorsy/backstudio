@@ -204,6 +204,41 @@ entities:
         load_erd(bad)
 
 
+def test_invite_enabled_requires_rbac_enabled(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true, invite: {enabled: true}}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    with pytest.raises(ERDValidationError, match="invite.enabled requires rbac.enabled"):
+        load_erd(bad)
+
+
+def test_invite_enabled_with_rbac_enabled_passes_validation(tmp_path):
+    ok = tmp_path / "ok.yml"
+    ok.write_text(
+        """
+project: {name: Demo}
+database: {type: sqlite, database_name: d.db}
+auth: {enabled: true, invite: {enabled: true}}
+rbac: {enabled: true, roles: [admin]}
+entities:
+  - {name: Widget, fields: [{name: id, type: integer, primary_key: true}]}
+services:
+  - {name: widgets, entities: [Widget]}
+"""
+    )
+    erd = load_erd(ok)
+    assert erd.auth.invite.enabled is True
+
+
 def test_unknown_role_reference_rejected(tmp_path):
     bad = tmp_path / "bad.yml"
     bad.write_text(

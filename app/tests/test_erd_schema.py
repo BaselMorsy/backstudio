@@ -265,6 +265,27 @@ def test_auth_spec_registration_defaults_to_open_mode():
     assert auth.registration.mode == "open"
 
 
+def test_invite_spec_defaults_to_disabled():
+    from app.erd.schema import InviteSpec
+    spec = InviteSpec()
+    assert spec.enabled is False
+    assert spec.expiration_minutes == 10080
+
+
+def test_webhook_spec_defaults_to_unset():
+    from app.erd.schema import WebhookSpec
+    spec = WebhookSpec()
+    assert spec.url_env_var is None
+    assert spec.secret_env_var is None
+
+
+def test_auth_spec_exposes_invite_and_webhook():
+    from app.erd.schema import AuthSpec
+    auth = AuthSpec(enabled=True, invite={"enabled": True}, webhook={"url_env_var": "NOTIFY_WEBHOOK_URL"})
+    assert auth.invite.enabled is True
+    assert auth.webhook.url_env_var == "NOTIFY_WEBHOOK_URL"
+
+
 def _with_field(**field):
     doc = dict(MINIMAL)
     doc["entities"] = [

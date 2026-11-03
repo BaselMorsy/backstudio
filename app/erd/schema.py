@@ -179,12 +179,24 @@ class ExternalAuthSpec(BaseModel):
         return v
 
 
+class InviteSpec(BaseModel):
+    enabled: bool = False
+    expiration_minutes: int = 10080
+
+
+class WebhookSpec(BaseModel):
+    url_env_var: Optional[str] = None
+    secret_env_var: Optional[str] = None
+
+
 class AuthSpec(BaseModel):
     enabled: bool = False
     mode: Literal["builtin", "external"] = "builtin"
     jwt: JWTSpec = Field(default_factory=JWTSpec)
     registration: RegistrationSpec = Field(default_factory=RegistrationSpec)
     external: Optional[ExternalAuthSpec] = None
+    invite: InviteSpec = Field(default_factory=InviteSpec)
+    webhook: WebhookSpec = Field(default_factory=WebhookSpec)
 
     @model_validator(mode="after")
     def external_block_matches_mode(self) -> "AuthSpec":

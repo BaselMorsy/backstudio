@@ -1338,3 +1338,13 @@ def test_translate_owner_id_type_defaults_to_int_without_owner_match_field():
     for model in state["data_models"]:
         if model.get("rls"):
             assert model["rls"]["owner_id_type"] == "int"
+
+
+def test_translate_emits_a_real_deterministic_checksum():
+    first = translate(load_erd(f"{FIXTURES}/valid_minimal.yml"))["checksum"]
+    again = translate(load_erd(f"{FIXTURES}/valid_minimal.yml"))["checksum"]
+    other = translate(load_erd(f"{FIXTURES}/valid_full.yml"))["checksum"]
+
+    assert len(first) == 64 and set(first) <= set("0123456789abcdef")
+    assert first == again
+    assert first != other

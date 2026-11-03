@@ -69,6 +69,7 @@ def test_generation_jwks_external_auth_unchanged(tmp_path):
 def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_secret(tmp_path, monkeypatch, isolated_sys_path):
     codebase_dir = _generate_shared_secret(tmp_path)
     monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
@@ -92,6 +93,7 @@ def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_sec
 def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret(tmp_path, monkeypatch, isolated_sys_path):
     codebase_dir = _generate_shared_secret(tmp_path)
     monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
@@ -121,6 +123,7 @@ def test_generated_shared_secret_verifier_rejects_an_asymmetrically_signed_token
     """
     codebase_dir = _generate_shared_secret(tmp_path)
     monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib

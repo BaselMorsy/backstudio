@@ -182,7 +182,7 @@ backstudio/
 │   │                          HTML/Mermaid visualization (visualize.py)
 │   ├── services/             # code_generator.py — the Jinja2-based generation engine
 │   ├── templates/Python/       # every Jinja2 template that produces generated-project files
-│   ├── utils/                    # checksum, file-ops, and id-generation helpers
+│   ├── utils/                    # checksum and file-ops helpers
 │   └── tests/                      # the test suite
 ├── examples/                  # example ERD files, incl. blog.yml used throughout this README
 ├── docs/superpowers/            # design specs and implementation plans

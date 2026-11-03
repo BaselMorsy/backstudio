@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from app.utils.checksum import compute_checksum
 from app.erd.field_types import enum_class_name, py_type_for
 from app.erd.loader import ERDValidationError
 from app.erd.schema import (
@@ -619,7 +620,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "claims": {"subject": erd.auth.external.claims.subject, "roles": erd.auth.external.claims.roles},
         }
 
-    return {
+    state = {
         "name": erd.project.name,
         "description": erd.project.description,
         "version": erd.project.version,
@@ -647,3 +648,5 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "webhook_url_env_var": erd.auth.webhook.url_env_var,
         "webhook_secret_env_var": erd.auth.webhook.secret_env_var,
     }
+    state["checksum"] = compute_checksum(state)
+    return state

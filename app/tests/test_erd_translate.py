@@ -1158,6 +1158,57 @@ def test_translate_integer_primary_keys_and_user_targets_stay_integer():
     assert m2m["association_table"]["right_foreign_key"]["column_type"] == "integer"
 
 
+def test_translate_exposes_invite_disabled_by_default():
+    state = translate(load_erd(f"{FIXTURES}/shophub_mini.yml"))
+    assert state["invite_enabled"] is False
+    assert state["invite_expiration_minutes"] == 10080
+    assert state["webhook_url_env_var"] is None
+    assert state["webhook_secret_env_var"] is None
+
+
+def test_translate_exposes_webhook_config_when_set():
+    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, WebhookSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="WebhookDemo", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="w.db"),
+        auth=AuthSpec(enabled=True, webhook=WebhookSpec(url_env_var="NOTIFY_WEBHOOK_URL", secret_env_var="NOTIFY_WEBHOOK_SECRET")),
+        entities=[
+            EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+    assert state["webhook_url_env_var"] == "NOTIFY_WEBHOOK_URL"
+    assert state["webhook_secret_env_var"] == "NOTIFY_WEBHOOK_SECRET"
+
+
+def test_translate_password_hash_nullable_only_when_invite_enabled():
+    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, InviteSpec, RBACSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+
+    erd = ERDConfig(
+        project=ProjectMeta(name="InviteDemo", version="1.0.0"),
+        database=DatabaseSpec(type="sqlite", database_name="i.db"),
+        auth=AuthSpec(enabled=True, invite=InviteSpec(enabled=True)),
+        rbac=RBACSpec(enabled=True, roles=["admin"]),
+        entities=[
+            EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
+        services=[ServiceDecl(name="widgets", entities=["Widget"])],
+    )
+    state = translate(erd)
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    password_field = next(f for f in user["fields"] if f["name"] == "password_hash")
+    assert password_field["nullable"] is True
+
+
+def test_translate_password_hash_stays_not_null_without_invite():
+    state = translate(load_erd(f"{FIXTURES}/shophub_mini.yml"))
+    user = next(m for m in state["data_models"] if m["name"] == "User")
+    password_field = next(f for f in user["fields"] if f["name"] == "password_hash")
+    assert password_field["nullable"] is False
+
+
 def test_translate_annotates_enum_fields_and_lists_enums():
     state = translate(load_erd(f"{FIXTURES}/field_types_showcase.yml"))
     assert state["enums"] == [

@@ -429,6 +429,9 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
 def _build_user_entity(erd: ERDConfig, enums: List[Dict[str, Any]]) -> Dict[str, Any]:
     declared = next((e for e in erd.entities if e.name == "User"), None)
     fields = [dict(f) for f in AUTH_USER_FIELDS]
+    if erd.auth.invite.enabled:
+        password_field = next(f for f in fields if f["name"] == "password_hash")
+        password_field["nullable"] = True
     if erd.auth.registration.mode == "email_verification":
         fields.append({"name": "is_verified", "type": "boolean", "nullable": False, "default": False})
     elif erd.auth.registration.mode == "admin_approval":
@@ -639,4 +642,8 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "rbac_enabled": erd.rbac.enabled,
         "rbac_roles": erd.rbac.roles,
         "registration_mode": erd.auth.registration.mode,
+        "invite_enabled": erd.auth.invite.enabled,
+        "invite_expiration_minutes": erd.auth.invite.expiration_minutes,
+        "webhook_url_env_var": erd.auth.webhook.url_env_var,
+        "webhook_secret_env_var": erd.auth.webhook.secret_env_var,
     }

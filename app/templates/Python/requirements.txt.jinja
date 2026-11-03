@@ -54,8 +54,8 @@ email-validator==2.1.1
 python-multipart==0.0.6
 {% endif %}
 {% endif %}
-{% if project.auth_mode == 'external' %}
-# External auth: JWKS fetch
+{% if project.auth_mode == 'external' or project.webhook_url_env_var %}
+# External auth JWKS fetch, and/or webhook notification delivery
 httpx==0.25.2
 {% endif %}
 

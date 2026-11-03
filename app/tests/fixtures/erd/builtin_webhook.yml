@@ -1,0 +1,30 @@
+project:
+  name: BuiltinWebhook
+  version: "1.0.0"
+  description: Minimal builtin-auth fixture with a webhook configured for notification delivery
+
+database:
+  type: sqlite
+  database_name: builtin_webhook.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+  webhook:
+    url_env_var: NOTIFY_WEBHOOK_URL
+
+rbac:
+  enabled: true
+  roles: [admin]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

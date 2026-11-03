@@ -1,7 +1,39 @@
-"""{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} email stub"""
+"""{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} notification delivery"""
+
+{% set is_async = project.database_config.async_mode %}
+from datetime import datetime
+{% if project.webhook_url_env_var %}
+import httpx
+
+from config import settings
+{% endif %}
 
 
-def send_email(to: str, subject: str, body: str) -> None:
-    """Development-mode stub - logs instead of sending. Replace with a real
-    email provider integration (SES, SendGrid, SMTP, ...) before production."""
-    print(f"[DEV EMAIL] To: {to}\nSubject: {subject}\n\n{body}\n")
+{{ 'async ' if is_async }}def notify(event: str, email: str, token: str, expires_at: datetime) -> bool:
+    """Deliver an invite/email-verification/password-reset notification.
+
+    Never raises - a delivery failure must not undo the caller's already-committed
+    DB work. Returns whether delivery actually happened.
+    """
+{% if project.webhook_url_env_var %}
+    headers = {}
+    {% if project.webhook_secret_env_var %}
+    headers["Authorization"] = f"Bearer {settings.WEBHOOK_SECRET}"
+    {% endif %}
+    payload = {"event": event, "email": email, "token": token, "expires_at": expires_at.isoformat()}
+    try:
+        {% if is_async %}
+        async with httpx.AsyncClient() as client:
+            response = await client.post(settings.WEBHOOK_URL, json=payload, headers=headers, timeout=5.0)
+        {% else %}
+        with httpx.Client() as client:
+            response = client.post(settings.WEBHOOK_URL, json=payload, headers=headers, timeout=5.0)
+        {% endif %}
+        response.raise_for_status()
+        return True
+    except httpx.HTTPError:
+        return False
+{% else %}
+    print(f"[DEV NOTIFY] event={event} to={email} token={token} expires_at={expires_at.isoformat()}")
+    return True
+{% endif %}

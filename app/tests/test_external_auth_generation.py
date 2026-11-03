@@ -160,6 +160,52 @@ def test_requirements_has_jose_and_httpx_but_not_password_deps(tmp_path):
     assert "python-multipart" not in req
 
 
+WEBHOOK_FIXTURE = f"{FIXTURES}/builtin_webhook.yml"
+WEBHOOK_ASYNC_FIXTURE = f"{FIXTURES}/builtin_webhook_async.yml"
+
+
+def _generate_webhook(tmp_path):
+    state = translate(load_erd(WEBHOOK_FIXTURE))
+    return CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+
+def _generate_webhook_async(tmp_path):
+    state = translate(load_erd(WEBHOOK_ASYNC_FIXTURE))
+    return CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
+
+
+def test_generation_webhook_configured_emits_httpx_post(tmp_path):
+    codebase_dir = _generate_webhook(tmp_path)
+    content = (codebase_dir / "modules" / "auth" / "email.py").read_text(encoding="utf-8")
+    assert "httpx" in content
+    assert "def notify(" in content
+    assert "print(" not in content
+
+
+def test_generation_webhook_unconfigured_emits_print_stub(tmp_path):
+    # builtin auth, no auth.webhook set -> print-stub path
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(
+        translate(load_erd(f"{FIXTURES}/shophub_mini.yml")), force=True
+    )
+    content = (codebase_dir / "modules" / "auth" / "email.py").read_text(encoding="utf-8")
+    assert "def notify(" in content
+    assert "httpx" not in content
+    assert "print(" in content
+
+
+def test_generation_webhook_configured_adds_httpx_to_requirements(tmp_path):
+    codebase_dir = _generate_webhook(tmp_path)
+    content = (codebase_dir / "requirements.txt").read_text(encoding="utf-8")
+    assert "httpx" in content
+
+
+def test_generation_async_project_with_webhook_emits_async_notify(tmp_path):
+    codebase_dir = _generate_webhook_async(tmp_path)
+    content = (codebase_dir / "modules" / "auth" / "email.py").read_text(encoding="utf-8")
+    assert "async def notify(" in content
+    assert "httpx.AsyncClient" in content
+
+
 def _rsa_keypair_and_jwk():
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization

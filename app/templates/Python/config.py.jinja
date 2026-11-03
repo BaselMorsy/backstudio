@@ -205,6 +205,15 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_refresh_expiration_minutes }}
     EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_email_verification_expiration_minutes }}
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = {{ project.security_config.jwt_password_reset_expiration_minutes }}
+    INVITE_TOKEN_EXPIRE_MINUTES: int = {{ project.invite_expiration_minutes }}
+    {% if project.webhook_url_env_var %}
+    WEBHOOK_URL: str = _require_env("{{ project.webhook_url_env_var }}")
+    {% if project.webhook_secret_env_var %}
+    WEBHOOK_SECRET: Optional[str] = _require_env("{{ project.webhook_secret_env_var }}")
+    {% else %}
+    WEBHOOK_SECRET: Optional[str] = None
+    {% endif %}
+    {% endif %}
     {% endif %}
 
     # Application

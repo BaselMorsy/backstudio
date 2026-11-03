@@ -236,6 +236,87 @@ class AuthService:
             raise ValueError("Invalid or expired token")
         return user_id
 
+{% if project.invite_enabled %}
+    {{ 'async ' if is_async }}def create_invite_token(self, user_id: int) -> str:
+        return self._create_token(str(user_id), timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES), "invite")
+
+    {{ 'async ' if is_async }}def invite_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, roles: List[str]) -> "tuple[User, bool]":
+        allowed = {{ project.rbac_roles|tojson }}
+        unknown = [r for r in roles if r not in allowed]
+        if unknown:
+            raise ValueError(f"Unknown role(s): {', '.join(unknown)} — declared roles are: {', '.join(allowed)}")
+{% if is_async %}
+        existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+{% else %}
+        existing = db.query(User).filter(User.email == email).first()
+{% endif %}
+        if existing is not None:
+            if existing.password_hash is not None:
+                raise ValueError("Email already registered")
+            raise ValueError("An invite is already pending for this email - use resend-invite")
+        user = User(
+            email=email,
+            password_hash=None,
+            roles=roles,
+            is_active=True,
+{% if project.registration_mode == 'email_verification' %}
+            is_verified=True,
+{% elif project.registration_mode == 'admin_approval' %}
+            is_approved=True,
+{% endif %}
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(user)
+{% if is_async %}
+        await db.commit()
+        await db.refresh(user)
+{% else %}
+        db.commit()
+        db.refresh(user)
+{% endif %}
+        token = {{ 'await ' if is_async }}self.create_invite_token(user.id)
+        expires_at = datetime.utcnow() + timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES)
+        delivered = {{ 'await ' if is_async }}notify(event="invite", email=user.email, token=token, expires_at=expires_at)
+        return user, delivered
+
+    {{ 'async ' if is_async }}def accept_invite(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, token: str, new_password: str) -> None:
+        try:
+            payload = self.decode_token(token, expected_type="invite", return_payload=True)
+        except HTTPException:
+            raise ValueError("Invalid or expired token")
+        user_id = int(payload["sub"])
+{% if is_async %}
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+{% else %}
+        user = db.query(User).filter(User.id == user_id).first()
+{% endif %}
+        if user is None:
+            raise ValueError("Invalid or expired token")
+        if user.password_hash is not None:
+            raise ValueError("Invite already accepted")
+        user.password_hash = self.hash_password(new_password)
+{% if is_async %}
+        await db.commit()
+{% else %}
+        db.commit()
+{% endif %}
+
+    {{ 'async ' if is_async }}def resend_invite(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str) -> Optional[bool]:
+{% if is_async %}
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+{% else %}
+        user = db.query(User).filter(User.email == email).first()
+{% endif %}
+        if user is None:
+            return None
+        if user.password_hash is not None:
+            raise ValueError("Invite already accepted")
+        token = {{ 'await ' if is_async }}self.create_invite_token(user.id)
+        expires_at = datetime.utcnow() + timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES)
+        return {{ 'await ' if is_async }}notify(event="invite", email=user.email, token=token, expires_at=expires_at)
+{% endif %}
+
     async def get_current_user(self, token: str = Depends(oauth2_scheme), db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db)) -> User:
         user_id = self.decode_token(token, expected_type="access")
 {% if is_async %}

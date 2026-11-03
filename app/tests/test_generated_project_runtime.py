@@ -1848,6 +1848,205 @@ def test_forgot_password_prints_structured_notify_payload_not_free_text(tmp_path
             assert "token=" in captured.out
 
 
+def _generate_invite_app(tmp_path, monkeypatch, db_name):
+    erd = load_erd(f"{FIXTURES}/builtin_invite.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+    db_path = tmp_path / db_name
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+    return codebase_dir
+
+
+def test_invite_creates_user_with_role_and_no_password(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_creates_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert response.status_code == 201, response.text
+            body = response.json()
+            assert body["roles"] == ["member"]
+            assert "webhook_delivered" in body
+
+
+def test_invite_duplicate_pending_email_returns_400_pointing_at_resend(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_duplicate_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert response.status_code == 400, response.text
+            assert "resend" in response.json()["detail"].lower()
+
+
+def test_invite_requires_at_least_one_role(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_empty_roles_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": []}, headers=admin_headers)
+            assert response.status_code == 422, response.text
+
+
+def test_accept_invite_sets_password_and_allows_login(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_accept_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            captured = capfd.readouterr()
+            token = re.search(r"token=(\S+)", captured.out).group(1)
+
+            response = client.post("/auth/accept-invite", json={"token": token, "new_password": "longenough1"})
+            assert response.status_code == 200, response.text
+
+            login = client.post("/auth/login", json={"email": "new@example.com", "password": "longenough1"})
+            assert login.status_code == 200, login.text
+
+
+def test_accept_invite_replayed_after_acceptance_returns_400(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_replay_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            captured = capfd.readouterr()
+            token = re.search(r"token=(\S+)", captured.out).group(1)
+
+            client.post("/auth/accept-invite", json={"token": token, "new_password": "longenough1"})
+            response = client.post("/auth/accept-invite", json={"token": token, "new_password": "other1234"})
+            assert response.status_code == 400, response.text
+            assert "already accepted" in response.json()["detail"].lower()
+
+
+def test_resend_invite_for_unknown_email_returns_404(tmp_path, monkeypatch, isolated_sys_path):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_unknown_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            response = client.post("/auth/resend-invite", json={"email": "never@invited.com"}, headers=admin_headers)
+            assert response.status_code == 404, response.text
+
+
+def test_resend_invite_for_already_accepted_email_returns_400(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_accepted_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            captured = capfd.readouterr()
+            token = re.search(r"token=(\S+)", captured.out).group(1)
+            client.post("/auth/accept-invite", json={"token": token, "new_password": "longenough1"})
+
+            response = client.post("/auth/resend-invite", json={"email": "new@example.com"}, headers=admin_headers)
+            assert response.status_code == 400, response.text
+            assert "already accepted" in response.json()["detail"].lower()
+
+
+def test_resend_invite_for_pending_email_refires_notify(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_pending_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            client.post("/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers)
+            capfd.readouterr()
+            response = client.post("/auth/resend-invite", json={"email": "pending@example.com"}, headers=admin_headers)
+            assert response.status_code == 200, response.text
+            captured = capfd.readouterr()
+            assert "event=invite" in captured.out
+
+
+def test_invited_user_under_email_verification_mode_is_not_double_gated(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd_dict_path = f"{FIXTURES}/builtin_invite_email_verification.yml"
+    erd = load_erd(erd_dict_path)
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+    db_path = tmp_path / "invite_email_verification_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_verify_token = re.search(r"token=(\S+)", capfd.readouterr().out).group(1)
+            client.post("/auth/verify-email", json={"token": admin_verify_token})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            captured = capfd.readouterr()
+            token = re.search(r"token=(\S+)", captured.out).group(1)
+
+            client.post("/auth/accept-invite", json={"token": token, "new_password": "longenough1"})
+            login = client.post("/auth/login", json={"email": "new@example.com", "password": "longenough1"})
+            assert login.status_code == 200, login.text
+
+
 def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):
     """auth_expansion_async_full.yml driven through real HTTP + a real aiosqlite
     DB - proves admin_approval gating, admin endpoints, and forgot/reset

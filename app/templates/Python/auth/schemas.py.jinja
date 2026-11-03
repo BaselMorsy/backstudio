@@ -41,6 +41,22 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+{% if project.invite_enabled %}
+class InviteUserRequest(BaseModel):
+    email: EmailStr
+    roles: List[str] = Field(..., min_length=1)
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+
+class ResendInviteRequest(BaseModel):
+    email: EmailStr
+
+
+{% endif %}
 {% if project.registration_mode == 'email_verification' %}
 class VerifyEmailRequest(BaseModel):
     token: str
@@ -64,3 +80,9 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+{% if project.invite_enabled %}
+class InviteResponse(UserResponse):
+    webhook_delivered: bool
+{% endif %}

@@ -21,6 +21,9 @@ from .schemas import (
 {% if project.registration_mode == 'email_verification' %}
     ResendVerificationRequest, VerifyEmailRequest,
 {% endif %}
+{% if project.invite_enabled %}
+    AcceptInviteRequest, InviteResponse, InviteUserRequest, ResendInviteRequest,
+{% endif %}
 )
 from .service import AuthService, get_{{ project.auth_module_name }}_service
 {% if project.rbac_enabled %}
@@ -247,4 +250,47 @@ _service = get_{{ project.auth_module_name }}_service()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
 {% endif %}
+{% endif %}
+
+
+{% if project.invite_enabled %}
+@router.post("/invite", response_model=InviteResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def invite(
+    payload: InviteUserRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> InviteResponse:
+    try:
+        user, webhook_delivered = {{ 'await ' if is_async }}service.invite_user(db, payload.email, payload.roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return InviteResponse(**UserResponse.model_validate(user).model_dump(), webhook_delivered=webhook_delivered)
+
+
+@router.post("/accept-invite", response_model=MessageResponse)
+{{ 'async ' if is_async }}def accept_invite_route(
+    payload: AcceptInviteRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+    try:
+        {{ 'await ' if is_async }}service.accept_invite(db, payload.token, payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return MessageResponse(message="Invite accepted - you may now log in.")
+
+
+@router.post("/resend-invite", response_model=MessageResponse, dependencies=[Depends(require_roles("admin"))])
+{{ 'async ' if is_async }}def resend_invite_route(
+    payload: ResendInviteRequest,
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> MessageResponse:
+    try:
+        delivered = {{ 'await ' if is_async }}service.resend_invite(db, payload.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if delivered is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return MessageResponse(message="Invite resent.")
 {% endif %}

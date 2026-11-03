@@ -1670,7 +1670,7 @@ def test_full_email_verification_flow_over_http(tmp_path, monkeypatch, isolated_
             assert login_resp.status_code == 401, login_resp.text  # unverified
 
             captured = capfd.readouterr()
-            match = re.search(r"Your verification token: (\S+)", captured.out)
+            match = re.search(r"token=(\S+)", captured.out)
             assert match, f"no verification token found in captured stdout: {captured.out}"
             token = match.group(1)
 
@@ -1766,7 +1766,7 @@ def test_full_forgot_reset_password_flow_over_http(tmp_path, monkeypatch, isolat
             assert forgot_resp.status_code == 200, forgot_resp.text
 
             captured = capfd.readouterr()
-            match = re.search(r"Your password reset token: (\S+)", captured.out)
+            match = re.search(r"token=(\S+)", captured.out)
             assert match, f"no reset token found in captured stdout: {captured.out}"
             token = match.group(1)
 
@@ -1786,6 +1786,66 @@ def test_full_forgot_reset_password_flow_over_http(tmp_path, monkeypatch, isolat
             # a genuinely nonexistent email gets the identical generic response (already covered
             # by test_forgot_password_and_resend_verification_are_enumeration_safe in Task 6, not
             # re-asserted here to avoid duplicating that test's exact purpose)
+
+
+def test_login_rejects_user_with_no_password_hash_set(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite.yml")
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "null_password_hash_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "pending@example.com", "password": "whatever123"})
+
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("UPDATE users SET password_hash = NULL WHERE email = 'pending@example.com'")
+            conn.commit()
+            conn.close()
+
+            response = client.post("/auth/login", json={"email": "pending@example.com", "password": "whatever123"})
+            assert response.status_code == 401, response.text
+            assert "invite" in response.json()["detail"].lower()
+
+
+def test_forgot_password_prints_structured_notify_payload_not_free_text(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd = load_erd(f"{FIXTURES}/builtin_invite.yml")  # auth.webhook unset -> print-stub path
+    state = translate(erd)
+
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "structured_notify_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "notify@example.com", "password": "whatever123"})
+            capfd.readouterr()  # drain registration's own output, if any
+
+            client.post("/auth/forgot-password", json={"email": "notify@example.com"})
+            captured = capfd.readouterr()
+            assert "event=password_reset" in captured.out
+            assert "token=" in captured.out
 
 
 def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):
@@ -1853,7 +1913,7 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
             forgot_resp = client.post("/auth/forgot-password", json={"email": "pending@example.com"})
             assert forgot_resp.status_code == 200
             captured = capfd.readouterr()
-            match = re.search(r"Your password reset token: (\S+)", captured.out)
+            match = re.search(r"token=(\S+)", captured.out)
             assert match
             token = match.group(1)
             reset_resp = client.post("/auth/reset-password", json={"token": token, "new_password": "brandnewpass1"})

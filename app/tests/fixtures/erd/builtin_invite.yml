@@ -1,0 +1,30 @@
+project:
+  name: BuiltinInvite
+  version: "1.0.0"
+  description: Minimal builtin-auth fixture with the admin invite flow enabled
+
+database:
+  type: sqlite
+  database_name: builtin_invite.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+  invite:
+    enabled: true
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

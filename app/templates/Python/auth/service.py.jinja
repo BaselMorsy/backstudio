@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database.base import get_db
 from database.models import User
-from .email import send_email
+from .email import notify
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/{{ project.auth_module_name }}/login")
@@ -138,7 +138,8 @@ class AuthService:
 {% endif %}
 {% if project.registration_mode == 'email_verification' %}
         token = self.create_email_verification_token(user.id)
-        send_email(user.email, "Verify your email", f"Your verification token: {token}")
+        expires_at = datetime.utcnow() + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES)
+        {{ 'await ' if is_async }}notify(event="email_verification", email=user.email, token=token, expires_at=expires_at)
 {% endif %}
         return user
 
@@ -148,6 +149,8 @@ class AuthService:
 {% else %}
         user = db.query(User).filter(User.email == email).first()
 {% endif %}
+        if user is not None and user.password_hash is None:
+            raise ValueError("Account setup incomplete - check your invite email")
         if not user or not self.verify_password(password, user.password_hash):
             raise ValueError("Invalid email or password")
         if not user.is_active:

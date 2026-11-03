@@ -81,6 +81,18 @@ auth:
     password_reset_expiration_minutes: int = 30
   registration:                     # mode: builtin only
     mode: open | email_verification | admin_approval        # default "open"
+  invite:                           # mode: builtin only; requires rbac.enabled: true (an
+                                     #   invite always assigns a role)
+    enabled: bool = false
+    expiration_minutes: int = 10080           # 7 days - invite links sit longer than a reset link
+  webhook:                          # mode: builtin only; how invite/email-verification/
+                                     #   password-reset tokens actually reach a user. Deciding
+                                     #   whether notify() POSTs or falls back to a dev-only print
+                                     #   stub happens at GENERATION time from url_env_var being
+                                     #   set here - not by flipping the env var at runtime, so
+                                     #   turning delivery on/off means regenerating.
+    url_env_var: str                # optional; unset -> print-stub fallback (dev only)
+    secret_env_var: str              # optional; adds "Authorization: Bearer <value>" header
   external:                         # required when mode: external, else must be omitted
     verification: jwks | shared_secret = jwks   # which half of this file applies
     jwks_url_env_var: str            # required iff verification: jwks, e.g. AUTH_JWKS_URL
@@ -95,6 +107,10 @@ auth:
       subject: str = "sub"
       roles: str = "roles"
 
+# invite.enabled requires rbac.enabled: true, same reason as admin_approval below - the
+#   invite/resend-invite endpoints are admin-only RBAC-gated, and inviting someone always
+#   assigns a role. An invited user exists (with a role) but has password_hash: NULL until
+#   they call /accept-invite - login is rejected with a distinct message until then.
 # admin_approval requires rbac.enabled: true (the approve-user endpoint is admin-only RBAC-gated)
 # mode: builtin generates User + register/login/refresh/me; jwt/registration only apply here.
 # mode: external generates only JWT verification (no User, no auth endpoints at all) - identity

@@ -86,3 +86,10 @@ def test_grammar_auth_topic_documents_shared_secret_verification():
     output = runner.invoke(app, ["grammar", "auth"]).output
     assert "shared_secret" in output
     assert "verification" in output
+
+
+def test_grammar_auth_topic_documents_invite_and_webhook():
+    output = runner.invoke(app, ["grammar", "auth"]).output
+    assert "invite" in output
+    assert "webhook" in output
+    assert "expiration_minutes" in output

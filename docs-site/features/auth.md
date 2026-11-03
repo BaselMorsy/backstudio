@@ -128,6 +128,68 @@ So today, deactivating a user via `POST /auth/users/{id}/deactivate` immediately
 `/auth/refresh` (no new access token can be minted) and every `get_current_user`-gated route
 (the existing access token stops working the moment it's next used) — not just future logins.
 
+## Notification delivery: webhook or print stub
+
+Three flows need to hand a token to a user outside the request/response cycle: email
+verification, password reset, and invite (below). All three go through one function,
+`notify(event, email, token, expires_at)` in `email.py.jinja`, instead of each flow calling its
+own ad-hoc delivery.
+
+Whether `notify()` actually sends an HTTP request or just prints is decided **at generation
+time** from `auth.webhook.url_env_var`, never by checking the environment at runtime — the same
+principle as the asymmetric-JWT templates only compiling in key-loading code when the ERD asks
+for it. Leaving `auth.webhook` unset keeps today's behavior exactly: a dev-only
+`print(f"[DEV NOTIFY] ...")` that always reports success. Setting `url_env_var` compiles in a
+real `httpx` POST instead:
+
+```python
+payload = {"event": event, "email": email, "token": token, "expires_at": expires_at.isoformat()}
+response = client.post(settings.WEBHOOK_URL, json=payload, headers=headers, timeout=5.0)
+response.raise_for_status()
+```
+
+(`async with httpx.AsyncClient()` instead of `httpx.Client()` when the project is async-mode —
+`notify()` follows the project's own sync/async convention like every other service method.) A
+delivery failure is caught and turned into a `False` return, never raised — the caller's own DB
+work (the user row, the issued token) has already committed by the time `notify()` runs, and a
+webhook outage must not undo it. `auth.webhook.secret_env_var`, if also set, adds an
+`Authorization: Bearer <value>` header; backstudio never constructs the actual link a user
+clicks — only the raw token goes in the payload, since backstudio has no idea what your
+frontend's routing looks like.
+
+## Invite a user, set password on first login
+
+`auth.invite.enabled: true` adds a fourth way into the system, independent of
+`auth.registration.mode`: an admin creates the account directly, assigning its role(s) up front,
+and the new user sets their own password via a link instead of registering themselves. Requires
+`rbac.enabled: true` — rejected at `validate` time otherwise, since an invite's whole point is
+assigning a role, and without RBAC there is no role to assign.
+
+Three endpoints, generated only when invite is enabled:
+
+| Endpoint | Auth | What it does |
+|---|---|---|
+| `POST /auth/invite` | `admin` (RBAC) | Creates the user immediately with `password_hash: NULL` and the given roles, fires `notify(event="invite", ...)`, returns `webhook_delivered: bool` so the admin knows whether to expect the email to actually arrive. |
+| `POST /auth/accept-invite` | none (the token itself is the credential) | Verifies the invite token, sets `password_hash` from the supplied password. Replaying an already-accepted token 400s with "Invite already accepted" — it does not silently re-set the password. |
+| `POST /auth/resend-invite` | `admin` (RBAC) | Re-fires the webhook for a still-pending invite without re-creating the user or re-picking roles. 404s for an email that was never invited; 400s ("Invite already accepted") for one that already set a password — a transient webhook failure is retried, acceptance is not undone. |
+
+**The invited-but-pending state has no dedicated column.** `password_hash` becomes
+`nullable: True` on the `User` model, but only when `auth.invite.enabled: true` — every other
+project keeps today's `NOT NULL` column unchanged. "Invited, not yet accepted" is simply
+`password_hash IS NULL`; once `/accept-invite` sets a real hash, that row is indistinguishable
+from any other active user. `authenticate_user` checks this before attempting password
+verification at all (verifying a password against `None` would crash, not just misbehave):
+
+```python
+if user is not None and user.password_hash is None:
+    raise ValueError("Account setup incomplete - check your invite email")
+```
+
+**An invited user is never double-gated.** If `auth.registration.mode` is also
+`email_verification` or `admin_approval`, an admin-created account is already trusted — it skips
+that self-registration confirmation step entirely by having `is_verified`/`is_approved` forced
+`True` at invite time, rather than requiring a second confirmation nobody ever sent.
+
 ## Issuing tokens another service can verify
 
 By default, `mode: builtin` signs with a plain symmetric secret (`auth.jwt.algorithm: HS256` and

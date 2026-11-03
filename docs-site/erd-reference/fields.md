@@ -68,6 +68,8 @@ still overrides the built default entirely, same as for `sqlite`.
 | `mode` | `Literal["builtin", "external"]` | default `"builtin"` | `"builtin"` auto-injects a `User` entity and generates a full JWT auth module (registration, login, refresh, `/me`). `"external"` generates only JWKS verification of tokens issued elsewhere — no `User`, no auth endpoints. See [Authentication](../features/auth.md). |
 | `jwt` | `JWTSpec` | default `JWTSpec()` | JWT signing and token-lifetime settings — `mode: "builtin"` only, see below. |
 | `registration` | `RegistrationSpec` | default `RegistrationSpec()` | Registration mode — `mode: "builtin"` only, see below. |
+| `invite` | `InviteSpec` | default `InviteSpec()` | Admin invite + set-password-on-first-login flow — `mode: "builtin"` only, see below. |
+| `webhook` | `WebhookSpec` | default `WebhookSpec()` | Notification delivery for invite/email-verification/password-reset tokens — `mode: "builtin"` only, see below. |
 | `external` | `Optional[ExternalAuthSpec]` | default `None` | JWKS verification settings, required when `mode: "external"` — see below. |
 
 !!! warning "`mode` and `external` move together"
@@ -149,6 +151,42 @@ auto-injected auth fields: `id`, `email`, `password_hash`, `roles`, `is_active`,
 `updated_at` (always reserved), plus `is_verified` (only reserved when
 `registration.mode: email_verification`) or `is_approved` (only reserved when
 `registration.mode: admin_approval`).
+
+### `auth.invite` (`InviteSpec`)
+
+| Field | Type | Required/default | Description |
+|---|---|---|---|
+| `enabled` | `bool` | default `False` | Turns on `POST /auth/invite`, `/auth/accept-invite`, `/auth/resend-invite`. Requires `rbac.enabled: true` (see below) — rejected at `validate` time otherwise. |
+| `expiration_minutes` | `int` | default `10080` | Invite token lifetime, in minutes (10080 minutes = 7 days — longer than a reset link, since invites tend to sit unopened longer). |
+
+!!! warning "`invite.enabled` requires RBAC"
+    `auth.invite.enabled: true` requires `rbac.enabled: true` — an invite always assigns a role,
+    and without RBAC there is no role to assign. From `app/erd/loader.py`'s `_validate_semantics`:
+
+    ```python
+    if erd.auth.invite.enabled and not erd.rbac.enabled:
+        raise ERDValidationError(
+            "auth.invite.enabled requires rbac.enabled: true (inviting a user always "
+            "assigns a role, and without RBAC there is no role to assign)"
+        )
+    ```
+
+Enabling invite also makes `User.password_hash` `nullable: True` (every other project keeps it
+`NOT NULL`, unchanged) — an invited user exists, with its role(s) already assigned, but has
+`password_hash: NULL` until `/accept-invite` sets a real one. See
+[Authentication → Invite a user, set password on first login](../features/auth.md#invite-a-user-set-password-on-first-login).
+
+### `auth.webhook` (`WebhookSpec`)
+
+| Field | Type | Required/default | Description |
+|---|---|---|---|
+| `url_env_var` | `Optional[str]` | default `None` | Name of the environment variable the generated project reads the webhook URL from. Unset means every notification falls back to a dev-only print stub — this choice is made at **generation** time, not by checking the env var at runtime. |
+| `secret_env_var` | `Optional[str]` | default `None` | Name of the environment variable holding a shared secret. When set, every webhook POST carries an `Authorization: Bearer <value>` header. |
+
+Independent of `auth.invite` — a project can configure a webhook without ever enabling invite
+(it still benefits email-verification and password-reset delivery), and can enable invite
+without a webhook (useful for local dev; tokens are printed instead). See
+[Authentication → Notification delivery](../features/auth.md#notification-delivery-webhook-or-print-stub).
 
 ### `auth.external` (`ExternalAuthSpec`)
 

@@ -32,6 +32,8 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 | Fixed set of string values | `type: enum`, `values: [...]` (UPPER_SNAKE, no Python-keyword collisions) |
 | Two backstudio services on the same trust boundary, no need for real issuer/verifier separation | `auth.external.verification: shared_secret` — simpler than JWKS, no key management, no published endpoint |
 | Two backstudio services that genuinely need separation (different deploys, a third party you don't control) | `auth.external.verification: jwks` + `auth.jwt.algorithm: RS256`/etc. on the issuer, with `private_key_path_env_var`/`public_key_path_env_var` pointing at a key pair you generate yourself |
+| Admin creates accounts directly (B2B, controlled onboarding) rather than self-registration | `auth.invite.enabled: true` (requires `rbac.enabled: true`) — the user exists with a role immediately, but can't log in until they set a password via `/accept-invite` |
+| Need invite/email-verification/password-reset to actually deliver somewhere, not just print to console | `auth.webhook.url_env_var` pointing at an env var holding the URL your own email service listens on — backstudio never sends email itself |
 
 ## Two gotchas worth knowing by heart (also now in `backstudio grammar rbac`/`rls`, and in `docs-site/features/rbac.md`/`rls.md`)
 
@@ -51,6 +53,9 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 - Setting only one of `private_key_path_env_var`/`public_key_path_env_var` on an asymmetric builtin service (both are required together), or setting either one on a symmetric service (both must be unset — rejected, not silently ignored). Same for `kid` on a symmetric service and `secret_env_var` on an asymmetric one.
 - A key file that parses but is the wrong family/curve for the configured algorithm (RSA key + `ES256`, P-256 key + `ES384`) — rejected at startup with a clear message, not a 500 the first time something signs with it.
 - Expecting a refresh/password-reset/email-verification token to work as a bearer credential on another service — only access tokens carry `iss`/`aud`/`roles`; the others never leave the issuing service as a credential.
+- `auth.invite.enabled: true` without `rbac.enabled: true` (rejected at `validate` time — an invite always assigns a role).
+- Expecting `auth.webhook` delivery to turn on/off by flipping the env var at runtime — the webhook-vs-print-stub choice is baked in at **generation** time; changing it means regenerating, not just editing `.env`.
+- Calling `/auth/resend-invite` for an invite that's already been accepted, expecting it to work like a no-op — it 400s ("Invite already accepted"), since silently swallowing that would hide a real "this account is already set up" mistake.
 
 ## Reference
 

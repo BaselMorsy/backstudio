@@ -135,7 +135,11 @@ route.
 
 - **Authentication** — optional JWT auth (`/auth/register`, `/auth/login`, `/auth/refresh`,
   `/auth/me`), bcrypt password hashing, email verification, password reset, and admin user
-  management (listing, deactivating, and role management for users). See
+  management (listing, deactivating, and role management for users). Admins can also invite a
+  user with a role (`/auth/invite`, `/auth/accept-invite`, `/auth/resend-invite`), and
+  invite/verification/reset tokens are handed to your own email service through a webhook
+  (`auth.webhook`) - backstudio never sends email itself. Services can also issue tokens for
+  other services to verify (HS*/RS*/ES*, JWKS) or run verify-only (`auth.mode: external`). See
   [docs-site/features/auth.md](docs-site/features/auth.md).
 - **RBAC** — declare roles once, then restrict any CRUD action on any entity to specific roles,
   either globally (`rbac.default_permissions`) or per entity (`endpoints.rbac`). See

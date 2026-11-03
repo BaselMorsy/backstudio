@@ -2047,6 +2047,175 @@ def test_invited_user_under_email_verification_mode_is_not_double_gated(tmp_path
             assert login.status_code == 200, login.text
 
 
+class _FakeWebhookResponse:
+    def raise_for_status(self):
+        pass
+
+
+def test_invite_webhook_delivery_success_reports_true(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_webhook.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "invite_webhook_success_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://notify.example/webhook")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_SECRET", "test-only-webhook-secret")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import httpx
+
+        received = []
+        original_post = httpx.Client.post
+
+        def fake_post(self, url, **kwargs):
+            if url == "https://notify.example/webhook":
+                received.append((url, kwargs))
+                return _FakeWebhookResponse()
+            return original_post(self, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "post", fake_post)
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert response.status_code == 201, response.text
+            assert response.json()["webhook_delivered"] is True
+
+        assert len(received) == 1
+        url, kwargs = received[0]
+        assert url == "https://notify.example/webhook"
+        assert kwargs["json"]["event"] == "invite"
+        assert kwargs["json"]["email"] == "new@example.com"
+        assert "token" in kwargs["json"]
+        assert "expires_at" in kwargs["json"]
+
+
+def test_invite_webhook_delivery_failure_reports_false_but_user_still_created(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_webhook.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "invite_webhook_failure_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://notify.example/webhook")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_SECRET", "test-only-webhook-secret")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import httpx
+
+        original_post = httpx.Client.post
+
+        def failing_post(self, url, **kwargs):
+            if url == "https://notify.example/webhook":
+                raise httpx.ConnectError("connection refused")
+            return original_post(self, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "post", failing_post)
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+
+            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert response.status_code == 201, response.text
+            assert response.json()["webhook_delivered"] is False
+
+            list_resp = client.get("/auth/users", headers=admin_headers)
+            assert any(u["email"] == "new@example.com" for u in list_resp.json())
+
+
+def test_webhook_secret_configured_sends_authorization_header(tmp_path, monkeypatch, isolated_sys_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_webhook.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "invite_webhook_secret_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_URL", "https://notify.example/webhook")
+    monkeypatch.setenv("NOTIFY_WEBHOOK_SECRET", "test-only-webhook-secret")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import httpx
+
+        received = []
+        original_post = httpx.Client.post
+
+        def fake_post(self, url, **kwargs):
+            if url == "https://notify.example/webhook":
+                received.append(kwargs)
+                return _FakeWebhookResponse()
+            return original_post(self, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "post", fake_post)
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+
+        assert len(received) == 1
+        assert received[0]["headers"]["Authorization"] == "Bearer test-only-webhook-secret"
+
+
+def test_async_mode_invite_flow_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_async.yml")
+    state = translate(erd)
+    generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
+    codebase_dir = generator.generate_project(state, force=True)
+
+    db_path = tmp_path / "invite_async_test.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+        import re
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            invite_resp = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            assert invite_resp.status_code == 201, invite_resp.text
+            captured = capfd.readouterr()
+            token = re.search(r"token=(\S+)", captured.out).group(1)
+
+            accept_resp = client.post("/auth/accept-invite", json={"token": token, "new_password": "longenough1"})
+            assert accept_resp.status_code == 200, accept_resp.text
+
+            login = client.post("/auth/login", json={"email": "new@example.com", "password": "longenough1"})
+            assert login.status_code == 200, login.text
+
+
 def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, isolated_sys_path, capfd):
     """auth_expansion_async_full.yml driven through real HTTP + a real aiosqlite
     DB - proves admin_approval gating, admin endpoints, and forgot/reset

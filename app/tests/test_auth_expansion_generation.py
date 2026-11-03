@@ -45,7 +45,7 @@ def test_email_dot_py_generated_whenever_auth_enabled(tmp_path):
     assert email_path.exists()
     email_src = email_path.read_text(encoding="utf-8")
     ast.parse(email_src)
-    assert "def send_email(to: str, subject: str, body: str) -> None:" in email_src
+    assert "def notify(event: str, email: str, token: str, expires_at: datetime) -> bool:" in email_src
     assert "print(" in email_src
 
 
@@ -80,7 +80,7 @@ def test_email_verification_mode_service_has_verification_methods(tmp_path):
     assert "EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES" in service_src
     assert "def verify_email(self, db: Session, token: str) -> None:" in service_src
     assert "is_verified = True" in service_src
-    assert "from .email import send_email" in service_src
+    assert "from .email import notify" in service_src
 
     # authenticate_user must reject an unverified user
     auth_start = service_src.index("def authenticate_user(")

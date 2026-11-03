@@ -1,0 +1,33 @@
+project:
+  name: BuiltinInviteWebhook
+  version: "1.0.0"
+  description: Invite flow combined with a webhook configured for real notification delivery
+
+database:
+  type: sqlite
+  database_name: builtin_invite_webhook.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+  invite:
+    enabled: true
+  webhook:
+    url_env_var: NOTIFY_WEBHOOK_URL
+    secret_env_var: NOTIFY_WEBHOOK_SECRET
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

@@ -1,0 +1,31 @@
+project:
+  name: BuiltinInviteAsync
+  version: "1.0.0"
+  description: Invite flow in an async-mode generated project
+
+database:
+  type: sqlite
+  database_name: builtin_invite_async.db
+  async_mode: true
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+  invite:
+    enabled: true
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

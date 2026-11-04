@@ -186,11 +186,14 @@ def test_set_user_roles_rejects_unknown_role(tmp_path):
     roles_start = service_src.index("def set_user_roles(")
     roles_end = service_src.index("\n    def deactivate_user(")
     roles_src = service_src[roles_start:roles_end]
-    assert "ValueError" in roles_src
+    assert "self._check_roles(roles)" in roles_src
+    check_start = service_src.index("def _check_roles(")
+    check_src = service_src[check_start : check_start + 400]
+    assert "ValueError" in check_src
     assert (
-        "rbac_roles" not in roles_src
+        "rbac_roles" not in check_src
     )  # the ALLOWED roles list is baked in at render time, not read from a runtime attribute
-    assert '["admin", "customer"]' in roles_src or "'admin', 'customer'" in roles_src.replace('"', "'")
+    assert '["admin", "customer"]' in check_src or "'admin', 'customer'" in check_src.replace('"', "'")
 
 
 def test_email_verification_blocks_login_until_verified(tmp_path):

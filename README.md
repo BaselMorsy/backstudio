@@ -82,6 +82,18 @@ uv run mypy                  # type check
 uv run pytest app/tests --cov --cov-fail-under=90
 ```
 
+### Using BackStudio from Claude Code agents
+
+The repo ships an agent skill, [`.claude/skills/using-backstudio/SKILL.md`](.claude/skills/using-backstudio/SKILL.md),
+that teaches Claude Code how to write ERD files, pick auth/RBAC/RLS options, and avoid the common
+validation mistakes. It is picked up automatically for any agent working inside this repo. To make it
+available to your agents in every project, copy it to your user skills folder:
+
+```bash
+mkdir -p ~/.claude/skills/using-backstudio
+cp .claude/skills/using-backstudio/SKILL.md ~/.claude/skills/using-backstudio/
+```
+
 ### A minimal ERD
 
 Save this as `blog.yml`:

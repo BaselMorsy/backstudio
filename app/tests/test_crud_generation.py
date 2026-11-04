@@ -185,6 +185,7 @@ def test_many_to_many_response_validator_extracts_ids_from_orm_relationship(tmp_
     codebase_dir = generator.generate_project(state, force=True)
 
     import importlib.util
+
     spec = importlib.util.spec_from_file_location(
         "generated_m2m_schemas", codebase_dir / "modules" / "content" / "schemas.py"
     )
@@ -265,7 +266,7 @@ def test_owned_and_many_to_many_relationships_compose_on_the_same_entity(tmp_pat
     ast.parse(schemas_src)
     py_compile.compile(str(schemas_file), doraise=True)
 
-    response_src = schemas_src[schemas_src.index("class PostResponse(BaseModel):"):]
+    response_src = schemas_src[schemas_src.index("class PostResponse(BaseModel):") :]
     assert "author_id: Optional[int] = None" in response_src  # owned FK
     assert "tag_ids: List[int] = []" in response_src  # many-to-many id list
     assert 'data.tag_ids = [item.id for item in getattr(data, "tags", [])]' in response_src
@@ -392,6 +393,7 @@ def test_service_create_and_update_actually_reject_bad_fk_at_runtime(tmp_path, m
         service = catalog_service.get_catalog_service()
 
         import pytest
+
         with pytest.raises(ValueError):
             service.create_product(db, {"name": "Widget", "price": 9.99, "sku": "W1", "category_id": 999})
 

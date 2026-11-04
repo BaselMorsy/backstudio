@@ -39,6 +39,7 @@ def _require_env(var_name: str) -> str:
     return value
 
 
+{% if project.security_config.jwt_is_asymmetric %}
 def _require_env_file(var_name: str) -> str:
     """Read a required env var naming a file path, and return that file's text.
 
@@ -54,6 +55,7 @@ def _require_env_file(var_name: str) -> str:
             f"Could not read the file at '{path}' (from environment variable "
             f"'{var_name}'): {exc}. Set the env var to a path to a real PEM key file."
         ) from exc
+{% endif %}
 {% endif %}
 {% if project.security_config and project.security_config.auth_strategy == 'jwt' and project.auth_mode == 'builtin' and project.security_config.jwt_is_asymmetric %}
 

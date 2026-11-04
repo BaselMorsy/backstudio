@@ -31,7 +31,9 @@ def test_external_auth_module_has_only_service_py(tmp_path):
     assert "class Principal" in service_src
     assert "def get_current_user" in service_src
 
-    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -66,7 +68,9 @@ def test_generation_jwks_external_auth_unchanged(tmp_path):
     assert "_fetch_jwks" in service_src
 
 
-def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_secret(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_secret(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     codebase_dir = _generate_shared_secret(tmp_path)
     monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
@@ -90,7 +94,9 @@ def test_generated_shared_secret_verifier_accepts_token_signed_with_matching_sec
             assert resp.status_code == 200, resp.text
 
 
-def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     codebase_dir = _generate_shared_secret(tmp_path)
     monkeypatch.setenv("SHARED_SECRET", "test-only-shared-secret")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
@@ -116,7 +122,9 @@ def test_generated_shared_secret_verifier_rejects_token_signed_with_wrong_secret
             assert resp.status_code == 401, resp.text
 
 
-def test_generated_shared_secret_verifier_rejects_an_asymmetrically_signed_token(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_shared_secret_verifier_rejects_an_asymmetrically_signed_token(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Final review I4 / Review Focus #4's second half: a token signed with an asymmetric
     algorithm sent to a shared_secret verifier (which only ever decodes with HS256/384/512)
     must be a clean 401, not an unhandled exception.
@@ -210,8 +218,8 @@ def test_generation_async_project_with_webhook_emits_async_notify(tmp_path):
 
 
 def _rsa_keypair_and_jwk():
-    from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
 
     priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pub = priv.public_key()
@@ -226,15 +234,28 @@ def _rsa_keypair_and_jwk():
         b = n.to_bytes((n.bit_length() + 7) // 8, "big")
         return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
-    jwk_dict = {"kty": "RSA", "use": "sig", "kid": "key1", "alg": "RS256", "n": b64url_uint(numbers.n), "e": b64url_uint(numbers.e)}
+    jwk_dict = {
+        "kty": "RSA",
+        "use": "sig",
+        "kid": "key1",
+        "alg": "RS256",
+        "n": b64url_uint(numbers.n),
+        "e": b64url_uint(numbers.e),
+    }
     return priv_pem, jwk_dict
 
 
 def _make_token(priv_pem, kid="key1", **claim_overrides):
     from jose import jwt
 
-    claims = {"sub": "user-1", "roles": ["admin"], "agency_id": "11111111-1111-1111-1111-111111111111",
-              "iss": "authservice", "aud": "jwt-claim-owner-match", "exp": int(time.time()) + 3600}
+    claims = {
+        "sub": "user-1",
+        "roles": ["admin"],
+        "agency_id": "11111111-1111-1111-1111-111111111111",
+        "iss": "authservice",
+        "aud": "jwt-claim-owner-match",
+        "exp": int(time.time()) + 3600,
+    }
     claims.update(claim_overrides)
     return jwt.encode(claims, priv_pem, algorithm="RS256", headers={"kid": kid})
 
@@ -257,7 +278,9 @@ def test_jwt_claim_rls_route_bodies_render_and_byte_compile(tmp_path):
     # create: unconditional claim stamp, no bypass branch, 403 on a missing claim -
     # mirrors auth_user's create exactly (see the comment in the template).
     assert '_claim_value = current_user.claims.get("agency_id")' in routes_src
-    assert routes_src.count('_claim_value = current_user.claims.get("agency_id")') >= 4  # create/list/read/update/delete
+    assert (
+        routes_src.count('_claim_value = current_user.claims.get("agency_id")') >= 4
+    )  # create/list/read/update/delete
     assert "status.HTTP_403_FORBIDDEN" in routes_src
     assert "Missing required claim: agency_id" in routes_src
 
@@ -267,10 +290,12 @@ def test_jwt_claim_rls_route_bodies_render_and_byte_compile(tmp_path):
     assert 'current_user: Principal = Depends(require_roles("admin"))' in routes_src
     # ... and NOT also duplicated as a decorator-level dependency for that same route.
     get_route_start = routes_src.index("def get_project_route")
-    get_route_decorator = routes_src[routes_src.rindex("@router.get", 0, get_route_start):get_route_start]
+    get_route_decorator = routes_src[routes_src.rindex("@router.get", 0, get_route_start) : get_route_start]
     assert "dependencies=" not in get_route_decorator
 
-    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -283,6 +308,7 @@ def test_typed_jwt_claim_rejects_wrong_json_types_and_malformed_strings(tmp_path
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         from fastapi import HTTPException
 
         routes_module = importlib.import_module("modules.projects.routes")
@@ -298,7 +324,10 @@ def test_typed_jwt_claim_rejects_wrong_json_types_and_malformed_strings(tmp_path
                     assert exc.status_code == 403
 
         # UUID: only a real UUID string is accepted.
-        assert str(claim("11111111-1111-1111-1111-111111111111", "UUID", "agency_id")) == "11111111-1111-1111-1111-111111111111"
+        assert (
+            str(claim("11111111-1111-1111-1111-111111111111", "UUID", "agency_id"))
+            == "11111111-1111-1111-1111-111111111111"
+        )
         for bad in ("not-a-uuid", 12345):
             try:
                 claim(bad, "UUID", "agency_id")
@@ -358,8 +387,9 @@ def test_get_current_user_rejects_every_failure_mode(tmp_path, monkeypatch, isol
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
-        import importlib
         import asyncio
+        import importlib
+
         from fastapi import HTTPException
 
         service_module = importlib.import_module("modules.auth.service")
@@ -412,8 +442,9 @@ def test_jwks_refetch_is_throttled_within_the_minimum_interval(tmp_path, monkeyp
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
-        import importlib
         import asyncio
+        import importlib
+
         from fastapi import HTTPException
 
         service_module = importlib.import_module("modules.auth.service")
@@ -459,8 +490,9 @@ def test_jwks_fetch_failure_is_503_not_401_or_a_crash(tmp_path, monkeypatch, iso
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'db.db').as_posix()}")
 
     with _GeneratedProjectImporter(codebase_dir):
-        import importlib
         import asyncio
+        import importlib
+
         import httpx
         from fastapi import HTTPException
 
@@ -484,8 +516,9 @@ def test_jwks_fetch_failure_is_503_not_401_or_a_crash(tmp_path, monkeypatch, iso
     codebase_dir2 = _generate(tmp_path / "b")
     monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
     with _GeneratedProjectImporter(codebase_dir2):
-        import importlib
         import asyncio
+        import importlib
+
         from fastapi import HTTPException
 
         service_module = importlib.import_module("modules.auth.service")
@@ -501,7 +534,9 @@ def _make_token_without_agency(priv_pem, sub, roles, aud):
 
     return jwt.encode(
         {"sub": sub, "roles": roles, "iss": "authservice", "aud": aud, "exp": int(time.time()) + 3600},
-        priv_pem, algorithm="RS256", headers={"kid": "key1"},
+        priv_pem,
+        algorithm="RS256",
+        headers={"kid": "key1"},
     )
 
 
@@ -532,12 +567,16 @@ def test_jwt_claim_rls_end_to_end_cross_tenant_isolation_and_bypass(tmp_path, mo
         server_module = importlib.import_module("server")
         database_base = importlib.import_module("database.base")
         database_models = importlib.import_module("database.models")
-        from fastapi.testclient import TestClient
-
         import uuid
 
-        member_a_token = _make_token(priv_pem, sub="member-a", roles=["member"], agency_id=agency_a_ref, aud="dana-finance")
-        member_b_token = _make_token(priv_pem, sub="member-b", roles=["member"], agency_id=agency_b_ref, aud="dana-finance")
+        from fastapi.testclient import TestClient
+
+        member_a_token = _make_token(
+            priv_pem, sub="member-a", roles=["member"], agency_id=agency_a_ref, aud="dana-finance"
+        )
+        member_b_token = _make_token(
+            priv_pem, sub="member-b", roles=["member"], agency_id=agency_b_ref, aud="dana-finance"
+        )
         admin_token = _make_token(priv_pem, sub="admin-1", roles=["admin"], agency_id=agency_a_ref, aud="dana-finance")
         no_claim_token = _make_token_without_agency(priv_pem, "member-c", ["member"], "dana-finance")
 
@@ -576,15 +615,23 @@ def test_jwt_claim_rls_end_to_end_cross_tenant_isolation_and_bypass(tmp_path, mo
             # create always stamps the caller's own claim, bypass or not
             created_by_admin = client.post("/projects", json={"title": "admin's own"}, headers=auth(admin_token))
             assert created_by_admin.status_code == 201
-            assert client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_b_token)).status_code == 404
-            assert client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_a_token)).status_code == 200
+            assert (
+                client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_b_token)).status_code
+                == 404
+            )
+            assert (
+                client.get(f"/projects/{created_by_admin.json()['id']}", headers=auth(member_a_token)).status_code
+                == 200
+            )
 
             # missing claim, non-bypass: 403 on list/read/update/delete and on create
             assert client.get("/projects", headers=auth(no_claim_token)).status_code == 403
             assert client.post("/projects", json={"title": "x"}, headers=auth(no_claim_token)).status_code == 403
 
             # cascade-owned Task inherits the same tenant scoping through one more join hop
-            task_created = client.post("/tasks", json={"label": "t1", "project_id": project_a_id}, headers=auth(member_a_token))
+            task_created = client.post(
+                "/tasks", json={"label": "t1", "project_id": project_a_id}, headers=auth(member_a_token)
+            )
             assert task_created.status_code == 201, task_created.text
             task_id = task_created.json()["id"]
             assert client.get(f"/tasks/{task_id}", headers=auth(member_b_token)).status_code == 404

@@ -20,7 +20,7 @@ def normalize_dict(data: Dict[str, Any]) -> str:
     Returns:
         Canonical JSON string representation
     """
-    return json.dumps(data, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 def compute_checksum(data: Dict[str, Any]) -> str:
@@ -43,13 +43,13 @@ def compute_checksum(data: Dict[str, Any]) -> str:
         64
     """
     # Create a copy without the checksum field to avoid circular dependency
-    data_copy = {k: v for k, v in data.items() if k != 'checksum'}
+    data_copy = {k: v for k, v in data.items() if k != "checksum"}
 
     # Normalize to canonical JSON string
     canonical_json = normalize_dict(data_copy)
 
     # Compute SHA256 hash
-    hash_object = hashlib.sha256(canonical_json.encode('utf-8'))
+    hash_object = hashlib.sha256(canonical_json.encode("utf-8"))
     return hash_object.hexdigest()
 
 

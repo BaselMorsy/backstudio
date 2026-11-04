@@ -15,6 +15,7 @@ These tests generate a real project onto disk, actually run it (import the
 FastAPI app and drive it with TestClient; actually invoke the `alembic`
 CLI), and would have caught both regressions.
 """
+
 import ast
 import subprocess
 import sys
@@ -243,9 +244,7 @@ def test_module_crud_round_trip_against_real_generated_app(tmp_path, monkeypatch
             admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
 
             # --- create ---
-            create_resp = client.post(
-                "/categories", json={"name": "Books"}, headers=admin_headers
-            )
+            create_resp = client.post("/categories", json={"name": "Books"}, headers=admin_headers)
             assert create_resp.status_code == 201, create_resp.text
             category = create_resp.json()
             assert category["name"] == "Books"
@@ -293,19 +292,13 @@ def test_module_crud_round_trip_against_real_generated_app(tmp_path, monkeypatch
                 json={"email": "roleless@example.com", "password": "supersecret123"},
             )
             assert second_login_resp.status_code == 200, second_login_resp.text
-            second_headers = {
-                "Authorization": f"Bearer {second_login_resp.json()['access_token']}"
-            }
+            second_headers = {"Authorization": f"Bearer {second_login_resp.json()['access_token']}"}
 
-            forbidden_resp = client.post(
-                "/categories", json={"name": "Should not be allowed"}, headers=second_headers
-            )
+            forbidden_resp = client.post("/categories", json={"name": "Should not be allowed"}, headers=second_headers)
             assert forbidden_resp.status_code == 403, forbidden_resp.text
 
 
-def test_renamed_auth_module_serves_over_real_http_and_old_auth_path_is_gone(
-    tmp_path, monkeypatch, isolated_sys_path
-):
+def test_renamed_auth_module_serves_over_real_http_and_old_auth_path_is_gone(tmp_path, monkeypatch, isolated_sys_path):
     """Generate a project whose auth service is renamed via a `services:` entry
     ({name: identity, entities: [User]}), stand up the real app, and confirm
     the 3-way name sync between rbac.py's import, server.py's route prefix,
@@ -350,22 +343,24 @@ def test_renamed_auth_module_serves_over_real_http_and_old_auth_path_is_gone(
             assert login_resp.status_code == 200, login_resp.text
             access_token = login_resp.json()["access_token"]
 
-            me_resp = client.get(
-                "/identity/me", headers={"Authorization": f"Bearer {access_token}"}
-            )
+            me_resp = client.get("/identity/me", headers={"Authorization": f"Bearer {access_token}"})
             assert me_resp.status_code == 200, me_resp.text
             assert me_resp.json()["email"] == "alice@example.com"
 
             # The old default /auth/* paths must not exist at all.
-            assert client.post(
-                "/auth/register", json={"email": "bob@example.com", "password": "supersecret123"}
-            ).status_code == 404
-            assert client.post(
-                "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
-            ).status_code == 404
-            assert client.get(
-                "/auth/me", headers={"Authorization": f"Bearer {access_token}"}
-            ).status_code == 404
+            assert (
+                client.post(
+                    "/auth/register", json={"email": "bob@example.com", "password": "supersecret123"}
+                ).status_code
+                == 404
+            )
+            assert (
+                client.post(
+                    "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
+                ).status_code
+                == 404
+            )
+            assert client.get("/auth/me", headers={"Authorization": f"Bearer {access_token}"}).status_code == 404
 
 
 def test_service_prefix_mounts_routes_under_prefix_and_override_and_unprefixed_sibling_still_work(
@@ -498,9 +493,7 @@ def test_owned_relationship_fk_round_trip_against_real_generated_app(tmp_path, m
             assert register_resp.status_code == 201, register_resp.text
             assert set(register_resp.json()["roles"]) == {"admin", "editor", "viewer"}
 
-            login_resp = client.post(
-                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
-            )
+            login_resp = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert login_resp.status_code == 200, login_resp.text
             admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
 
@@ -581,11 +574,7 @@ def test_many_to_many_id_list_round_trip_against_real_generated_app(tmp_path, mo
             db = database_base.SessionLocal()
             try:
                 post_obj = db.query(database_models.Post).filter(database_models.Post.id == post_id).first()
-                tag_objs = (
-                    db.query(database_models.Tag)
-                    .filter(database_models.Tag.id.in_([tag1_id, tag2_id]))
-                    .all()
-                )
+                tag_objs = db.query(database_models.Tag).filter(database_models.Tag.id.in_([tag1_id, tag2_id])).all()
                 post_obj.tags.extend(tag_objs)
                 db.commit()
             finally:
@@ -624,8 +613,12 @@ def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkey
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap: first user gets every role
             admin_id = admin_resp.json()["id"]
 
@@ -636,6 +629,7 @@ def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkey
             # non-bypass RLS path rather than being blocked by RBAC entirely
             db_path_for_grant = db_path
             import sqlite3
+
             conn = sqlite3.connect(str(db_path_for_grant))
             conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
             conn.commit()
@@ -669,11 +663,17 @@ def test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own(tmp_path, monkey
 
             # customer's own order is fully accessible
             assert client.get(f"/orders/{order_cust['id']}", headers=cust_headers).status_code == 200
-            assert client.put(f"/orders/{order_cust['id']}", json={"status": "shipped"}, headers=cust_headers).status_code == 200
+            assert (
+                client.put(f"/orders/{order_cust['id']}", json={"status": "shipped"}, headers=cust_headers).status_code
+                == 200
+            )
 
             # customer cannot see, update, or delete admin's order - plain 404, not 403
             assert client.get(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
-            assert client.put(f"/orders/{order_admin['id']}", json={"status": "shipped"}, headers=cust_headers).status_code == 404
+            assert (
+                client.put(f"/orders/{order_admin['id']}", json={"status": "shipped"}, headers=cust_headers).status_code
+                == 404
+            )
             assert client.delete(f"/orders/{order_admin['id']}", headers=cust_headers).status_code == 404
 
             # admin (bypass) CAN touch customer's order
@@ -706,7 +706,9 @@ def test_rls_header_identity_isolates_tenants_and_422s_on_missing_header(tmp_pat
             missing_header_resp = client.get("/orders")
             assert missing_header_resp.status_code == 422
 
-            order1 = client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant1["id"])}).json()
+            order1 = client.post(
+                "/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant1["id"])}
+            ).json()
             client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant2["id"])})
 
             list_t1 = client.get("/orders", headers={"X-Tenant-Id": str(tenant1["id"])}).json()
@@ -745,16 +747,12 @@ def test_rls_header_create_rejects_an_owner_id_that_does_not_exist(tmp_path, mon
             tenant = client.post("/tenants", json={"name": "Acme"}).json()
 
             # a real tenant id still works, unchanged
-            ok_resp = client.post(
-                "/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant["id"])}
-            )
+            ok_resp = client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": str(tenant["id"])})
             assert ok_resp.status_code == 201, ok_resp.text
             assert ok_resp.json()["tenant_id"] == tenant["id"]
 
             # a tenant id that does not exist is rejected exactly like any other bad FK
-            bad_resp = client.post(
-                "/orders", json={"status": "pending"}, headers={"X-Tenant-Id": "999999"}
-            )
+            bad_resp = client.post("/orders", json={"status": "pending"}, headers={"X-Tenant-Id": "999999"})
             assert bad_resp.status_code == 400, bad_resp.text
             assert "999999" in bad_resp.json()["detail"]
 
@@ -795,9 +793,7 @@ def test_rls_header_with_rbac_gates_action_but_header_still_governs_ownership(tm
             assert register_resp.status_code == 201, register_resp.text
             assert set(register_resp.json()["roles"]) == {"admin"}
 
-            login_resp = client.post(
-                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
-            )
+            login_resp = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert login_resp.status_code == 200, login_resp.text
             admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
 
@@ -817,9 +813,7 @@ def test_rls_header_with_rbac_gates_action_but_header_still_governs_ownership(tm
 
             # same admin JWT, tenant1's header -> only tenant1's order (not both, even though
             # the same RBAC-authorized user created both rows)
-            list_t1 = client.get(
-                "/orders", headers={**admin_headers, "X-Tenant-Id": str(tenant1["id"])}
-            ).json()
+            list_t1 = client.get("/orders", headers={**admin_headers, "X-Tenant-Id": str(tenant1["id"])}).json()
             assert [o["id"] for o in list_t1] == [order1["id"]]
 
             # same admin JWT, tenant2's header -> cannot see tenant1's order: 404, not 403
@@ -891,9 +885,7 @@ def test_rls_header_bypass_roles_skip_header_except_on_create(tmp_path, monkeypa
             # non-bypass "customer" role directly via the DB (no role-grant endpoint
             # exists for self-service - same technique used elsewhere in this file, e.g.
             # test_rls_bypass_role_sees_all_rows_non_bypass_sees_only_own).
-            cust_resp = client.post(
-                "/auth/register", json={"email": "cust@example.com", "password": "supersecret123"}
-            )
+            cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
             assert cust_resp.json()["roles"] == []
             import sqlite3
 
@@ -941,9 +933,7 @@ def test_rls_header_bypass_roles_skip_header_except_on_create(tmp_path, monkeypa
             get2 = client.get(f"/orders/{order2['id']}", headers=admin_headers)
             assert get2.status_code == 200, get2.text
 
-            put_resp = client.put(
-                f"/orders/{order1['id']}", json={"status": "shipped"}, headers=admin_headers
-            )
+            put_resp = client.put(f"/orders/{order1['id']}", json={"status": "shipped"}, headers=admin_headers)
             assert put_resp.status_code == 200, put_resp.text
             assert put_resp.json()["status"] == "shipped"
 
@@ -954,9 +944,7 @@ def test_rls_header_bypass_roles_skip_header_except_on_create(tmp_path, monkeypa
 
             # --- (c) bypass-role caller's create WITHOUT the header still 422s: the one
             # place bypass_roles deliberately does not apply ---
-            create_no_header_resp = client.post(
-                "/orders", json={"status": "pending"}, headers=admin_headers
-            )
+            create_no_header_resp = client.post("/orders", json={"status": "pending"}, headers=admin_headers)
             assert create_no_header_resp.status_code == 422, create_no_header_resp.text
 
             # --- (d) bypass-role caller's create WITH the header succeeds and stamps
@@ -994,15 +982,11 @@ def test_cross_module_owned_relationship_validates_against_shared_repo(tmp_path,
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            register_resp = client.post(
-                "/auth/register", json={"email": "a@example.com", "password": "supersecret123"}
-            )
+            register_resp = client.post("/auth/register", json={"email": "a@example.com", "password": "supersecret123"})
             assert register_resp.status_code == 201, register_resp.text
             user_id = register_resp.json()["id"]
 
-            login_resp = client.post(
-                "/auth/login", json={"email": "a@example.com", "password": "supersecret123"}
-            )
+            login_resp = client.post("/auth/login", json={"email": "a@example.com", "password": "supersecret123"})
             assert login_resp.status_code == 200, login_resp.text
             admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
 
@@ -1146,9 +1130,7 @@ def test_async_mode_full_stack_round_trip_against_real_generated_app(tmp_path, m
             assert register_resp.status_code == 201, register_resp.text
             assert set(register_resp.json()["roles"]) == {"admin", "customer"}
 
-            login_resp = client.post(
-                "/auth/login", json={"email": "admin@example.com", "password": "supersecret123"}
-            )
+            login_resp = client.post("/auth/login", json={"email": "admin@example.com", "password": "supersecret123"})
             assert login_resp.status_code == 200, login_resp.text
             admin_headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
 
@@ -1184,9 +1166,7 @@ def test_async_mode_full_stack_round_trip_against_real_generated_app(tmp_path, m
             assert [p["name"] for p in filtered_resp.json()] == ["Thing"]
 
             # update
-            update_resp = client.put(
-                f"/products/{product_id}", json={"name": "Renamed"}, headers=admin_headers
-            )
+            update_resp = client.put(f"/products/{product_id}", json={"name": "Renamed"}, headers=admin_headers)
             assert update_resp.status_code == 200, update_resp.text
             assert update_resp.json()["name"] == "Renamed"
 
@@ -1221,9 +1201,7 @@ def test_async_mode_full_stack_round_trip_against_real_generated_app(tmp_path, m
                 "/auth/login", json={"email": "roleless@example.com", "password": "supersecret123"}
             )
             second_headers = {"Authorization": f"Bearer {second_login_resp.json()['access_token']}"}
-            forbidden_resp = client.post(
-                "/categories", json={"name": "Should not be allowed"}, headers=second_headers
-            )
+            forbidden_resp = client.post("/categories", json={"name": "Should not be allowed"}, headers=second_headers)
             assert forbidden_resp.status_code == 403, forbidden_resp.text
 
     # The `with TestClient(...)` block above has already exited by this point, which
@@ -1265,9 +1243,9 @@ def test_async_many_to_many_id_list_round_trip_against_real_generated_app(tmp_pa
         server_module = importlib.import_module("server")
         database_base = importlib.import_module("database.base")
         database_models = importlib.import_module("database.models")
+        from fastapi.testclient import TestClient
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
-        from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             # --- the critical assertions: these 500'd before the fix ---
@@ -1356,11 +1334,14 @@ def test_rls_create_schema_silently_ignores_client_supplied_owner_field(tmp_path
             # only so the "real" owner below isn't the first user, and discarded.
             client.post("/auth/register", json={"email": "bootstrap@example.com", "password": "supersecret123"})
 
-            register_resp = client.post("/auth/register", json={"email": "real@example.com", "password": "supersecret123"})
+            register_resp = client.post(
+                "/auth/register", json={"email": "real@example.com", "password": "supersecret123"}
+            )
             assert register_resp.json()["roles"] == []
             real_owner_id = register_resp.json()["id"]
 
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'real@example.com'")
             conn.commit()
@@ -1402,21 +1383,28 @@ def test_async_mode_rls_full_stack_round_trip_against_real_generated_app(tmp_pat
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
             assert admin_resp.status_code == 201, admin_resp.text
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap
             admin_id = admin_resp.json()["id"]
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
             assert cust_resp.json()["roles"] == []
             cust_id = cust_resp.json()["id"]
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
             conn.commit()
             conn.close()
-            cust_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'cust@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            cust_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'cust@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             # root ownership: each user's own order, async create injects owner correctly
             order_admin = client.post("/orders", json={"status": "pending"}, headers=admin_headers).json()
@@ -1477,13 +1465,18 @@ def test_admin_user_management_403_then_200_round_trip(tmp_path, monkeypatch, is
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             cust_resp = client.post("/auth/register", json={"email": "cust@example.com", "password": "supersecret123"})
             assert cust_resp.json()["roles"] == []
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.execute("UPDATE users SET roles = '[\"customer\"]' WHERE email = 'cust@example.com'")
             conn.commit()
@@ -1510,7 +1503,10 @@ def test_admin_user_management_403_then_200_round_trip(tmp_path, monkeypatch, is
             # this test with /auth to match real generated behavior.
             assert client.get("/auth/users", headers=cust_headers).status_code == 403
             assert client.get(f"/auth/users/{cust_id}", headers=cust_headers).status_code == 403
-            assert client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["admin"]}, headers=cust_headers).status_code == 403
+            assert (
+                client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["admin"]}, headers=cust_headers).status_code
+                == 403
+            )
             assert client.post(f"/auth/users/{cust_id}/deactivate", headers=cust_headers).status_code == 403
 
             # admin succeeds on all of them
@@ -1522,11 +1518,15 @@ def test_admin_user_management_403_then_200_round_trip(tmp_path, monkeypatch, is
             assert get_resp.status_code == 200
             assert get_resp.json()["id"] == cust_id
 
-            roles_resp = client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["admin", "customer"]}, headers=admin_headers)
+            roles_resp = client.put(
+                f"/auth/users/{cust_id}/roles", json={"roles": ["admin", "customer"]}, headers=admin_headers
+            )
             assert roles_resp.status_code == 200
             assert set(roles_resp.json()["roles"]) == {"admin", "customer"}
 
-            bad_roles_resp = client.put(f"/auth/users/{cust_id}/roles", json={"roles": ["not_a_real_role"]}, headers=admin_headers)
+            bad_roles_resp = client.put(
+                f"/auth/users/{cust_id}/roles", json={"roles": ["not_a_real_role"]}, headers=admin_headers
+            )
             assert bad_roles_resp.status_code == 400
 
             deact_resp = client.post(f"/auth/users/{cust_id}/deactivate", headers=admin_headers)
@@ -1568,15 +1568,23 @@ def test_deactivated_user_access_and_refresh_tokens_are_rejected(tmp_path, monke
 
         with TestClient(server_module.app) as client:
             # bootstrap admin (first user registered gets every declared role)
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             # target user whose tokens we'll capture and then invalidate
-            target_resp = client.post("/auth/register", json={"email": "target@example.com", "password": "supersecret123"})
+            target_resp = client.post(
+                "/auth/register", json={"email": "target@example.com", "password": "supersecret123"}
+            )
             target_id = target_resp.json()["id"]
 
-            target_login = client.post("/auth/login", json={"email": "target@example.com", "password": "supersecret123"})
+            target_login = client.post(
+                "/auth/login", json={"email": "target@example.com", "password": "supersecret123"}
+            )
             assert target_login.status_code == 200, target_login.text
             old_access_token = target_login.json()["access_token"]
             old_refresh_token = target_login.json()["refresh_token"]
@@ -1663,7 +1671,9 @@ def test_full_email_verification_flow_over_http(tmp_path, monkeypatch, isolated_
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            register_resp = client.post("/auth/register", json={"email": "eve@example.com", "password": "supersecret123"})
+            register_resp = client.post(
+                "/auth/register", json={"email": "eve@example.com", "password": "supersecret123"}
+            )
             assert register_resp.status_code == 201, register_resp.text
 
             login_resp = client.post("/auth/login", json={"email": "eve@example.com", "password": "supersecret123"})
@@ -1703,7 +1713,9 @@ def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
             assert set(admin_resp.json()["roles"]) == {"admin", "customer"}  # bootstrap gets every role
             # bootstrap (first-user) admin is auto-approved, symmetric with the existing
             # roles bootstrap - admin_approval mode would otherwise ship unbootstrappable,
@@ -1715,12 +1727,16 @@ def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_
             assert admin_login.status_code == 200, admin_login.text
             admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
-            pending_resp = client.post("/auth/register", json={"email": "pending@example.com", "password": "supersecret123"})
+            pending_resp = client.post(
+                "/auth/register", json={"email": "pending@example.com", "password": "supersecret123"}
+            )
             assert pending_resp.status_code == 201, pending_resp.text
             pending_id = pending_resp.json()["id"]
             assert pending_resp.json()["is_approved"] is False
 
-            pending_login = client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"})
+            pending_login = client.post(
+                "/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}
+            )
             assert pending_login.status_code == 401, pending_login.text
 
             # DEVIATION FROM BRIEF (documented per the task-6 precedent in
@@ -1735,7 +1751,9 @@ def test_full_admin_approval_flow_over_http(tmp_path, monkeypatch, isolated_sys_
             assert approve_resp.status_code == 200, approve_resp.text
             assert approve_resp.json()["is_approved"] is True
 
-            pending_login2 = client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"})
+            pending_login2 = client.post(
+                "/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}
+            )
             assert pending_login2.status_code == 200, pending_login2.text
 
 
@@ -1809,6 +1827,7 @@ def test_login_rejects_user_with_no_password_hash_set(tmp_path, monkeypatch, iso
             client.post("/auth/register", json={"email": "pending@example.com", "password": "whatever123"})
 
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.execute("UPDATE users SET password_hash = NULL WHERE email = 'pending@example.com'")
             conn.commit()
@@ -1819,7 +1838,9 @@ def test_login_rejects_user_with_no_password_hash_set(tmp_path, monkeypatch, iso
             assert "invite" in response.json()["detail"].lower()
 
 
-def test_forgot_password_prints_structured_notify_payload_not_free_text(tmp_path, monkeypatch, isolated_sys_path, capfd):
+def test_forgot_password_prints_structured_notify_payload_not_free_text(
+    tmp_path, monkeypatch, isolated_sys_path, capfd
+):
     erd = load_erd(f"{FIXTURES}/builtin_invite.yml")  # auth.webhook unset -> print-stub path
     state = translate(erd)
 
@@ -1857,11 +1878,15 @@ def _assert_printed_expiry_matches_token_exp(printed: str, event: str) -> None:
     line = next(ln for ln in printed.splitlines() if f"event={event}" in ln)
     token = re.search(r"token=(\S+)", line).group(1)
     expires_at = datetime.fromisoformat(re.search(r"expires_at=(\S+)", line).group(1))
-    token_exp = datetime.fromtimestamp(jose_jwt.get_unverified_claims(token)["exp"], tz=timezone.utc).replace(tzinfo=None)
+    token_exp = datetime.fromtimestamp(jose_jwt.get_unverified_claims(token)["exp"], tz=timezone.utc).replace(
+        tzinfo=None
+    )
     assert expires_at == token_exp
 
 
-def test_notify_expires_at_equals_the_tokens_own_exp_for_invite_and_password_reset(tmp_path, monkeypatch, isolated_sys_path, capfd):
+def test_notify_expires_at_equals_the_tokens_own_exp_for_invite_and_password_reset(
+    tmp_path, monkeypatch, isolated_sys_path, capfd
+):
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "expiry_exact_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
@@ -1871,7 +1896,9 @@ def test_notify_expires_at_equals_the_tokens_own_exp_for_invite_and_password_res
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
@@ -1884,7 +1911,9 @@ def test_notify_expires_at_equals_the_tokens_own_exp_for_invite_and_password_res
             _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "password_reset")
 
 
-def test_notify_expires_at_equals_the_tokens_own_exp_for_email_verification(tmp_path, monkeypatch, isolated_sys_path, capfd):
+def test_notify_expires_at_equals_the_tokens_own_exp_for_email_verification(
+    tmp_path, monkeypatch, isolated_sys_path, capfd
+):
     erd = load_erd(f"{FIXTURES}/builtin_invite_email_verification.yml")
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(translate(erd), force=True)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'expiry_verify_test.db').as_posix()}")
@@ -1930,14 +1959,19 @@ def test_invite_creates_user_with_role_and_no_password(tmp_path, monkeypatch, is
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_creates_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            response = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert response.status_code == 201, response.text
             body = response.json()
             assert body["roles"] == ["member"]
@@ -1948,15 +1982,20 @@ def test_invite_duplicate_pending_email_returns_400_pointing_at_resend(tmp_path,
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_duplicate_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
-            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            response = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert response.status_code == 400, response.text
             assert "resend" in response.json()["detail"].lower()
 
@@ -1965,14 +2004,19 @@ def test_invite_requires_at_least_one_role(tmp_path, monkeypatch, isolated_sys_p
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_empty_roles_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": []}, headers=admin_headers)
+            response = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": []}, headers=admin_headers
+            )
             assert response.status_code == 422, response.text
 
 
@@ -1981,12 +2025,15 @@ def test_accept_invite_sets_password_and_allows_login(tmp_path, monkeypatch, iso
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
         import re
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
@@ -2005,12 +2052,15 @@ def test_accept_invite_replayed_after_acceptance_returns_400(tmp_path, monkeypat
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
         import re
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
@@ -2027,12 +2077,15 @@ def test_resend_invite_for_unknown_email_returns_404(tmp_path, monkeypatch, isol
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_unknown_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             response = client.post("/auth/resend-invite", json={"email": "never@invited.com"}, headers=admin_headers)
             assert response.status_code == 404, response.text
@@ -2043,12 +2096,15 @@ def test_resend_invite_for_already_accepted_email_returns_400(tmp_path, monkeypa
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
         import re
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
@@ -2065,14 +2121,19 @@ def test_forgot_password_for_pending_invitee_returns_generic_200_not_500(tmp_pat
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "forgot_password_pending_invitee_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            client.post("/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers)
+            client.post(
+                "/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers
+            )
 
             response = client.post("/auth/forgot-password", json={"email": "pending@example.com"})
             assert response.status_code == 200, response.text
@@ -2083,14 +2144,19 @@ def test_resend_invite_for_pending_email_refires_notify(tmp_path, monkeypatch, i
     codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "invite_resend_pending_test.db")
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            client.post("/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers)
+            client.post(
+                "/auth/invite", json={"email": "pending@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             capfd.readouterr()
             response = client.post("/auth/resend-invite", json={"email": "pending@example.com"}, headers=admin_headers)
             assert response.status_code == 200, response.text
@@ -2098,7 +2164,9 @@ def test_resend_invite_for_pending_email_refires_notify(tmp_path, monkeypatch, i
             assert "event=invite" in captured.out
 
 
-def test_invited_user_under_email_verification_mode_is_not_double_gated(tmp_path, monkeypatch, isolated_sys_path, capfd):
+def test_invited_user_under_email_verification_mode_is_not_double_gated(
+    tmp_path, monkeypatch, isolated_sys_path, capfd
+):
     erd_dict_path = f"{FIXTURES}/builtin_invite_email_verification.yml"
     erd = load_erd(erd_dict_path)
     state = translate(erd)
@@ -2112,6 +2180,7 @@ def test_invited_user_under_email_verification_mode_is_not_double_gated(tmp_path
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
         import re
+
         server_module = importlib.import_module("server")
         from fastapi.testclient import TestClient
 
@@ -2119,7 +2188,9 @@ def test_invited_user_under_email_verification_mode_is_not_double_gated(tmp_path
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
             admin_verify_token = re.search(r"token=(\S+)", capfd.readouterr().out).group(1)
             client.post("/auth/verify-email", json={"token": admin_verify_token})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
@@ -2151,6 +2222,7 @@ def test_invite_webhook_delivery_success_reports_true(tmp_path, monkeypatch, iso
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         import httpx
 
         received = []
@@ -2169,9 +2241,13 @@ def test_invite_webhook_delivery_success_reports_true(tmp_path, monkeypatch, iso
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            response = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert response.status_code == 201, response.text
             assert response.json()["webhook_delivered"] is True
 
@@ -2199,6 +2275,7 @@ def test_invite_webhook_delivery_failure_reports_false_but_user_still_created(tm
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         import httpx
 
         original_post = httpx.Client.post
@@ -2215,9 +2292,13 @@ def test_invite_webhook_delivery_failure_reports_false_but_user_still_created(tm
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
-            response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            response = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert response.status_code == 201, response.text
             assert response.json()["webhook_delivered"] is False
 
@@ -2240,6 +2321,7 @@ def test_webhook_secret_configured_sends_authorization_header(tmp_path, monkeypa
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         import httpx
 
         received = []
@@ -2258,7 +2340,9 @@ def test_webhook_secret_configured_sends_authorization_header(tmp_path, monkeypa
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
 
         assert len(received) == 1
@@ -2280,6 +2364,7 @@ def test_resend_invite_reports_delivery_failure(tmp_path, monkeypatch, isolated_
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
+
         import httpx
 
         original_post = httpx.Client.post
@@ -2294,10 +2379,14 @@ def test_resend_invite_reports_delivery_failure(tmp_path, monkeypatch, isolated_
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             monkeypatch.setattr(httpx.Client, "post", flaky_post)
-            invite_resp = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            invite_resp = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert invite_resp.json()["webhook_delivered"] is False
 
             resend_resp = client.post("/auth/resend-invite", json={"email": "new@example.com"}, headers=admin_headers)
@@ -2320,8 +2409,9 @@ def test_notify_catches_non_http_error_and_returns_false_not_500(tmp_path, monke
 
     with _GeneratedProjectImporter(codebase_dir):
         import importlib
-        import httpx
         import logging
+
+        import httpx
 
         original_post = httpx.Client.post
 
@@ -2337,10 +2427,14 @@ def test_notify_catches_non_http_error_and_returns_false_not_500(tmp_path, monke
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
 
             with caplog.at_level(logging.WARNING):
-                response = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+                response = client.post(
+                    "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+                )
             assert response.status_code == 201, response.text
             assert response.json()["webhook_delivered"] is False
             assert any("notify" in rec.message.lower() for rec in caplog.records)
@@ -2366,10 +2460,14 @@ def test_async_mode_invite_flow_round_trip(tmp_path, monkeypatch, isolated_sys_p
 
         with TestClient(server_module.app) as client:
             client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
-            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            admin_headers = {
+                "Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"
+            }
             capfd.readouterr()
 
-            invite_resp = client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            invite_resp = client.post(
+                "/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers
+            )
             assert invite_resp.status_code == 201, invite_resp.text
             captured = capfd.readouterr()
             token = re.search(r"token=(\S+)", captured.out).group(1)
@@ -2406,7 +2504,9 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
         from fastapi.testclient import TestClient
 
         with TestClient(server_module.app) as client:
-            admin_resp = client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_resp = client.post(
+                "/auth/register", json={"email": "admin@example.com", "password": "supersecret123"}
+            )
             assert admin_resp.status_code == 201, admin_resp.text
             # bootstrap (first-user) admin is auto-approved, symmetric with the existing
             # roles bootstrap, so it can log in directly with no SQL workaround
@@ -2418,9 +2518,16 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
             admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
             # admin_approval flow
-            pending_resp = client.post("/auth/register", json={"email": "pending@example.com", "password": "supersecret123"})
+            pending_resp = client.post(
+                "/auth/register", json={"email": "pending@example.com", "password": "supersecret123"}
+            )
             pending_id = pending_resp.json()["id"]
-            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}).status_code == 401
+            assert (
+                client.post(
+                    "/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}
+                ).status_code
+                == 401
+            )
 
             # DEVIATION FROM BRIEF (documented per the Task-6/Task-7 precedent - see
             # test_admin_user_management_403_then_200_round_trip and
@@ -2435,7 +2542,12 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
             approve_resp = client.post(f"/auth/users/{pending_id}/approve", headers=admin_headers)
             assert approve_resp.status_code == 200, approve_resp.text
 
-            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}).status_code == 200
+            assert (
+                client.post(
+                    "/auth/login", json={"email": "pending@example.com", "password": "supersecret123"}
+                ).status_code
+                == 200
+            )
 
             # admin endpoints
             list_resp = client.get("/auth/users", headers=admin_headers)
@@ -2451,7 +2563,12 @@ def test_async_mode_auth_expansion_full_stack_round_trip(tmp_path, monkeypatch, 
             token = match.group(1)
             reset_resp = client.post("/auth/reset-password", json={"token": token, "new_password": "brandnewpass1"})
             assert reset_resp.status_code == 200, reset_resp.text
-            assert client.post("/auth/login", json={"email": "pending@example.com", "password": "brandnewpass1"}).status_code == 200
+            assert (
+                client.post(
+                    "/auth/login", json={"email": "pending@example.com", "password": "brandnewpass1"}
+                ).status_code
+                == 200
+            )
 
     # `with TestClient(...)` has already exited here, running the async lifespan
     # shutdown (await engine.dispose()) - reaching this line without a hang is
@@ -2514,19 +2631,15 @@ def test_free_text_project_fields_with_quotes_backslashes_and_unicode_generate_a
     tree = ast.parse(server_src)  # would raise SyntaxError before the fix
 
     title_line = next(l for l in server_src.splitlines() if l.strip().startswith("title="))
-    title_value = ast.literal_eval(title_line.strip()[len("title="):].rstrip(","))
+    title_value = ast.literal_eval(title_line.strip()[len("title=") :].rstrip(","))
     assert title_value == state["name"]
 
-    description_line = next(
-        l for l in server_src.splitlines() if l.strip().startswith("description=")
-    )
-    description_value = ast.literal_eval(
-        description_line.strip()[len("description="):].rstrip(",")
-    )
+    description_line = next(l for l in server_src.splitlines() if l.strip().startswith("description="))
+    description_value = ast.literal_eval(description_line.strip()[len("description=") :].rstrip(","))
     assert description_value == state["description"]
 
     name_field_line = next(l for l in server_src.splitlines() if l.strip().startswith('"name":'))
-    name_field_value = ast.literal_eval(name_field_line.strip()[len('"name":'):].rstrip(",").strip())
+    name_field_value = ast.literal_eval(name_field_line.strip()[len('"name":') :].rstrip(",").strip())
     assert name_field_value == state["name"]
 
     # Module docstring (the |replace('"', '\\"') fix): the raw name is still
@@ -2591,9 +2704,7 @@ def test_base_path_quote_stress_generates_and_byte_compiles_with_exact_path_roun
 
     # Sanity: the fixture actually carries the dangerous characters under test,
     # and translate() computed the expected base_path from it verbatim.
-    entity = next(
-        e for module in state["modules"] for e in module["entities"] if e["name"] == "Widget"
-    )
+    entity = next(e for module in state["modules"] for e in module["entities"] if e["name"] == "Widget")
     assert entity["base_path"] == '/we"ird\\path'
 
     generator = CodeGenerator(output_dir=str(tmp_path / "workspace"))
@@ -2653,9 +2764,7 @@ def test_header_name_quote_stress_generates_and_byte_compiles_with_alias_round_t
     ast.parse(routes_src)
 
     alias_line = next(l for l in routes_src.splitlines() if "alias=" in l)
-    alias_value = ast.literal_eval(
-        alias_line.strip().rsplit("alias=", 1)[1].rstrip(",)").rstrip(")")
-    )
+    alias_value = ast.literal_eval(alias_line.strip().rsplit("alias=", 1)[1].rstrip(",)").rstrip(")"))
     assert alias_value == 'X-Ten"ant'
 
 
@@ -2724,15 +2833,14 @@ def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monk
             # 3. User B's writes against A's Note are still owner-filtered - a plain
             # 404, exactly like a non-any_authenticated entity - proving read_scope
             # has no effect whatsoever on create/update/delete.
-            assert client.put(
-                f"/notes/{note['id']}", json={"body": "hijacked"}, headers=b_headers
-            ).status_code == 404
+            assert client.put(f"/notes/{note['id']}", json={"body": "hijacked"}, headers=b_headers).status_code == 404
             assert client.delete(f"/notes/{note['id']}", headers=b_headers).status_code == 404
 
             # ...and A can still update/delete its own Note normally.
-            assert client.put(
-                f"/notes/{note['id']}", json={"body": "A's note, edited"}, headers=a_headers
-            ).status_code == 200
+            assert (
+                client.put(f"/notes/{note['id']}", json={"body": "A's note, edited"}, headers=a_headers).status_code
+                == 200
+            )
 
             # ================= Secret (default read_scope: owner) =================
             # 4. Sibling entity in the SAME fixture that does NOT set read_scope:
@@ -2783,7 +2891,9 @@ def test_rls_read_scope_any_authenticated_public_read_owner_write(tmp_path, monk
             assert client.get(f"/notes/{note['id']}").status_code in (401, 403)
 
 
-def test_builtin_issuer_own_routes_work_when_issuer_and_audience_are_configured(tmp_path, monkeypatch, isolated_sys_path):
+def test_builtin_issuer_own_routes_work_when_issuer_and_audience_are_configured(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Final review C1: setting auth.jwt.issuer/audience (exactly what the interop docs tell
     you to do) must not break the issuing service's OWN protected routes. decode_token's
     jwt.decode call never passed issuer=/audience=, so once a token carried "aud"/"iss",
@@ -2842,7 +2952,9 @@ def test_generated_verifier_rejects_a_refresh_token_from_the_issuer(tmp_path, mo
 
         with TestClient(issuer_server.app) as issuer_client:
             issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
-            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post(
+                "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
+            )
             assert login_resp.status_code == 200, login_resp.text
             refresh_token = login_resp.json()["refresh_token"]
 
@@ -2865,7 +2977,9 @@ def test_two_generated_services_shared_secret_round_trip(tmp_path, monkeypatch, 
     rejected) by the verifier based purely on whether the two share the same secret value -
     exactly the scenario this whole sub-project exists to make possible.
     """
-    issuer_erd = load_erd(f"{FIXTURES}/builtin_shared_secret_issuer.yml")  # builtin, secret_env_var=JWT_SECRET, issuer=authservice
+    issuer_erd = load_erd(
+        f"{FIXTURES}/builtin_shared_secret_issuer.yml"
+    )  # builtin, secret_env_var=JWT_SECRET, issuer=authservice
     issuer_state = translate(issuer_erd)
     issuer_dir = CodeGenerator(output_dir=str(tmp_path / "issuer")).generate_project(issuer_state, force=True)
 
@@ -2883,10 +2997,14 @@ def test_two_generated_services_shared_secret_round_trip(tmp_path, monkeypatch, 
         from fastapi.testclient import TestClient
 
         with TestClient(issuer_server.app) as issuer_client:
-            register_resp = issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            register_resp = issuer_client.post(
+                "/auth/register", json={"email": "alice@example.com", "password": "supersecret123"}
+            )
             issuer_user_id = register_resp.json()["id"]
             assert register_resp.json()["roles"] == ["admin"]  # first user bootstrapped to admin
-            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post(
+                "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
+            )
             assert login_resp.status_code == 200, login_resp.text
             token = login_resp.json()["access_token"]
 
@@ -2895,8 +3013,8 @@ def test_two_generated_services_shared_secret_round_trip(tmp_path, monkeypatch, 
     monkeypatch.setenv("SHARED_SECRET", "same-shared-value")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
     with _GeneratedProjectImporter(verifier_dir):
-        import importlib
         import asyncio
+        import importlib
 
         verifier_server = importlib.import_module("server")
         verifier_service_module = importlib.import_module("modules.auth.service")
@@ -2951,10 +3069,14 @@ def test_two_generated_services_jwks_round_trip(tmp_path, monkeypatch, isolated_
         from fastapi.testclient import TestClient
 
         with TestClient(issuer_server.app) as issuer_client:
-            register_resp = issuer_client.post("/auth/register", json={"email": "alice@example.com", "password": "supersecret123"})
+            register_resp = issuer_client.post(
+                "/auth/register", json={"email": "alice@example.com", "password": "supersecret123"}
+            )
             issuer_user_id = register_resp.json()["id"]
             assert register_resp.json()["roles"] == ["admin"]  # first user bootstrapped to admin
-            login_resp = issuer_client.post("/auth/login", json={"email": "alice@example.com", "password": "supersecret123"})
+            login_resp = issuer_client.post(
+                "/auth/login", json={"email": "alice@example.com", "password": "supersecret123"}
+            )
             assert login_resp.status_code == 200, login_resp.text
             token = login_resp.json()["access_token"]
         issuer_jwks = jwks_module.build_jwks()
@@ -2962,8 +3084,8 @@ def test_two_generated_services_jwks_round_trip(tmp_path, monkeypatch, isolated_
     monkeypatch.setenv("AUTH_JWKS_URL", "https://issuer.example/.well-known/jwks.json")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'verifier.db').as_posix()}")
     with _GeneratedProjectImporter(verifier_dir):
-        import importlib
         import asyncio
+        import importlib
 
         verifier_service_module = importlib.import_module("modules.auth.service")
 
@@ -3142,7 +3264,9 @@ def test_generated_jwks_endpoint_serves_a_key_that_verifies_an_issued_token(tmp_
             assert decoded["sub"] == str(user_id)
 
 
-def test_generated_jwks_endpoint_serves_an_es256_key_that_verifies_an_issued_token(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_jwks_endpoint_serves_an_es256_key_that_verifies_an_issued_token(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Final review I2: the EC family (ES256/384/512) had no passing-case test at all - only
     RS256 was ever proven to actually work end-to-end.
     """
@@ -3214,7 +3338,9 @@ def test_generated_builtin_asymmetric_config_corrupt_key_file_fails_fast(tmp_pat
             importlib.import_module("config")
 
 
-def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_rsa_key_under_es256(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_rsa_key_under_es256(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Final review I2: a key that parses fine but is the wrong family for the configured
     algorithm (an RSA key under ES256, an EC key under RS256) must fail fast at config import
     with a clear message - not a 500 the first time a route tries to sign or the JWKS route
@@ -3237,7 +3363,9 @@ def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_rsa_key_un
             importlib.import_module("config")
 
 
-def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_ec_key_under_rs256(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_ec_key_under_rs256(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     erd = load_erd(f"{FIXTURES}/builtin_asymmetric_jwt.yml")  # algorithm: RS256
     state = translate(erd)
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)
@@ -3255,7 +3383,9 @@ def test_generated_builtin_asymmetric_config_rejects_wrong_key_family_ec_key_und
             importlib.import_module("config")
 
 
-def test_generated_builtin_asymmetric_config_rejects_wrong_curve_p256_key_under_es384(tmp_path, monkeypatch, isolated_sys_path):
+def test_generated_builtin_asymmetric_config_rejects_wrong_curve_p256_key_under_es384(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     erd = load_erd(f"{FIXTURES}/builtin_asymmetric_es384.yml")  # algorithm: ES384, needs P-384
     state = translate(erd)
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(state, force=True)

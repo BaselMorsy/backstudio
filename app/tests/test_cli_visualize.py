@@ -10,9 +10,7 @@ def test_visualize_writes_html_file(tmp_path, monkeypatch):
     monkeypatch.setattr("webbrowser.open", lambda *_args, **_kwargs: True)
     out_file = tmp_path / "diagram.html"
 
-    result = runner.invoke(
-        app, ["visualize", f"{FIXTURES}/valid_minimal.yml", "--output", str(out_file), "--no-open"]
-    )
+    result = runner.invoke(app, ["visualize", f"{FIXTURES}/valid_minimal.yml", "--output", str(out_file), "--no-open"])
 
     assert result.exit_code == 0
     assert out_file.exists()

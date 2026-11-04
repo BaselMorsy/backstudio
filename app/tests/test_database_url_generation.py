@@ -17,7 +17,11 @@ def _generate(tmp_path, fixture):
 
 CASES = [
     ("db_url_postgres_sync", None, "postgresql+psycopg2://dana_user@db.internal:5433/dana finance"),
-    ("db_url_postgres_sync", "p@ss/w:rd%", "postgresql+psycopg2://dana_user:p%40ss%2Fw%3Ard%25@db.internal:5433/dana finance"),
+    (
+        "db_url_postgres_sync",
+        "p@ss/w:rd%",
+        "postgresql+psycopg2://dana_user:p%40ss%2Fw%3Ard%25@db.internal:5433/dana finance",
+    ),
     ("db_url_postgres_async", None, "postgresql+asyncpg://dana_user@db.internal:5433/dana finance"),
     ("db_url_postgres_async", "pw", "postgresql+asyncpg://dana_user:pw@db.internal:5433/dana finance"),
     ("db_url_mysql_sync", None, "mysql+pymysql://root@localhost/appdb"),
@@ -28,7 +32,9 @@ CASES = [
 
 
 @pytest.mark.parametrize("fixture,password,expected", CASES)
-def test_default_database_url_is_built_from_the_database_block(fixture, password, expected, tmp_path, monkeypatch, isolated_sys_path):
+def test_default_database_url_is_built_from_the_database_block(
+    fixture, password, expected, tmp_path, monkeypatch, isolated_sys_path
+):
     codebase_dir = _generate(tmp_path, fixture)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     if password is None:
@@ -50,11 +56,13 @@ def test_database_url_env_var_still_overrides_the_built_default(tmp_path, monkey
         assert importlib.import_module("config").settings.DATABASE_URL == "postgresql://other/db"
 
 
-def test_special_characters_in_the_database_block_cannot_corrupt_the_generated_config(tmp_path, monkeypatch, isolated_sys_path):
+def test_special_characters_in_the_database_block_cannot_corrupt_the_generated_config(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Review Focus: a username with quotes/backslash/emoji must compile and be URL-quoted."""
     import yaml
 
-    hostile = "we\"ird\\name \U0001F4B0"   # we"ird\name <emoji>
+    hostile = 'we"ird\\name \U0001f4b0'  # we"ird\name <emoji>
     path = tmp_path / "hostile.yml"
     path.write_text(
         yaml.safe_dump(
@@ -68,7 +76,7 @@ def test_special_characters_in_the_database_block_cannot_corrupt_the_generated_c
         ),
         encoding="utf-8",
     )
-    assert load_erd(path).database.username == hostile   # sanity: it survived YAML unchanged
+    assert load_erd(path).database.username == hostile  # sanity: it survived YAML unchanged
     state = translate(load_erd(path))
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "w")).generate_project(state, force=True)
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -98,7 +106,9 @@ def test_database_name_is_not_url_quoted_so_sqlalchemy_parses_it_back_exactly(tm
 
 def test_non_sqlite_config_has_no_sqlite_fallback_and_sqlite_config_is_unchanged(tmp_path):
     pg_src = (_generate(tmp_path / "a", "db_url_postgres_sync") / "config.py").read_text(encoding="utf-8")
-    assert "sqlite" not in pg_src and "def _default_database_url" in pg_src and "from urllib.parse import quote" in pg_src
+    assert (
+        "sqlite" not in pg_src and "def _default_database_url" in pg_src and "from urllib.parse import quote" in pg_src
+    )
     sqlite_src = (_generate(tmp_path / "b", "valid_minimal") / "config.py").read_text(encoding="utf-8")
     assert "sqlite:///./demo.db" in sqlite_src and "_default_database_url" not in sqlite_src
 

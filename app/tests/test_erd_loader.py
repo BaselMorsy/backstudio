@@ -1167,6 +1167,7 @@ def test_external_auth_rejects_a_declared_user_entity(tmp_path):
 
 def test_external_auth_without_audience_warns(tmp_path):
     import yaml
+
     from app.erd.warnings import collect_warnings
 
     path = tmp_path / "external.yml"
@@ -1177,6 +1178,7 @@ def test_external_auth_without_audience_warns(tmp_path):
 
 def test_external_auth_with_audience_does_not_warn(tmp_path):
     import yaml
+
     from app.erd.warnings import collect_warnings
 
     doc = _minimal_external_auth_doc()
@@ -1196,9 +1198,7 @@ def test_external_auth_rejects_a_relationship_targeting_user_with_no_declared_us
     import yaml
 
     doc = _minimal_external_auth_doc()
-    doc["entities"][0]["relationships"] = [
-        {"name": "owner", "cardinality": "many-to-one", "target": "User"}
-    ]
+    doc["entities"][0]["relationships"] = [{"name": "owner", "cardinality": "many-to-one", "target": "User"}]
     path = tmp_path / "external.yml"
     path.write_text(yaml.safe_dump(doc))
     with pytest.raises(ERDValidationError, match="User"):

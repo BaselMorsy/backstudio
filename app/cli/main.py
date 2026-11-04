@@ -82,7 +82,7 @@ def grammar(
     topic: str = typer.Argument(
         None,
         help=f"One section's grammar: {' | '.join(TOPICS)}. Omit to list all top-level keys.",
-    )
+    ),
 ) -> None:
     """Fast terminal reference for the ERD YAML grammar (not the full docs)."""
     if topic is None:
@@ -102,7 +102,7 @@ def grammar(
 
 @app.command()
 def validate(
-    erd_file: Path = typer.Argument(..., exists=True, readable=True, help="Path to the ERD YAML file")
+    erd_file: Path = typer.Argument(..., exists=True, readable=True, help="Path to the ERD YAML file"),
 ) -> None:
     """Validate an ERD file without generating anything."""
     try:
@@ -167,9 +167,7 @@ def generate(
     # including any .env a previous run wrote — so preserve one across a --force
     # regeneration rather than silently rotating the user's secret on every re-run.
     predicted_env_path = output / state["name"] / ".env"
-    preserved_env_content = (
-        predicted_env_path.read_text(encoding="utf-8") if predicted_env_path.exists() else None
-    )
+    preserved_env_content = predicted_env_path.read_text(encoding="utf-8") if predicted_env_path.exists() else None
 
     try:
         project_dir = generator.generate_project(state, force=force)

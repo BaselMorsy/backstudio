@@ -28,9 +28,12 @@ def test_showcase_renders_the_new_types_and_byte_compiles(tmp_path):
     assert "Numeric(18, 2)" in models_src and "Numeric(10, 4)" in models_src
     assert "default=Decimal('0.5')" in models_src
     assert "Uuid(as_uuid=True)" in models_src
-    assert "        DateTime(timezone=True),\n" in models_src       # booked_at
-    assert "        DateTime,\n" in models_src                       # local_note_at (timezone: false)
-    assert "Enum(LedgerEntryStatus, native_enum=False, create_constraint=True, name='ck_ledger_entries_status')" in models_src
+    assert "        DateTime(timezone=True),\n" in models_src  # booked_at
+    assert "        DateTime,\n" in models_src  # local_note_at (timezone: false)
+    assert (
+        "Enum(LedgerEntryStatus, native_enum=False, create_constraint=True, name='ck_ledger_entries_status')"
+        in models_src
+    )
     assert "default=LedgerEntryStatus.PENDING" in models_src
     assert "ForeignKey('ledger_entries.id')" in models_src
     assert "Column('ledger_line_id', BigInteger, ForeignKey('ledger_lines.id'), primary_key=True)" in models_src
@@ -39,7 +42,7 @@ def test_showcase_renders_the_new_types_and_byte_compiles(tmp_path):
     enums_src = (codebase_dir / "database" / "enums.py").read_text(encoding="utf-8")
     ast.parse(enums_src)
     assert "class LedgerEntryStatus(str, Enum):" in enums_src
-    assert "PENDING = 'PENDING'" in enums_src   # python_value renders via repr
+    assert "PENDING = 'PENDING'" in enums_src  # python_value renders via repr
 
     schemas_src = (codebase_dir / "modules" / "ledger" / "schemas.py").read_text(encoding="utf-8")
     ast.parse(schemas_src)
@@ -51,7 +54,9 @@ def test_showcase_renders_the_new_types_and_byte_compiles(tmp_path):
     assert "ref: Optional[UUID] = None" in schemas_src
     assert "status: LedgerEntryStatus = LedgerEntryStatus.PENDING" in schemas_src
 
-    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -75,14 +80,18 @@ def test_showcase_round_trips_over_http_on_sqlite(tmp_path, monkeypatch, isolate
         with TestClient(server_module.app) as client:
             created = client.post(
                 "/ledger_entries",
-                json={"amount": "12.50", "ref": ref, "booked_at": "2026-01-01T10:00:00+00:00",
-                      "local_note_at": "2026-01-01T10:00:00"},
+                json={
+                    "amount": "12.50",
+                    "ref": ref,
+                    "booked_at": "2026-01-01T10:00:00+00:00",
+                    "local_note_at": "2026-01-01T10:00:00",
+                },
             )
             assert created.status_code == 201, created.text
             body = created.json()
-            assert body["id"] == 1 and isinstance(body["id"], int)   # BigInteger PK autoincrements on SQLite
+            assert body["id"] == 1 and isinstance(body["id"], int)  # BigInteger PK autoincrements on SQLite
             assert isinstance(body["amount"], str) and Decimal(body["amount"]) == Decimal("12.50")
-            assert Decimal(body["fee"]) == Decimal("0.5")             # default 0.5 rendered as Decimal('0.5')
+            assert Decimal(body["fee"]) == Decimal("0.5")  # default 0.5 rendered as Decimal('0.5')
             assert body["ref"] == ref
             assert body["status"] == "PENDING"
             assert body["booked_at"].startswith("2026-01-01T10:00:00")
@@ -142,7 +151,11 @@ def test_alembic_autogenerate_handles_the_new_types(tmp_path):
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{(tmp_path / 'alembic.db').as_posix()}", "DEBUG": "True"}
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "revision", "--autogenerate", "-m", "showcase"],
-        cwd=str(codebase_dir), capture_output=True, text=True, env=env, timeout=60,
+        cwd=str(codebase_dir),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     migration = next((codebase_dir / "alembic" / "versions").glob("*.py")).read_text(encoding="utf-8")
@@ -157,10 +170,10 @@ def test_auth_injected_user_timestamps_stay_naive_in_generated_models(tmp_path):
     codebase_dir = _generate(tmp_path, "examples/personal_finance.yml")
     models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
     user_start = models_src.index("class User(Base):")
-    user_end = models_src.find("\nclass ", user_start + 1)   # User is the last (alphabetical) model here
+    user_end = models_src.find("\nclass ", user_start + 1)  # User is the last (alphabetical) model here
     user_src = models_src[user_start:] if user_end == -1 else models_src[user_start:user_end]
     assert "timezone=True" not in user_src
-    assert "DateTime(timezone=True)" in models_src   # Transaction.occurred_at is a declared datetime
+    assert "DateTime(timezone=True)" in models_src  # Transaction.occurred_at is a declared datetime
 
 
 def test_decimal_defaults_written_as_float_int_and_string_render_exactly(tmp_path):

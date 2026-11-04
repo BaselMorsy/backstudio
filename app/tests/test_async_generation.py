@@ -134,10 +134,12 @@ def test_async_minimal_engine_actually_runs_and_disposes_cleanly(tmp_path):
     db_path = tmp_path / "engine_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
         os.environ["DEBUG"] = "True"
 
@@ -216,10 +218,12 @@ def test_async_service_fk_validation_and_delete_actually_work(tmp_path):
     db_path = tmp_path / "service_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
         os.environ["DEBUG"] = "True"
 
@@ -247,7 +251,13 @@ def test_async_service_fk_validation_and_delete_actually_work(tmp_path):
         os.environ.pop("DATABASE_URL", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -325,10 +335,12 @@ def test_async_repo_functions_actually_run_against_a_real_db(tmp_path):
     db_path = tmp_path / "repo_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
         os.environ["DEBUG"] = "True"
 
@@ -548,10 +560,12 @@ def test_async_auth_register_and_login_actually_work(tmp_path):
     db_path = tmp_path / "auth_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -577,7 +591,13 @@ def test_async_auth_register_and_login_actually_work(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 

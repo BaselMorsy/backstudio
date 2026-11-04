@@ -73,6 +73,15 @@ This creates `.venv` in the repo root; prefix commands with `uv run` (`uv run ba
 `uv run pytest app/tests`) or activate the venv first
 (`.venv\Scripts\activate.bat` on Windows, `source .venv/bin/activate` on macOS/Linux).
 
+Before pushing, run the same checks CI runs:
+
+```bash
+uv run ruff check .          # lint
+uv run ruff format --check . # formatting (drop --check to apply)
+uv run mypy                  # type check
+uv run pytest app/tests --cov --cov-fail-under=90
+```
+
 ### A minimal ERD
 
 Save this as `blog.yml`:

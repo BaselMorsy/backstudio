@@ -47,10 +47,17 @@ def test_a_name_that_matches_the_derived_one_does_not_warn():
 def test_one_to_many_and_many_to_many_only_compare_the_attribute():
     """Review Focus: the FK column of a one-to-many is derived from the *entity* (category_id),
     never from the relationship name - comparing it would warn on a perfectly named relationship."""
-    entities = [_entity("Post"), _entity("Label"), _entity("Category", [
-        _rel("posts", "Post", "one-to-many"),
-        _rel("labels", "Label", "many-to-many"),
-    ])]
+    entities = [
+        _entity("Post"),
+        _entity("Label"),
+        _entity(
+            "Category",
+            [
+                _rel("posts", "Post", "one-to-many"),
+                _rel("labels", "Label", "many-to-many"),
+            ],
+        ),
+    ]
     assert collect_warnings(_erd(entities)) == []
 
     warnings = collect_warnings(_erd([_entity("Post"), _entity("Category", [_rel("items", "Post", "one-to-many")])]))

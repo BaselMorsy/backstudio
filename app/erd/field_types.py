@@ -29,15 +29,32 @@ _SA_TYPE = {
 }
 
 _PY_TYPE = {
-    "string": "str", "integer": "int", "bigint": "int", "float": "float", "decimal": "Decimal",
-    "boolean": "bool", "datetime": "datetime", "date": "date", "text": "str", "json": "Any",
+    "string": "str",
+    "integer": "int",
+    "bigint": "int",
+    "float": "float",
+    "decimal": "Decimal",
+    "boolean": "bool",
+    "datetime": "datetime",
+    "date": "date",
+    "text": "str",
+    "json": "Any",
     "uuid": "UUID",
 }
 
 _MERMAID_TYPE = {
-    "string": "string", "integer": "int", "bigint": "bigint", "float": "float",
-    "decimal": "decimal", "boolean": "bool", "datetime": "datetime", "date": "date",
-    "text": "text", "json": "json", "uuid": "uuid", "enum": "enum",
+    "string": "string",
+    "integer": "int",
+    "bigint": "bigint",
+    "float": "float",
+    "decimal": "decimal",
+    "boolean": "bool",
+    "datetime": "datetime",
+    "date": "date",
+    "text": "text",
+    "json": "json",
+    "uuid": "uuid",
+    "enum": "enum",
 }
 
 
@@ -91,7 +108,8 @@ def is_safe_enum_member(value: Any) -> bool:
         and not keyword.iskeyword(value)
         and not hasattr(str, value)
         and not hasattr(enum.Enum, value)  # metaclass attributes such as `mro`
-        and value not in vars(enum.Enum)  # `name`/`value` are class-hidden DynamicClassAttributes: hasattr() and dir() miss them
+        and value
+        not in vars(enum.Enum)  # `name`/`value` are class-hidden DynamicClassAttributes: hasattr() and dir() miss them
     )
 
 
@@ -142,8 +160,7 @@ def sa_column_type(field: Mapping[str, Any], with_length: bool = True) -> str:
         return 'BigInteger().with_variant(Integer(), "sqlite")'
     if _is(field, "enum"):
         return (
-            f"Enum({field['enum_class']}, native_enum=False, create_constraint=True, "
-            f"name={field['enum_constraint']!r})"
+            f"Enum({field['enum_class']}, native_enum=False, create_constraint=True, name={field['enum_constraint']!r})"
         )
     return sa_type_for(field.get("type"))
 

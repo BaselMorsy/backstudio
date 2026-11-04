@@ -27,12 +27,18 @@ jobs:
       - name: Ruff lint
         run: uv run --python 3.11 ruff check .
 
+      - name: Ruff format check
+        run: uv run --python 3.11 ruff format --check .
+
+      - name: Type check (mypy)
+        run: uv run --python 3.11 mypy
+
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v5
@@ -66,6 +72,10 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
 
@@ -73,11 +83,37 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Build sdist and wheel
-        run: uv build --python 3.11
+        run: uv build --python ${{ matrix.python-version }}
 
       - name: Smoke-test the built wheel
         run: |
-          uv venv --python 3.11 /tmp/smoke
+          uv venv --python ${{ matrix.python-version }} /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/backstudio --help
           /tmp/smoke/bin/backstudio grammar auth
+
+  generated-requirements:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Generate sample projects (every database type, sync and async)
+        run: |
+          uv sync --python 3.11 --locked
+          for f in async_postgresql async_mysql db_url_postgres_sync db_url_mysql_sync builtin_invite_webhook async_minimal; do
+            uv run --python 3.11 backstudio generate app/tests/fixtures/erd/$f.yml -o /tmp/gen/$f --force
+          done
+
+      - name: Generated requirements resolve to binary wheels on Python ${{ matrix.python-version }}
+        run: |
+          for r in $(find /tmp/gen -name requirements.txt); do
+            echo "== $r"
+            uv pip compile "$r" --python-version ${{ matrix.python-version }} --only-binary :all: > /dev/null
+          done

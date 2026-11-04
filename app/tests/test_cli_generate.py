@@ -23,9 +23,7 @@ def test_generate_default_output_dir_is_the_current_directory(tmp_path, monkeypa
 
 
 def test_generate_writes_codebase_and_reports_path(tmp_path):
-    result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)]
-    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "Generated at:" in result.output
     assert (tmp_path / "Demo" / "server.py").exists()
@@ -41,9 +39,7 @@ def test_generate_refuses_to_overwrite_without_force(tmp_path):
 
 def test_generate_force_overwrites(tmp_path):
     runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
-    result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path), "--force"]
-    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path), "--force"])
     assert result.exit_code == 0
 
 
@@ -76,9 +72,7 @@ def test_generate_does_not_overwrite_existing_env_file(tmp_path, monkeypatch):
     codebase_dir.mkdir(parents=True)
     (codebase_dir / ".env").write_text("JWT_SECRET=my-own-custom-secret\n", encoding="utf-8")
 
-    result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"]
-    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"])
 
     assert result.exit_code == 0
     assert "Generated a random JWT_SECRET" not in result.output
@@ -102,9 +96,7 @@ def test_generate_force_preserves_hand_edited_env_file(tmp_path, monkeypatch):
     env_file = tmp_path / "ShopHub" / ".env"
     env_file.write_text("JWT_SECRET=my-hand-picked-secret\nEXTRA_VAR=keep-me\n", encoding="utf-8")
 
-    result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"]
-    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_full.yml", "--output-dir", str(tmp_path), "--force"])
 
     assert result.exit_code == 0
     assert "Generated a random JWT_SECRET" not in result.output
@@ -112,9 +104,7 @@ def test_generate_force_preserves_hand_edited_env_file(tmp_path, monkeypatch):
 
 
 def test_generate_does_not_write_env_file_when_auth_disabled(tmp_path):
-    result = runner.invoke(
-        app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)]
-    )
+    result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
 
     assert result.exit_code == 0
     assert not (tmp_path / "Demo" / ".env").exists()
@@ -131,7 +121,9 @@ def test_generate_alembic_failure_prints_one_concise_line_not_a_traceback(tmp_pa
     _make_alembic_fail(
         monkeypatch,
         subprocess.CalledProcessError(
-            1, ["alembic"], output=b"",
+            1,
+            ["alembic"],
+            output=b"",
             stderr=b"Traceback (most recent call last):\n  File \"x.py\", line 1\nModuleNotFoundError: No module named 'psycopg2'\n",
         ),
     )
@@ -147,7 +139,10 @@ def test_generate_alembic_failure_prints_one_concise_line_not_a_traceback(tmp_pa
 
 
 def test_generate_alembic_failure_falls_back_to_stdout_then_exit_code(tmp_path, monkeypatch):
-    _make_alembic_fail(monkeypatch, subprocess.CalledProcessError(2, ["alembic"], output=b"noise-line-A\nlast stdout line\n", stderr=b""))
+    _make_alembic_fail(
+        monkeypatch,
+        subprocess.CalledProcessError(2, ["alembic"], output=b"noise-line-A\nlast stdout line\n", stderr=b""),
+    )
     result = runner.invoke(app, ["generate", f"{FIXTURES}/valid_minimal.yml", "--output-dir", str(tmp_path)])
     assert "last stdout line" in result.output and "noise-line-A" not in result.output
 

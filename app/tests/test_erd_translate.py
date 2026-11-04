@@ -1,19 +1,19 @@
 import pytest
 from pydantic import ValidationError
 
-from app.erd.loader import load_erd, ERDValidationError
-from app.erd.translate import translate
+from app.erd.loader import ERDValidationError, load_erd
 from app.erd.schema import (
-    ERDConfig,
-    ProjectMeta,
+    AuthSpec,
     DatabaseSpec,
     EntitySpec,
-    RelationshipDecl,
-    AuthSpec,
-    ServiceDecl,
-    ModelField,
+    ERDConfig,
     FieldType,
+    ModelField,
+    ProjectMeta,
+    RelationshipDecl,
+    ServiceDecl,
 )
+from app.erd.translate import translate
 
 FIXTURES = "app/tests/fixtures/erd"
 
@@ -118,19 +118,10 @@ def test_translate_one_to_many_cardinality():
             EntitySpec(
                 name="Author",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(
-                        name="author_books",
-                        cardinality="one-to-many",
-                        target="Book"
-                    )
-                ]
+                relationships=[RelationshipDecl(name="author_books", cardinality="one-to-many", target="Book")],
             ),
-            EntitySpec(
-                name="Book",
-                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]
-            ),
-        ]
+            EntitySpec(name="Book", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
     )
 
     state = translate(erd)
@@ -171,19 +162,10 @@ def test_translate_one_to_one_cardinality():
             EntitySpec(
                 name="Author",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(
-                        name="author_profile",
-                        cardinality="one-to-one",
-                        target="Profile"
-                    )
-                ]
+                relationships=[RelationshipDecl(name="author_profile", cardinality="one-to-one", target="Profile")],
             ),
-            EntitySpec(
-                name="Profile",
-                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]
-            ),
-        ]
+            EntitySpec(name="Profile", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
     )
 
     state = translate(erd)
@@ -227,19 +209,10 @@ def test_translate_many_to_many_cardinality():
             EntitySpec(
                 name="Author",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(
-                        name="author_tags",
-                        cardinality="many-to-many",
-                        target="Tag"
-                    )
-                ]
+                relationships=[RelationshipDecl(name="author_tags", cardinality="many-to-many", target="Tag")],
             ),
-            EntitySpec(
-                name="Tag",
-                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]
-            ),
-        ]
+            EntitySpec(name="Tag", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
     )
 
     state = translate(erd)
@@ -336,8 +309,8 @@ def test_translate_two_relationships_to_same_target_stay_distinct():
     assert len(person_attrs) == 2
 
     # Rendering must not raise (both relationships coexist on the SQLAlchemy class).
-    import tempfile
     import ast as ast_module
+    import tempfile
 
     from app.services.code_generator import CodeGenerator
 
@@ -368,12 +341,8 @@ def test_translate_ambiguous_relationship_names_raise_clear_error():
                 name="Message",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
                 relationships=[
-                    RelationshipDecl(
-                        name="sender", cardinality="many-to-one", target="Person", attribute="contact"
-                    ),
-                    RelationshipDecl(
-                        name="recipient", cardinality="many-to-one", target="Person", attribute="contact"
-                    ),
+                    RelationshipDecl(name="sender", cardinality="many-to-one", target="Person", attribute="contact"),
+                    RelationshipDecl(name="recipient", cardinality="many-to-one", target="Person", attribute="contact"),
                 ],
             ),
         ],
@@ -449,15 +418,12 @@ def test_translate_relationship_enums_to_strings():
                         name="author_books",
                         cardinality="one-to-many",
                         target="Book",
-                        lazy="selectin"  # This will be parsed as LazyStrategy.SELECTIN
+                        lazy="selectin",  # This will be parsed as LazyStrategy.SELECTIN
                     )
-                ]
+                ],
             ),
-            EntitySpec(
-                name="Book",
-                fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]
-            ),
-        ]
+            EntitySpec(name="Book", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
+        ],
     )
 
     state = translate(erd)
@@ -472,9 +438,7 @@ def test_translate_relationship_enums_to_strings():
     assert isinstance(rel["cardinality"], str), (
         f"cardinality should be string, got {type(rel['cardinality']).__name__}: {repr(rel['cardinality'])}"
     )
-    assert rel["cardinality"] == "one-to-many", (
-        f"cardinality should be 'one-to-many', got {repr(rel['cardinality'])}"
-    )
+    assert rel["cardinality"] == "one-to-many", f"cardinality should be 'one-to-many', got {repr(rel['cardinality'])}"
     assert not rel["cardinality"].startswith("Cardinality."), (
         f"cardinality should not be enum repr: {repr(rel['cardinality'])}"
     )
@@ -484,12 +448,8 @@ def test_translate_relationship_enums_to_strings():
     assert isinstance(source["lazy"], (str, type(None))), (
         f"lazy should be string or None, got {type(source['lazy']).__name__}: {repr(source['lazy'])}"
     )
-    assert source["lazy"] == "selectin", (
-        f"lazy should be 'selectin', got {repr(source['lazy'])}"
-    )
-    assert not str(source["lazy"]).startswith("LazyStrategy."), (
-        f"lazy should not be enum repr: {repr(source['lazy'])}"
-    )
+    assert source["lazy"] == "selectin", f"lazy should be 'selectin', got {repr(source['lazy'])}"
+    assert not str(source["lazy"]).startswith("LazyStrategy."), f"lazy should not be enum repr: {repr(source['lazy'])}"
 
 
 def test_translate_groups_entities_into_modules():
@@ -569,17 +529,18 @@ def test_translate_auth_user_fields_have_defaults():
         )
 
     # Render models.py and verify syntax is valid
-    from app.services.code_generator import CodeGenerator
-    import tempfile
     import ast
+    import tempfile
+
+    from app.services.code_generator import CodeGenerator
 
     with tempfile.TemporaryDirectory() as tmp:
         gen = CodeGenerator(output_dir=tmp)
         codebase = gen.generate_project(state, force=True)
-        models_src = (codebase / 'database' / 'models.py').read_text(encoding='utf-8')
+        models_src = (codebase / "database" / "models.py").read_text(encoding="utf-8")
 
         # Check for the problematic "default=," pattern
-        assert 'default=,' not in models_src, "Generated models.py should not contain 'default=,' syntax errors"
+        assert "default=," not in models_src, "Generated models.py should not contain 'default=,' syntax errors"
 
         # Parse the file to verify syntax
         try:
@@ -601,9 +562,7 @@ def test_owned_relationships_many_to_one():
             EntitySpec(
                 name="Post",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="category", cardinality="many-to-one", target="Category")
-                ],
+                relationships=[RelationshipDecl(name="category", cardinality="many-to-one", target="Category")],
             ),
         ],
         services=[ServiceDecl(name="content", entities=["Category", "Post"])],
@@ -646,9 +605,7 @@ def test_owned_relationships_one_to_many_equivalent_to_many_to_one():
             EntitySpec(
                 name="Author",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="author_books", cardinality="one-to-many", target="Book")
-                ],
+                relationships=[RelationshipDecl(name="author_books", cardinality="one-to-many", target="Book")],
             ),
             EntitySpec(
                 name="Book",
@@ -689,9 +646,7 @@ def test_owned_relationships_required_fk_not_nullable():
                 name="Post",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
                 relationships=[
-                    RelationshipDecl(
-                        name="category", cardinality="many-to-one", target="Category", nullable=False
-                    )
+                    RelationshipDecl(name="category", cardinality="many-to-one", target="Category", nullable=False)
                 ],
             ),
         ],
@@ -710,9 +665,7 @@ def test_many_to_many_relationships_both_sides():
             EntitySpec(
                 name="Post",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="tags", cardinality="many-to-many", target="Tag")
-                ],
+                relationships=[RelationshipDecl(name="tags", cardinality="many-to-many", target="Tag")],
             ),
             EntitySpec(
                 name="Tag",
@@ -750,9 +703,7 @@ def test_self_referential_many_to_one_produces_distinct_views_and_single_owned_f
             EntitySpec(
                 name="Employee",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="manager", cardinality="many-to-one", target="Employee")
-                ],
+                relationships=[RelationshipDecl(name="manager", cardinality="many-to-one", target="Employee")],
             ),
         ],
         services=[ServiceDecl(name="hr", entities=["Employee"])],
@@ -795,9 +746,7 @@ def test_self_referential_one_to_one_produces_distinct_attributes():
             EntitySpec(
                 name="Employee",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="buddy", cardinality="one-to-one", target="Employee")
-                ],
+                relationships=[RelationshipDecl(name="buddy", cardinality="one-to-one", target="Employee")],
             ),
         ],
         services=[ServiceDecl(name="hr", entities=["Employee"])],
@@ -839,9 +788,7 @@ def test_self_referential_one_to_many_produces_distinct_attributes():
             EntitySpec(
                 name="Category",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[
-                    RelationshipDecl(name="children", cardinality="one-to-many", target="Category")
-                ],
+                relationships=[RelationshipDecl(name="children", cardinality="one-to-many", target="Category")],
             ),
         ],
         services=[ServiceDecl(name="catalog", entities=["Category"])],
@@ -1022,12 +969,16 @@ def test_cascades_ownership_cycle_rejected():
             EntitySpec(
                 name="A",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[RelationshipDecl(name="b", cardinality="many-to-one", target="B", cascades_ownership=True)],
+                relationships=[
+                    RelationshipDecl(name="b", cardinality="many-to-one", target="B", cascades_ownership=True)
+                ],
             ),
             EntitySpec(
                 name="B",
                 fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)],
-                relationships=[RelationshipDecl(name="a", cardinality="many-to-one", target="A", cascades_ownership=True)],
+                relationships=[
+                    RelationshipDecl(name="a", cardinality="many-to-one", target="A", cascades_ownership=True)
+                ],
             ),
         ],
         services=[ServiceDecl(name="ab", entities=["A", "B"])],
@@ -1110,7 +1061,17 @@ def test_translate_threads_jwt_lifetimes_into_security_config():
 
 
 def test_translate_custom_jwt_lifetimes_flow_through():
-    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, JWTSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+    from app.erd.schema import (
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        JWTSpec,
+        ModelField,
+        ProjectMeta,
+        ServiceDecl,
+    )
 
     erd = ERDConfig(
         project=ProjectMeta(name="CustomLifetimes", version="1.0.0"),
@@ -1149,7 +1110,9 @@ def test_translate_integer_primary_keys_and_user_targets_stay_integer():
     state = translate(load_erd(f"{FIXTURES}/valid_full.yml"))
     for rel in state["relationships"]:
         assert rel["foreign_key"]["column_type"] == "integer"
-    customer = next(r for r in translate(load_erd("examples/ecommerce.yml"))["relationships"] if r["name"] == "customer")
+    customer = next(
+        r for r in translate(load_erd("examples/ecommerce.yml"))["relationships"] if r["name"] == "customer"
+    )
     assert customer["target"]["model"] == "User" and customer["foreign_key"]["column_type"] == "integer"
     state = translate(load_erd(f"{FIXTURES}/many_to_many.yml"))
     m2m = next(r for r in state["relationships"] if r["cardinality"] == "many-to-many")
@@ -1166,12 +1129,24 @@ def test_translate_exposes_invite_disabled_by_default():
 
 
 def test_translate_exposes_webhook_config_when_set():
-    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, WebhookSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+    from app.erd.schema import (
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        ModelField,
+        ProjectMeta,
+        ServiceDecl,
+        WebhookSpec,
+    )
 
     erd = ERDConfig(
         project=ProjectMeta(name="WebhookDemo", version="1.0.0"),
         database=DatabaseSpec(type="sqlite", database_name="w.db"),
-        auth=AuthSpec(enabled=True, webhook=WebhookSpec(url_env_var="NOTIFY_WEBHOOK_URL", secret_env_var="NOTIFY_WEBHOOK_SECRET")),
+        auth=AuthSpec(
+            enabled=True, webhook=WebhookSpec(url_env_var="NOTIFY_WEBHOOK_URL", secret_env_var="NOTIFY_WEBHOOK_SECRET")
+        ),
         entities=[
             EntitySpec(name="Widget", fields=[ModelField(name="id", type=FieldType.INTEGER, primary_key=True)]),
         ],
@@ -1183,7 +1158,18 @@ def test_translate_exposes_webhook_config_when_set():
 
 
 def test_translate_password_hash_nullable_only_when_invite_enabled():
-    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, InviteSpec, RBACSpec, EntitySpec, ServiceDecl, ModelField, FieldType
+    from app.erd.schema import (
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        InviteSpec,
+        ModelField,
+        ProjectMeta,
+        RBACSpec,
+        ServiceDecl,
+    )
 
     erd = ERDConfig(
         project=ProjectMeta(name="InviteDemo", version="1.0.0"),
@@ -1277,7 +1263,10 @@ def test_declared_user_enum_field_is_annotated(tmp_path):
                 "database": {"type": "sqlite", "database_name": "d.db"},
                 "auth": {"enabled": True},
                 "entities": [
-                    {"name": "User", "fields": [{"name": "tier", "type": "enum", "values": ["FREE", "PRO"], "default": "FREE"}]},
+                    {
+                        "name": "User",
+                        "fields": [{"name": "tier", "type": "enum", "values": ["FREE", "PRO"], "default": "FREE"}],
+                    },
                     {"name": "Widget", "fields": [{"name": "id", "type": "integer", "primary_key": True}]},
                 ],
                 "services": [{"name": "things", "entities": ["Widget"]}, {"name": "auth", "entities": ["User"]}],

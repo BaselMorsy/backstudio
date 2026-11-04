@@ -56,6 +56,9 @@ Backstudio generates a FastAPI backend (SQLAlchemy models, Pydantic schemas, rou
 - `auth.invite.enabled: true` without `rbac.enabled: true` (rejected at `validate` time — an invite always assigns a role).
 - Expecting `auth.webhook` delivery to turn on/off by flipping the env var at runtime — the webhook-vs-print-stub choice is baked in at **generation** time; changing it means regenerating, not just editing `.env`.
 - Calling `/auth/resend-invite` for an invite that's already been accepted, expecting it to work like a no-op — it 400s ("Invite already accepted"), since silently swallowing that would hide a real "this account is already set up" mistake.
+- Treating `webhook_delivered: false` in an `/auth/invite` or `/auth/resend-invite` response as a failure to create the account — the user and role already exist; only the notification did not go out (webhook down or misconfigured). Fix the webhook and call `/auth/resend-invite`.
+- A `project.name` that is only dots/spaces (`.`, `..`) or otherwise cannot be a directory name — rejected at `validate` time. Path separators and characters invalid in file names are replaced with `_` in the generated folder name, so `generate` can never write or delete outside `-o <dir>`.
+- Assuming generated projects run on older Pythons — they pin current dependency versions and need Python 3.11+ (3.11, 3.12 and 3.13 are tested).
 
 ## Reference
 

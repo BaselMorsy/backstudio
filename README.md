@@ -6,7 +6,7 @@
   **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
 
   [![Tests](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml/badge.svg)](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml)
-  [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+  [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>
@@ -72,6 +72,27 @@ uv sync --extra dev
 This creates `.venv` in the repo root; prefix commands with `uv run` (`uv run backstudio ...`,
 `uv run pytest app/tests`) or activate the venv first
 (`.venv\Scripts\activate.bat` on Windows, `source .venv/bin/activate` on macOS/Linux).
+
+Before pushing, run the same checks CI runs:
+
+```bash
+uv run ruff check .          # lint
+uv run ruff format --check . # formatting (drop --check to apply)
+uv run mypy                  # type check
+uv run pytest app/tests --cov --cov-fail-under=90
+```
+
+### Using BackStudio from Claude Code agents
+
+The repo ships an agent skill, [`.claude/skills/using-backstudio/SKILL.md`](.claude/skills/using-backstudio/SKILL.md),
+that teaches Claude Code how to write ERD files, pick auth/RBAC/RLS options, and avoid the common
+validation mistakes. It is picked up automatically for any agent working inside this repo. To make it
+available to your agents in every project, copy it to your user skills folder:
+
+```bash
+mkdir -p ~/.claude/skills/using-backstudio
+cp .claude/skills/using-backstudio/SKILL.md ~/.claude/skills/using-backstudio/
+```
 
 ### A minimal ERD
 

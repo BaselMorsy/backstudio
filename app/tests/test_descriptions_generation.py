@@ -11,9 +11,9 @@ from app.tests.test_generated_project_runtime import _GeneratedProjectImporter, 
 FIXTURES = "app/tests/fixtures/erd"
 FIXTURE = f"{FIXTURES}/descriptions_stress.yml"
 
-ENTITY_DESC = "Prepaid wallet: \"quoted\", 'single', back\\slash, <b>tag</b> & ampersand \U0001F4B0\nsecond line"
+ENTITY_DESC = "Prepaid wallet: \"quoted\", 'single', back\\slash, <b>tag</b> & ampersand \U0001f4b0\nsecond line"
 PK_DESC = 'Primary key "id" \\ path'
-BALANCE_DESC = "Balance in major units - wallet \U0001F4B0, it's \"exact\"\nsecond line"
+BALANCE_DESC = 'Balance in major units - wallet \U0001f4b0, it\'s "exact"\nsecond line'
 LABEL_DESC = "Plain label"
 
 
@@ -33,12 +33,14 @@ def test_descriptions_round_trip_exactly_through_generated_sql_comments(tmp_path
             for kw in node.keywords:
                 if kw.arg == "comment":
                     comments.add(ast.literal_eval(kw.value))
-    assert comments == {ENTITY_DESC, PK_DESC, BALANCE_DESC, LABEL_DESC}   # `plain` has none
+    assert comments == {ENTITY_DESC, PK_DESC, BALANCE_DESC, LABEL_DESC}  # `plain` has none
 
     wallet = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Wallet")
-    assert ast.get_docstring(wallet) == "Wallet model"   # free text never reaches a docstring
+    assert ast.get_docstring(wallet) == "Wallet model"  # free text never reaches a docstring
 
-    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -76,22 +78,22 @@ def test_descriptions_reach_pydantic_fields_openapi_and_postgres_comment_ddl(tmp
         assert "COMMENT ON TABLE wallets IS" in str(SetTableComment(wallets).compile(dialect=postgresql.dialect()))
         column_ddl = str(SetColumnComment(wallets.c.balance).compile(dialect=postgresql.dialect()))
         assert "COMMENT ON COLUMN wallets.balance IS" in column_ddl
-        assert "Balance in major units" in column_ddl and "\U0001F4B0" in column_ddl
+        assert "Balance in major units" in column_ddl and "\U0001f4b0" in column_ddl
 
 
 def test_mermaid_shows_sanitized_field_descriptions_as_attribute_comments():
     diagram = render_mermaid(load_erd(FIXTURE))
     assert "int id PK \"Primary key 'id' \\ path\"" in diagram
-    assert 'decimal balance "Balance in major units - wallet \U0001F4B0, it\'s \'exact\' second line"' in diagram
+    assert "decimal balance \"Balance in major units - wallet \U0001f4b0, it's 'exact' second line\"" in diagram
     assert 'string label "Plain label"' in diagram
-    assert "string plain\n" in diagram + "\n"   # no comment when there is no description
+    assert "string plain\n" in diagram + "\n"  # no comment when there is no description
 
 
 def test_a_project_without_descriptions_does_not_import_pydantic_field(tmp_path):
     state = translate(load_erd(f"{FIXTURES}/valid_minimal.yml"))
     codebase_dir = CodeGenerator(output_dir=str(tmp_path / "w")).generate_project(state, force=True)
     schemas_src = (codebase_dir / "modules" / "widgets" / "schemas.py").read_text(encoding="utf-8")
-    assert ", Field" not in schemas_src and "Field(" not in schemas_src   # ("Fields required..." docstrings are fine)
+    assert ", Field" not in schemas_src and "Field(" not in schemas_src  # ("Fields required..." docstrings are fine)
 
 
 def test_a_declared_user_entitys_description_becomes_a_table_comment(tmp_path):

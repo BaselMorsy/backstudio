@@ -2,15 +2,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.erd.schema import (
-    ERDConfig,
     ALL_ACTIONS,
     EntitySpec,
+    ERDConfig,
     RelationshipDecl,
     RLSIdentitySource,
     RLSSpec,
     ServiceDecl,
 )
-
 
 MINIMAL = {
     "project": {"name": "Demo"},
@@ -111,12 +110,14 @@ def test_service_prefix_rejects_invalid_values(bad_prefix):
 
 def test_database_async_mode_defaults_to_false():
     from app.erd.schema import DatabaseSpec
+
     spec = DatabaseSpec(type="sqlite", database_name="d.db")
     assert spec.async_mode is False
 
 
 def test_database_async_mode_can_be_enabled():
     from app.erd.schema import DatabaseSpec
+
     spec = DatabaseSpec(type="sqlite", database_name="d.db", async_mode=True)
     assert spec.async_mode is True
 
@@ -149,9 +150,7 @@ def test_relationship_cascades_ownership_true_rejected_on_one_to_one():
 
 def test_relationship_cannot_be_both_owner_and_cascades_ownership():
     with pytest.raises(ValidationError):
-        RelationshipDecl(
-            name="user", cardinality="many-to-one", target="User", owner=True, cascades_ownership=True
-        )
+        RelationshipDecl(name="user", cardinality="many-to-one", target="User", owner=True, cascades_ownership=True)
 
 
 def test_entity_at_most_one_owner_relationship():
@@ -222,6 +221,7 @@ def test_entity_rls_defaults_none():
 
 def test_jwt_spec_new_lifetime_fields_have_correct_defaults():
     from app.erd.schema import JWTSpec
+
     jwt = JWTSpec()
     assert jwt.expiration_minutes == 30
     assert jwt.refresh_token_expiration_minutes == 10080
@@ -231,6 +231,7 @@ def test_jwt_spec_new_lifetime_fields_have_correct_defaults():
 
 def test_jwt_spec_new_lifetime_fields_are_overridable():
     from app.erd.schema import JWTSpec
+
     jwt = JWTSpec(
         refresh_token_expiration_minutes=5,
         email_verification_expiration_minutes=10,
@@ -243,56 +244,66 @@ def test_jwt_spec_new_lifetime_fields_are_overridable():
 
 def test_builtin_asymmetric_algorithm_requires_both_key_path_env_vars():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="private_key_path_env_var"):
         JWTSpec(algorithm="RS256")
 
 
 def test_builtin_asymmetric_algorithm_missing_public_key_path_rejected():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="public_key_path_env_var"):
         JWTSpec(algorithm="RS256", private_key_path_env_var="PRIVATE_KEY_PATH")
 
 
 def test_builtin_symmetric_algorithm_rejects_key_path_fields_set():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="private_key_path_env_var"):
         JWTSpec(algorithm="HS256", private_key_path_env_var="PRIVATE_KEY_PATH")
 
 
 def test_builtin_unrecognized_algorithm_rejected():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="algorithm"):
         JWTSpec(algorithm="PS256")
 
 
 def test_jwt_spec_issuer_defaults_to_none():
     from app.erd.schema import JWTSpec
+
     assert JWTSpec().issuer is None
 
 
 def test_jwt_spec_issuer_is_overridable():
     from app.erd.schema import JWTSpec
+
     assert JWTSpec(issuer="authservice").issuer == "authservice"
 
 
 def test_jwt_spec_audience_defaults_to_none():
     from app.erd.schema import JWTSpec
+
     assert JWTSpec().audience is None
 
 
 def test_jwt_spec_audience_is_overridable():
     from app.erd.schema import JWTSpec
+
     assert JWTSpec(audience="my-api").audience == "my-api"
 
 
 def test_jwt_spec_symmetric_algorithm_rejects_kid_set_explicitly():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="kid"):
         JWTSpec(algorithm="HS256", kid="v1")
 
 
 def test_jwt_spec_asymmetric_algorithm_rejects_secret_env_var_set_explicitly():
     from app.erd.schema import JWTSpec
+
     with pytest.raises(ValidationError, match="secret_env_var"):
         JWTSpec(
             algorithm="RS256",
@@ -304,6 +315,7 @@ def test_jwt_spec_asymmetric_algorithm_rejects_secret_env_var_set_explicitly():
 
 def test_builtin_asymmetric_algorithm_with_both_key_paths_accepted():
     from app.erd.schema import JWTSpec
+
     spec = JWTSpec(
         algorithm="RS256",
         private_key_path_env_var="PRIVATE_KEY_PATH",
@@ -314,30 +326,35 @@ def test_builtin_asymmetric_algorithm_with_both_key_paths_accepted():
 
 def test_registration_spec_defaults_to_open():
     from app.erd.schema import RegistrationSpec
+
     reg = RegistrationSpec()
     assert reg.mode == "open"
 
 
 def test_registration_spec_accepts_valid_modes():
     from app.erd.schema import RegistrationSpec
+
     assert RegistrationSpec(mode="email_verification").mode == "email_verification"
     assert RegistrationSpec(mode="admin_approval").mode == "admin_approval"
 
 
 def test_registration_spec_rejects_unknown_mode():
     from app.erd.schema import RegistrationSpec
+
     with pytest.raises(ValidationError):
         RegistrationSpec(mode="invite_only")
 
 
 def test_auth_spec_registration_defaults_to_open_mode():
     from app.erd.schema import AuthSpec
+
     auth = AuthSpec(enabled=True)
     assert auth.registration.mode == "open"
 
 
 def test_invite_spec_defaults_to_disabled():
     from app.erd.schema import InviteSpec
+
     spec = InviteSpec()
     assert spec.enabled is False
     assert spec.expiration_minutes == 10080
@@ -345,6 +362,7 @@ def test_invite_spec_defaults_to_disabled():
 
 def test_webhook_spec_defaults_to_unset():
     from app.erd.schema import WebhookSpec
+
     spec = WebhookSpec()
     assert spec.url_env_var is None
     assert spec.secret_env_var is None
@@ -352,6 +370,7 @@ def test_webhook_spec_defaults_to_unset():
 
 def test_auth_spec_exposes_invite_and_webhook():
     from app.erd.schema import AuthSpec
+
     auth = AuthSpec(enabled=True, invite={"enabled": True}, webhook={"url_env_var": "NOTIFY_WEBHOOK_URL"})
     assert auth.invite.enabled is True
     assert auth.webhook.url_env_var == "NOTIFY_WEBHOOK_URL"
@@ -420,7 +439,14 @@ def test_valid_new_types_parse():
                     "description": "Append-only ledger",
                     "fields": [
                         {"name": "id", "type": "bigint", "primary_key": True},
-                        {"name": "amount", "type": "decimal", "precision": 18, "scale": 2, "default": "0.00", "description": "Minor units"},
+                        {
+                            "name": "amount",
+                            "type": "decimal",
+                            "precision": 18,
+                            "scale": 2,
+                            "default": "0.00",
+                            "description": "Minor units",
+                        },
                         {"name": "fee", "type": "decimal", "precision": 10, "scale": 4, "default": 0.5},
                         {"name": "n", "type": "decimal", "precision": 5, "scale": 0, "default": 0},
                         {"name": "status", "type": "enum", "values": ["ACTIVE", "DONE"], "default": "ACTIVE"},
@@ -442,11 +468,13 @@ def test_valid_new_types_parse():
 def test_external_auth_requires_the_external_block():
     with pytest.raises(ValidationError):
         from app.erd.schema import AuthSpec
+
         AuthSpec(mode="external")
 
 
 def test_external_auth_spec_defaults():
     from app.erd.schema import ExternalAuthSpec
+
     spec = ExternalAuthSpec(jwks_url_env_var="AUTH_JWKS_URL", issuer="authservice")
     assert spec.algorithms == ["RS256"]
     assert spec.audience is None
@@ -457,24 +485,28 @@ def test_external_auth_spec_defaults():
 @pytest.mark.parametrize("bad_alg", ["HS256", "HS384", "HS512"])
 def test_external_auth_rejects_hmac_algorithms(bad_alg):
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError):
         ExternalAuthSpec(jwks_url_env_var="X", issuer="i", algorithms=[bad_alg])
 
 
 def test_external_auth_rejects_empty_algorithms():
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError):
         ExternalAuthSpec(jwks_url_env_var="X", issuer="i", algorithms=[])
 
 
 def test_external_jwks_verification_requires_jwks_url_env_var():
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError, match="jwks_url_env_var"):
         ExternalAuthSpec(issuer="https://issuer.example")
 
 
 def test_external_jwks_verification_rejects_secret_env_var_set():
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError, match="secret_env_var"):
         ExternalAuthSpec(
             issuer="https://issuer.example",
@@ -485,12 +517,14 @@ def test_external_jwks_verification_rejects_secret_env_var_set():
 
 def test_external_shared_secret_verification_requires_secret_env_var():
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError, match="secret_env_var"):
         ExternalAuthSpec(issuer="https://issuer.example", verification="shared_secret")
 
 
 def test_external_shared_secret_verification_rejects_asymmetric_algorithm():
     from app.erd.schema import ExternalAuthSpec
+
     with pytest.raises(ValidationError, match="HMAC|symmetric"):
         ExternalAuthSpec(
             issuer="https://issuer.example",
@@ -502,6 +536,7 @@ def test_external_shared_secret_verification_rejects_asymmetric_algorithm():
 
 def test_external_shared_secret_verification_accepted():
     from app.erd.schema import ExternalAuthSpec
+
     spec = ExternalAuthSpec(
         issuer="https://issuer.example",
         verification="shared_secret",
@@ -513,6 +548,7 @@ def test_external_shared_secret_verification_accepted():
 
 def test_rls_identity_source_jwt_claim_requires_claim_field():
     from app.erd.schema import RLSIdentitySource
+
     with pytest.raises(ValidationError):
         RLSIdentitySource(type="jwt_claim")
     source = RLSIdentitySource(type="jwt_claim", claim="agency_id")
@@ -521,6 +557,7 @@ def test_rls_identity_source_jwt_claim_requires_claim_field():
 
 def test_rls_identity_source_claim_rejected_on_non_jwt_claim_type():
     from app.erd.schema import RLSIdentitySource
+
     with pytest.raises(ValidationError):
         RLSIdentitySource(type="auth_user", claim="agency_id")
     with pytest.raises(ValidationError):
@@ -529,5 +566,6 @@ def test_rls_identity_source_claim_rejected_on_non_jwt_claim_type():
 
 def test_rls_header_name_still_rejected_on_jwt_claim_type():
     from app.erd.schema import RLSIdentitySource
+
     with pytest.raises(ValidationError):
         RLSIdentitySource(type="jwt_claim", claim="agency_id", header_name="X-Tenant-Id")

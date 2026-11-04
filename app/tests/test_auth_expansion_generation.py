@@ -186,9 +186,14 @@ def test_set_user_roles_rejects_unknown_role(tmp_path):
     roles_start = service_src.index("def set_user_roles(")
     roles_end = service_src.index("\n    def deactivate_user(")
     roles_src = service_src[roles_start:roles_end]
-    assert "ValueError" in roles_src
-    assert "rbac_roles" not in roles_src  # the ALLOWED roles list is baked in at render time, not read from a runtime attribute
-    assert '["admin", "customer"]' in roles_src or "'admin', 'customer'" in roles_src.replace('"', "'")
+    assert "self._check_roles(roles)" in roles_src
+    check_start = service_src.index("def _check_roles(")
+    check_src = service_src[check_start : check_start + 400]
+    assert "ValueError" in check_src
+    assert (
+        "rbac_roles" not in check_src
+    )  # the ALLOWED roles list is baked in at render time, not read from a runtime attribute
+    assert '["admin", "customer"]' in check_src or "'admin', 'customer'" in check_src.replace('"', "'")
 
 
 def test_email_verification_blocks_login_until_verified(tmp_path):
@@ -206,10 +211,12 @@ def test_email_verification_blocks_login_until_verified(tmp_path):
     db_path = tmp_path / "email_verif_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -225,6 +232,7 @@ def test_email_verification_blocks_login_until_verified(tmp_path):
             assert user.is_verified is False
 
             import pytest as _pytest
+
             with _pytest.raises(ValueError, match="Email not verified"):
                 service.authenticate_user(db, "alice@example.com", "supersecret123")
 
@@ -244,7 +252,13 @@ def test_email_verification_blocks_login_until_verified(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -258,10 +272,12 @@ def test_admin_approval_blocks_login_until_approved(tmp_path):
     db_path = tmp_path / "admin_approval_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -284,6 +300,7 @@ def test_admin_approval_blocks_login_until_approved(tmp_path):
             assert user.is_approved is False
 
             import pytest as _pytest
+
             with _pytest.raises(ValueError, match="Account pending approval"):
                 service.authenticate_user(db, "bob@example.com", "supersecret123")
 
@@ -300,7 +317,13 @@ def test_admin_approval_blocks_login_until_approved(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -318,10 +341,12 @@ def test_password_reset_token_is_genuinely_single_use(tmp_path):
     db_path = tmp_path / "pwd_reset_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -349,6 +374,7 @@ def test_password_reset_token_is_genuinely_single_use(tmp_path):
 
             # second use of the SAME token: must fail now, since password_hash changed
             import pytest as _pytest
+
             with _pytest.raises(ValueError, match="Invalid or expired token"):
                 service.verify_password_reset_token(db, token)
 
@@ -365,7 +391,13 @@ def test_password_reset_token_is_genuinely_single_use(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -379,10 +411,12 @@ def test_password_reset_token_rejects_malformed_or_wrong_type_token(tmp_path):
     db_path = tmp_path / "pwd_reset_malformed_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -397,6 +431,7 @@ def test_password_reset_token_rejects_malformed_or_wrong_type_token(tmp_path):
             user = service.register_user(db, "dave@example.com", "supersecret123")
 
             import pytest as _pytest
+
             with _pytest.raises(ValueError, match="Invalid or expired token"):
                 service.verify_password_reset_token(db, "not-a-real-token")
 
@@ -412,7 +447,13 @@ def test_password_reset_token_rejects_malformed_or_wrong_type_token(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -426,10 +467,12 @@ def test_admin_service_methods_actually_work_against_a_real_db(tmp_path):
     db_path = tmp_path / "admin_methods_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -455,6 +498,7 @@ def test_admin_service_methods_actually_work_against_a_real_db(tmp_path):
             assert updated.roles == ["customer"]
 
             import pytest as _pytest
+
             with _pytest.raises(ValueError):
                 service.set_user_roles(db, other_user.id, ["not_a_real_role"])
 
@@ -472,7 +516,13 @@ def test_admin_service_methods_actually_work_against_a_real_db(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -573,8 +623,16 @@ def test_admin_approval_mode_approve_route_present(tmp_path):
 
 
 def test_open_mode_no_rbac_has_only_forgot_reset(tmp_path):
-    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl
-    from app.erd.schema import ModelField, FieldType
+    from app.erd.schema import (
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        ModelField,
+        ProjectMeta,
+        ServiceDecl,
+    )
 
     erd = ERDConfig(
         project=ProjectMeta(name="OpenNoRbac", version="1.0.0"),
@@ -610,7 +668,7 @@ def test_admin_routes_gated_with_require_roles_admin(tmp_path):
     routes_src = (codebase_dir / "modules" / "auth" / "routes.py").read_text(encoding="utf-8")
     assert "from rbac import require_roles" in routes_src
     list_start = routes_src.index('"/users"')
-    list_block = routes_src[list_start:list_start + 400]
+    list_block = routes_src[list_start : list_start + 400]
     assert 'dependencies=[Depends(require_roles("admin"))]' in list_block
 
 

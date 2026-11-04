@@ -2,11 +2,12 @@
 
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.erd import field_types
-from app.utils.file_ops import ensure_directory
+from app.utils.file_ops import ensure_directory, safe_dir_name
 
 _DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -35,10 +36,10 @@ class CodeGenerator:
         # Initialize Jinja2 environment
         self.jinja_env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
-            autoescape=select_autoescape(['html', 'xml']),
+            autoescape=select_autoescape(["html", "xml"]),
             trim_blocks=True,
             lstrip_blocks=True,
-            keep_trailing_newline=True
+            keep_trailing_newline=True,
         )
 
         # Register custom filters
@@ -53,8 +54,9 @@ class CodeGenerator:
         def to_snake_case(text: str) -> str:
             """Convert text to snake_case"""
             import re
-            text = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', text)
-            return re.sub('([a-z0-9])([A-Z])', r'\1_\2', text).lower()
+
+            text = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", text)
+            return re.sub("([a-z0-9])([A-Z])", r"\1_\2", text).lower()
 
         def to_pascal_case(text: str) -> str:
             """Convert text to PascalCase"""
@@ -62,33 +64,34 @@ class CodeGenerator:
             if text and text[0].isupper() and any(c.isupper() for c in text[1:]):
                 return text
             # Otherwise convert from snake_case or other formats
-            return ''.join(word.capitalize() for word in text.replace('_', ' ').split())
+            return "".join(word.capitalize() for word in text.replace("_", " ").split())
 
         def to_camel_case(text: str) -> str:
             """Convert text to camelCase"""
             pascal = to_pascal_case(text)
-            return pascal[0].lower() + pascal[1:] if pascal else ''
+            return pascal[0].lower() + pascal[1:] if pascal else ""
 
         def to_kebab_case(text: str) -> str:
             """Convert text to kebab-case"""
             import re
-            text = re.sub('(.)([A-Z][a-z]+)', r'\1-\2', text)
-            return re.sub('([a-z0-9])([A-Z])', r'\1-\2', text).lower()
 
-        self.jinja_env.filters['snake_case'] = to_snake_case
-        self.jinja_env.filters['pascal_case'] = to_pascal_case
-        self.jinja_env.filters['camel_case'] = to_camel_case
-        self.jinja_env.filters['kebab_case'] = to_kebab_case
-        self.jinja_env.filters['python_value'] = field_types.python_literal
+            text = re.sub("(.)([A-Z][a-z]+)", r"\1-\2", text)
+            return re.sub("([a-z0-9])([A-Z])", r"\1-\2", text).lower()
+
+        self.jinja_env.filters["snake_case"] = to_snake_case
+        self.jinja_env.filters["pascal_case"] = to_pascal_case
+        self.jinja_env.filters["camel_case"] = to_camel_case
+        self.jinja_env.filters["kebab_case"] = to_kebab_case
+        self.jinja_env.filters["python_value"] = field_types.python_literal
 
         # Register global functions for templates
-        self.jinja_env.globals['get_sqlalchemy_type'] = self._get_sqlalchemy_type
-        self.jinja_env.globals['get_python_type'] = self._get_python_type
-        self.jinja_env.globals['sa_column_type'] = field_types.sa_column_type
-        self.jinja_env.globals['py_type'] = field_types.py_type
-        self.jinja_env.globals['py_default'] = field_types.py_default
-        self.jinja_env.globals['sa_extra_imports'] = field_types.sa_extra_imports
-        self.jinja_env.globals['schema_type_imports'] = field_types.schema_type_imports
+        self.jinja_env.globals["get_sqlalchemy_type"] = self._get_sqlalchemy_type
+        self.jinja_env.globals["get_python_type"] = self._get_python_type
+        self.jinja_env.globals["sa_column_type"] = field_types.sa_column_type
+        self.jinja_env.globals["py_type"] = field_types.py_type
+        self.jinja_env.globals["py_default"] = field_types.py_default
+        self.jinja_env.globals["sa_extra_imports"] = field_types.sa_extra_imports
+        self.jinja_env.globals["schema_type_imports"] = field_types.schema_type_imports
 
     def _get_sqlalchemy_type(self, field_type: str) -> str:
         """Map a FieldType value to a SQLAlchemy column type name (see app/erd/field_types.py)."""
@@ -115,7 +118,7 @@ class CodeGenerator:
     def _write_file(self, path: Path, content: str) -> None:
         """Write content to file, ensuring directory exists"""
         ensure_directory(path.parent)
-        path.write_text(content, encoding='utf-8')
+        path.write_text(content, encoding="utf-8")
 
     def generate_project(self, project_state: Dict[str, Any], force: bool = False) -> Path:
         """
@@ -132,11 +135,11 @@ class CodeGenerator:
             FileExistsError: If project exists and force=False
             ValueError: If required configuration missing
         """
-        project_name = project_state['name']
-        framework = project_state['framework']
+        project_name = project_state["name"]
+        framework = project_state["framework"]
 
         # Output directory: workspace/{project_name}
-        project_dir = self.output_dir / project_name
+        project_dir = self.output_dir / safe_dir_name(project_name)
 
         if project_dir.exists() and not force:
             raise FileExistsError(f"Generated code already exists at {project_dir}")
@@ -147,7 +150,7 @@ class CodeGenerator:
         ensure_directory(project_dir)
 
         # Generate FastAPI project (Python only)
-        if framework == 'fastapi':
+        if framework == "fastapi":
             self._generate_fastapi_project(project_state, project_dir)
         else:
             raise ValueError(f"Unsupported framework: {framework}. Only 'fastapi' is supported.")
@@ -167,7 +170,7 @@ class CodeGenerator:
         - requirements.txt
         - README.md
         """
-        context = {'project': state}
+        context = {"project": state}
 
         # Create database directory
         db_dir = output_dir / "database"
@@ -175,135 +178,96 @@ class CodeGenerator:
         (db_dir / "__init__.py").touch()
 
         # Generate database files
-        self._write_file(
-            db_dir / "base.py",
-            self._render_template("Python/database/base.py.jinja", context)
-        )
-        self._write_file(
-            db_dir / "models.py",
-            self._render_template("Python/database/models.py.jinja", context)
-        )
-        if state.get('enums'):
-            self._write_file(
-                db_dir / "enums.py",
-                self._render_template("Python/database/enums.py.jinja", context)
-            )
-        self._write_file(
-            db_dir / "repo.py",
-            self._render_template("Python/database/repo.py.jinja", context)
-        )
+        self._write_file(db_dir / "base.py", self._render_template("Python/database/base.py.jinja", context))
+        self._write_file(db_dir / "models.py", self._render_template("Python/database/models.py.jinja", context))
+        if state.get("enums"):
+            self._write_file(db_dir / "enums.py", self._render_template("Python/database/enums.py.jinja", context))
+        self._write_file(db_dir / "repo.py", self._render_template("Python/database/repo.py.jinja", context))
 
         # Generate one directory per service/module from an ERD
-        if state.get('modules'):
+        if state.get("modules"):
             modules_dir = output_dir / "modules"
             ensure_directory(modules_dir)
             (modules_dir / "__init__.py").touch()
 
-        for module in state.get('modules', []):
-            module_dir = output_dir / "modules" / module['snake_name']
+        for module in state.get("modules", []):
+            module_dir = output_dir / "modules" / module["snake_name"]
             ensure_directory(module_dir)
             (module_dir / "__init__.py").touch()
 
-            module_context = {'project': state, 'module': module}
+            module_context = {"project": state, "module": module}
             self._write_file(
                 module_dir / "schemas.py",
-                self._render_template("Python/service/module_schemas.py.jinja", module_context)
+                self._render_template("Python/service/module_schemas.py.jinja", module_context),
             )
             self._write_file(
                 module_dir / "service.py",
-                self._render_template("Python/service/module_service.py.jinja", module_context)
+                self._render_template("Python/service/module_service.py.jinja", module_context),
             )
             self._write_file(
-                module_dir / "routes.py",
-                self._render_template("Python/service/module_routes.py.jinja", module_context)
+                module_dir / "routes.py", self._render_template("Python/service/module_routes.py.jinja", module_context)
             )
 
         # Auth service, generated as a module. mode: builtin gets register/login/refresh/me
         # (JWT signed by this service); mode: external gets only JWKS verification - there is
         # nothing to register, log in, or reset a password for.
-        if state.get('auth_enabled'):
+        if state.get("auth_enabled"):
             ensure_directory(output_dir / "modules")
             (output_dir / "modules" / "__init__.py").touch()
-            auth_dir = output_dir / "modules" / state.get('auth_module_name', 'auth')
+            auth_dir = output_dir / "modules" / state.get("auth_module_name", "auth")
             ensure_directory(auth_dir)
             (auth_dir / "__init__.py").touch()
-            if state.get('auth_mode') == 'external':
+            if state.get("auth_mode") == "external":
                 self._write_file(
-                    auth_dir / "service.py",
-                    self._render_template("Python/auth/external_service.py.jinja", context)
+                    auth_dir / "service.py", self._render_template("Python/auth/external_service.py.jinja", context)
                 )
             else:
-                self._write_file(auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context))
-                self._write_file(auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context))
+                self._write_file(
+                    auth_dir / "schemas.py", self._render_template("Python/auth/schemas.py.jinja", context)
+                )
+                self._write_file(
+                    auth_dir / "service.py", self._render_template("Python/auth/service.py.jinja", context)
+                )
                 self._write_file(auth_dir / "routes.py", self._render_template("Python/auth/routes.py.jinja", context))
                 self._write_file(auth_dir / "email.py", self._render_template("Python/auth/email.py.jinja", context))
-                security_config = state.get('security_config') or {}
-                if security_config.get('jwt_is_asymmetric'):
+                security_config = state.get("security_config") or {}
+                if security_config.get("jwt_is_asymmetric"):
                     self._write_file(auth_dir / "jwks.py", self._render_template("Python/auth/jwks.py.jinja", context))
 
         # RBAC dependency (only meaningful once auth exists, enforced at the ERD validation layer)
-        if state.get('rbac_enabled'):
-            self._write_file(
-                output_dir / "rbac.py",
-                self._render_template("Python/rbac/dependency.py.jinja", context)
-            )
+        if state.get("rbac_enabled"):
+            self._write_file(output_dir / "rbac.py", self._render_template("Python/rbac/dependency.py.jinja", context))
 
         # Alembic scaffolding (unconditional - every generated project gets migrations)
         alembic_dir = output_dir / "alembic"
         ensure_directory(alembic_dir / "versions")
-        self._write_file(
-            output_dir / "alembic.ini",
-            self._render_template("Python/alembic/alembic.ini.jinja", context)
-        )
-        self._write_file(
-            alembic_dir / "env.py",
-            self._render_template("Python/alembic/env.py.jinja", context)
-        )
+        self._write_file(output_dir / "alembic.ini", self._render_template("Python/alembic/alembic.ini.jinja", context))
+        self._write_file(alembic_dir / "env.py", self._render_template("Python/alembic/env.py.jinja", context))
         # script.py.mako is Alembic's OWN Mako template (used by `alembic revision` to
         # generate new migration files) - it is copied verbatim, never rendered through
         # Jinja2, since its ${...} syntax is Mako's, not ours.
         mako_source = self.templates_dir / "Python" / "alembic" / "script.py.mako.jinja"
-        self._write_file(alembic_dir / "script.py.mako", mako_source.read_text(encoding='utf-8'))
+        self._write_file(alembic_dir / "script.py.mako", mako_source.read_text(encoding="utf-8"))
 
         # Generate main application files
+        self._write_file(output_dir / "config.py", self._render_template("Python/config.py.jinja", context))
+        self._write_file(output_dir / "server.py", self._render_template("Python/server.py.jinja", context))
+        self._write_file(output_dir / "middleware.py", self._render_template("Python/middleware.py.jinja", context))
+        self._write_file(output_dir / "dependencies.py", self._render_template("Python/dependencies.py.jinja", context))
         self._write_file(
-            output_dir / "config.py",
-            self._render_template("Python/config.py.jinja", context)
+            output_dir / "requirements.txt", self._render_template("Python/requirements.txt.jinja", context)
         )
-        self._write_file(
-            output_dir / "server.py",
-            self._render_template("Python/server.py.jinja", context)
-        )
-        self._write_file(
-            output_dir / "middleware.py",
-            self._render_template("Python/middleware.py.jinja", context)
-        )
-        self._write_file(
-            output_dir / "dependencies.py",
-            self._render_template("Python/dependencies.py.jinja", context)
-        )
-        self._write_file(
-            output_dir / "requirements.txt",
-            self._render_template("Python/requirements.txt.jinja", context)
-        )
-        self._write_file(
-            output_dir / "README.md",
-            self._render_template("Python/README.md.jinja", context)
-        )
-        self._write_file(
-            output_dir / ".gitignore",
-            self._render_template("Python/gitignore.jinja", context)
-        )
-
+        self._write_file(output_dir / "README.md", self._render_template("Python/README.md.jinja", context))
+        self._write_file(output_dir / ".gitignore", self._render_template("Python/gitignore.jinja", context))
 
     def _to_snake_case(self, text: str) -> str:
         """Helper to convert to snake_case"""
         import re
-        text = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', text)
-        return re.sub('([a-z0-9])([A-Z])', r'\1_\2', text).lower()
+
+        text = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", text)
+        return re.sub("([a-z0-9])([A-Z])", r"\1_\2", text).lower()
 
     def _to_camel_case(self, text: str) -> str:
         """Helper to convert to camelCase"""
-        pascal = ''.join(word.capitalize() for word in text.replace('_', ' ').split())
-        return pascal[0].lower() + pascal[1:] if pascal else ''
-
+        pascal = "".join(word.capitalize() for word in text.replace("_", " ").split())
+        return pascal[0].lower() + pascal[1:] if pascal else ""

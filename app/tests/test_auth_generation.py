@@ -62,9 +62,15 @@ def test_no_auth_module_when_disabled(tmp_path):
 
 def test_renamed_auth_service_uses_its_own_name(tmp_path):
     from app.erd.schema import (
-        ERDConfig, ProjectMeta, DatabaseSpec, AuthSpec, EntitySpec, ServiceDecl,
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        ModelField,
+        ProjectMeta,
+        ServiceDecl,
     )
-    from app.erd.schema import ModelField, FieldType
 
     erd = ERDConfig(
         project=ProjectMeta(name="Demo", version="1.0.0"),

@@ -5,16 +5,37 @@ from app.erd.schema import FieldType
 from app.services.code_generator import CodeGenerator
 
 LEGACY_SA = {
-    "string": "String", "integer": "Integer", "float": "Float", "boolean": "Boolean",
-    "datetime": "DateTime", "date": "Date", "text": "Text", "json": "JSON", "uuid": "Uuid(as_uuid=True)",
+    "string": "String",
+    "integer": "Integer",
+    "float": "Float",
+    "boolean": "Boolean",
+    "datetime": "DateTime",
+    "date": "Date",
+    "text": "Text",
+    "json": "JSON",
+    "uuid": "Uuid(as_uuid=True)",
 }
 LEGACY_PY = {
-    "string": "str", "integer": "int", "float": "float", "boolean": "bool",
-    "datetime": "datetime", "date": "date", "text": "str", "json": "Any", "uuid": "UUID",
+    "string": "str",
+    "integer": "int",
+    "float": "float",
+    "boolean": "bool",
+    "datetime": "datetime",
+    "date": "date",
+    "text": "str",
+    "json": "Any",
+    "uuid": "UUID",
 }
 LEGACY_MERMAID = {
-    "string": "string", "integer": "int", "float": "float", "boolean": "bool",
-    "datetime": "datetime", "date": "date", "text": "text", "json": "json", "uuid": "uuid",
+    "string": "string",
+    "integer": "int",
+    "float": "float",
+    "boolean": "bool",
+    "datetime": "datetime",
+    "date": "date",
+    "text": "text",
+    "json": "json",
+    "uuid": "uuid",
 }
 
 
@@ -38,8 +59,14 @@ def test_unknown_types_fall_back_like_the_legacy_maps():
 @pytest.mark.parametrize(
     "value,expected",
     [
-        (True, "True"), (False, "False"), (None, "None"), (3, "3"), (2.5, "2.5"),
-        ([], "[]"), ("plain", "'plain'"), ("O'Brien's", '"O\'Brien\'s"'),
+        (True, "True"),
+        (False, "False"),
+        (None, "None"),
+        (3, "3"),
+        (2.5, "2.5"),
+        ([], "[]"),
+        ("plain", "'plain'"),
+        ("O'Brien's", "\"O'Brien's\""),
     ],
 )
 def test_python_literal_matches_the_old_python_value_filter(value, expected):
@@ -74,10 +101,24 @@ def _field(type_, **extra):
 @pytest.mark.parametrize(
     "value,ok",
     [
-        ("ACTIVE", True), ("in_progress", True), ("A1", True), ("Posted", True),
-        ("class", False), ("None", False), ("True", False), ("mro", False), ("name", False),
-        ("value", False), ("count", False), ("upper", False), ("_x", False), ("__x", False),
-        ("1A", False), ("in-progress", False), ("has space", False), ("", False),
+        ("ACTIVE", True),
+        ("in_progress", True),
+        ("A1", True),
+        ("Posted", True),
+        ("class", False),
+        ("None", False),
+        ("True", False),
+        ("mro", False),
+        ("name", False),
+        ("value", False),
+        ("count", False),
+        ("upper", False),
+        ("_x", False),
+        ("__x", False),
+        ("1A", False),
+        ("in-progress", False),
+        ("has space", False),
+        ("", False),
     ],
 )
 def test_is_safe_enum_member(value, ok):
@@ -134,7 +175,7 @@ def test_py_type_variants():
 
 
 def test_py_default_variants():
-    assert ft.py_default(_field("string", default="O'Brien's")) == '"O\'Brien\'s"'
+    assert ft.py_default(_field("string", default="O'Brien's")) == "\"O'Brien's\""
     assert ft.py_default(_field("integer", default=3)) == "3"
     assert ft.py_default(_field("boolean", default=False)) == "False"
     assert ft.py_default(_field("decimal", precision=10, scale=4, default=0.5)) == "Decimal('0.5')"
@@ -151,15 +192,20 @@ def test_sa_extra_imports_orders_and_dedupes():
         ],
         "relationships": [
             {"foreign_key": {"column_type": "bigint"}},
-            {"association_table": {"left_foreign_key": {"column_type": "integer"}, "right_foreign_key": {"column_type": "bigint"}}},
+            {
+                "association_table": {
+                    "left_foreign_key": {"column_type": "integer"},
+                    "right_foreign_key": {"column_type": "bigint"},
+                }
+            },
         ],
     }
     assert ft.sa_extra_imports(project) == ["BigInteger", "Enum", "Numeric", "Uuid"]
     assert ft.sa_extra_imports({"data_models": [{"fields": [_field("integer")]}], "relationships": []}) == []
     # an FK-only bigint (no bigint field) still needs the import
-    assert ft.sa_extra_imports(
-        {"data_models": [], "relationships": [{"foreign_key": {"column_type": "bigint"}}]}
-    ) == ["BigInteger"]
+    assert ft.sa_extra_imports({"data_models": [], "relationships": [{"foreign_key": {"column_type": "bigint"}}]}) == [
+        "BigInteger"
+    ]
 
 
 def test_schema_type_imports():

@@ -76,7 +76,7 @@ def test_shophub_mini_relationship_crosses_service_boundary(tmp_path):
     order_class_src = models_src[order_class_start:next_class_start]
 
     assert "product_id" in order_class_src
-    assert 'ForeignKey(\'products.id\')' in order_class_src or 'ForeignKey("products.id")' in order_class_src
+    assert "ForeignKey('products.id')" in order_class_src or 'ForeignKey("products.id")' in order_class_src
     assert "product = relationship(" in order_class_src
 
 
@@ -150,9 +150,7 @@ def test_self_referential_relationships_generate_and_byte_compile(tmp_path):
     models_src = (codebase_dir / "database" / "models.py").read_text(encoding="utf-8")
     ast.parse(models_src)
 
-    class_starts = sorted(
-        [models_src.index("class Employee(Base):"), models_src.index("class Category(Base):")]
-    )
+    class_starts = sorted([models_src.index("class Employee(Base):"), models_src.index("class Category(Base):")])
     boundaries = class_starts + [len(models_src)]
     employee_start = models_src.index("class Employee(Base):")
     category_start = models_src.index("class Category(Base):")

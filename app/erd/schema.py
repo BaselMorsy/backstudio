@@ -10,6 +10,7 @@ from app.erd.field_types import is_safe_enum_member, to_decimal, to_uuid
 
 class Cardinality(str, Enum):
     """Relationship cardinality types"""
+
     ONE_TO_MANY = "one-to-many"
     MANY_TO_ONE = "many-to-one"
     ONE_TO_ONE = "one-to-one"
@@ -18,6 +19,7 @@ class Cardinality(str, Enum):
 
 class LazyStrategy(str, Enum):
     """SQLAlchemy lazy loading strategies"""
+
     SELECT = "select"
     JOINED = "joined"
     SELECTIN = "selectin"
@@ -27,6 +29,7 @@ class LazyStrategy(str, Enum):
 
 class FieldType(str, Enum):
     """Data model field types"""
+
     STRING = "string"
     INTEGER = "integer"
     FLOAT = "float"
@@ -43,6 +46,7 @@ class FieldType(str, Enum):
 
 class ModelField(BaseModel):
     """Data model field specification"""
+
     name: str = Field(..., description="Field name")
     type: FieldType = Field(..., description="Field data type")
     nullable: bool = Field(default=True, description="Whether field can be null")
@@ -114,6 +118,7 @@ ALL_ACTIONS = ["create", "list", "read", "update", "delete"]
 
 class CliDatabaseType(str, Enum):
     """Database backends the CLI's SQLAlchemy code generation supports."""
+
     POSTGRESQL = "postgresql"
     MYSQL = "mysql"
     SQLITE = "sqlite"
@@ -232,9 +237,7 @@ class ExternalAuthSpec(BaseModel):
             raise ValueError("auth.external.algorithms must not be empty")
         if self.verification == "jwks":
             if self.jwks_url_env_var is None:
-                raise ValueError(
-                    "auth.external.verification: 'jwks' requires auth.external.jwks_url_env_var"
-                )
+                raise ValueError("auth.external.verification: 'jwks' requires auth.external.jwks_url_env_var")
             if self.secret_env_var is not None:
                 raise ValueError(
                     "auth.external.secret_env_var only applies to verification: 'shared_secret' - "
@@ -251,9 +254,7 @@ class ExternalAuthSpec(BaseModel):
                 )
         else:
             if self.secret_env_var is None:
-                raise ValueError(
-                    "auth.external.verification: 'shared_secret' requires auth.external.secret_env_var"
-                )
+                raise ValueError("auth.external.verification: 'shared_secret' requires auth.external.secret_env_var")
             if self.jwks_url_env_var is not None:
                 raise ValueError(
                     "auth.external.jwks_url_env_var only applies to verification: 'jwks' - "
@@ -294,10 +295,7 @@ class AuthSpec(BaseModel):
         if self.mode == "external" and self.external is None:
             raise ValueError("auth.mode: external requires auth.external to be set")
         if self.mode == "builtin" and self.external is not None:
-            raise ValueError(
-                "auth.external is only valid when auth.mode: external - remove it, or set "
-                "mode: external"
-            )
+            raise ValueError("auth.external is only valid when auth.mode: external - remove it, or set mode: external")
         return self
 
 
@@ -311,9 +309,7 @@ class RBACSpec(BaseModel):
     def actions_are_known(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
         for action in v:
             if action not in ALL_ACTIONS:
-                raise ValueError(
-                    f"rbac.default_permissions: unknown action '{action}' (expected one of {ALL_ACTIONS})"
-                )
+                raise ValueError(f"rbac.default_permissions: unknown action '{action}' (expected one of {ALL_ACTIONS})")
         return v
 
 
@@ -327,8 +323,7 @@ class RLSIdentitySource(BaseModel):
         if self.type == "header":
             if not self.header_name:
                 raise ValueError(
-                    "rls.identity_source: type 'header' requires 'header_name' to be set "
-                    "(e.g. 'X-Tenant-Id')"
+                    "rls.identity_source: type 'header' requires 'header_name' to be set (e.g. 'X-Tenant-Id')"
                 )
             if self.header_name.strip().lower() == "authorization":
                 raise ValueError(
@@ -359,6 +354,7 @@ class RelationshipDecl(BaseModel):
 
     Only one side needs to declare it; `translate.py` fills in the other side.
     """
+
     name: str
     cardinality: Cardinality
     target: str
@@ -394,6 +390,7 @@ class RelationshipDecl(BaseModel):
 
 class ServiceDecl(BaseModel):
     """Assigns a set of entities to a named service/module."""
+
     name: str = Field(..., min_length=1)
     entities: List[str] = Field(..., min_length=1)
     prefix: Optional[str] = None
@@ -420,9 +417,7 @@ class ServiceDecl(BaseModel):
                 "entirely (or leave it unset) rather than setting an empty prefix"
             )
         if not v.startswith("/"):
-            raise ValueError(
-                f"services: prefix '{v}' must start with '/' (e.g. '/catalog')"
-            )
+            raise ValueError(f"services: prefix '{v}' must start with '/' (e.g. '/catalog')")
         if v.endswith("/"):
             raise ValueError(
                 f"services: prefix '{v}' must not end with '/' (e.g. '/catalog', not '/catalog/') "
@@ -437,9 +432,7 @@ class ServiceDecl(BaseModel):
                     "characters have no legitimate meaning in a URL path segment"
                 )
         if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in v):
-            raise ValueError(
-                f"services: prefix {v!r} must not contain control characters"
-            )
+            raise ValueError(f"services: prefix {v!r} must not contain control characters")
         return v
 
 

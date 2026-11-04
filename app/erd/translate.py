@@ -4,18 +4,18 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
-from app.utils.checksum import compute_checksum
 from app.erd.field_types import enum_class_name, py_type_for
 from app.erd.loader import ERDValidationError
 from app.erd.schema import (
     ALL_ACTIONS,
     ASYMMETRIC_JWT_ALGORITHMS,
-    ERDConfig,
     EntitySpec,
+    ERDConfig,
     FieldType,
     ModelField,
     RelationshipDecl,
 )
+from app.utils.checksum import compute_checksum
 
 # created_at/updated_at are timezone: False because the auth code writes naive
 # datetime.utcnow() - a timezone-aware column would misread that value on PostgreSQL.
@@ -89,7 +89,12 @@ def _field_dicts(
             data["enum_class"] = class_name
             data["enum_constraint"] = constraint
             enums.append(
-                {"class_name": class_name, "values": list(field.values), "entity": entity_name, "field": field.name}
+                {
+                    "class_name": class_name,
+                    "values": list(field.values or []),
+                    "entity": entity_name,
+                    "field": field.name,
+                }
             )
         dicts.append(data)
     return dicts
@@ -151,7 +156,8 @@ def _build_relationship(
 
     if rel.cardinality == "many-to-many":
         default_table_name = (
-            f"{_snake_case(entity.name)}_{name_basis}" if use_name_basis
+            f"{_snake_case(entity.name)}_{name_basis}"
+            if use_name_basis
             else f"{_snake_case(entity.name)}_{_snake_case(rel.target)}"
         )
         table_name = rel.association_table or default_table_name
@@ -174,12 +180,16 @@ def _build_relationship(
 
     if rel.cardinality == "one-to-many":
         fk_model = rel.target
-        fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(entity.name)}_id")
+        fk_column = rel.foreign_key_column or (
+            f"{name_basis}_id" if use_name_basis else f"{_snake_case(entity.name)}_id"
+        )
         fk_references = f"{entity_table}.id"
         fk_type = _pk_type(erd, entity.name)
     else:  # many-to-one or one-to-one: this entity owns the FK column
         fk_model = entity.name
-        fk_column = rel.foreign_key_column or (f"{name_basis}_id" if use_name_basis else f"{_snake_case(rel.target)}_id")
+        fk_column = rel.foreign_key_column or (
+            f"{name_basis}_id" if use_name_basis else f"{_snake_case(rel.target)}_id"
+        )
         fk_references = f"{target_table}.id"
         fk_type = _pk_type(erd, rel.target)
 
@@ -272,15 +282,17 @@ def _owned_relationships_for(entity_name: str, rels: List[Dict[str, Any]]) -> Li
             is_source = rel["source"]["model"] == entity_name
         seen_names.add(rel["name"])
         other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
-        owned.append({
-            "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
-            "fk_column": fk["column"],
-            "fk_nullable": fk["nullable"],
-            "target_model": other_model,
-            "target_snake": _snake_case(other_model),
-            "owner": rel.get("owner", False),
-            "cascades_ownership": rel.get("cascades_ownership", False),
-        })
+        owned.append(
+            {
+                "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
+                "fk_column": fk["column"],
+                "fk_nullable": fk["nullable"],
+                "target_model": other_model,
+                "target_snake": _snake_case(other_model),
+                "owner": rel.get("owner", False),
+                "cascades_ownership": rel.get("cascades_ownership", False),
+            }
+        )
     return owned
 
 
@@ -300,11 +312,13 @@ def _many_to_many_relationships_for(entity_name: str, rels: List[Dict[str, Any]]
         view = rel.get("_view")
         is_source = (view == "source") if view is not None else (rel["source"]["model"] == entity_name)
         other_model = rel["target"]["model"] if is_source else rel["source"]["model"]
-        m2m.append({
-            "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
-            "target_model": other_model,
-            "target_plural_snake": _pluralize(other_model),
-        })
+        m2m.append(
+            {
+                "attribute": rel["source"]["attribute"] if is_source else rel["target"]["attribute"],
+                "target_model": other_model,
+                "target_plural_snake": _pluralize(other_model),
+            }
+        )
     return m2m
 
 
@@ -350,7 +364,12 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
         owner_rel = owner_rel_of(model_name)
         if owner_rel is not None:
             entity = entity_by_name[model_name]
-            match_field_name = entity.rls.owner_match_field
+            entity_rls = entity.rls
+            if entity_rls is None:
+                raise ERDValidationError(
+                    f"Entity '{model_name}' has an 'owner: true' relationship but declares no 'rls:' block."
+                )
+            match_field_name = entity_rls.owner_match_field
             if match_field_name:
                 owner_entity_name = owner_rel["target_model"]
                 owner_model = data_models[owner_entity_name]
@@ -360,15 +379,17 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
                     "root_model": owner_entity_name,
                     "owner_fk_column": match_field_name,
                     "owner_id_type": py_type_for(match_field["type"]),
-                    "join_chain": [{
-                        "from_model": model_name,
-                        "from_fk_column": owner_rel["fk_column"],
-                        "to_model": owner_entity_name,
-                        "to_pk_column": pk_column_of(owner_entity_name),
-                    }],
-                    "identity_source": entity.rls.identity_source.model_dump(mode="json"),
-                    "bypass_roles": list(entity.rls.bypass_roles),
-                    "read_scope": entity.rls.read_scope,
+                    "join_chain": [
+                        {
+                            "from_model": model_name,
+                            "from_fk_column": owner_rel["fk_column"],
+                            "to_model": owner_entity_name,
+                            "to_pk_column": pk_column_of(owner_entity_name),
+                        }
+                    ],
+                    "identity_source": entity_rls.identity_source.model_dump(mode="json"),
+                    "bypass_roles": list(entity_rls.bypass_roles),
+                    "read_scope": entity_rls.read_scope,
                 }
             else:
                 rls = {
@@ -377,9 +398,9 @@ def _resolve_rls(erd: ERDConfig, data_models: Dict[str, Dict[str, Any]]) -> None
                     "owner_fk_column": owner_rel["fk_column"],
                     "owner_id_type": "int",
                     "join_chain": [],
-                    "identity_source": entity.rls.identity_source.model_dump(mode="json"),
-                    "bypass_roles": list(entity.rls.bypass_roles),
-                    "read_scope": entity.rls.read_scope,
+                    "identity_source": entity_rls.identity_source.model_dump(mode="json"),
+                    "bypass_roles": list(entity_rls.bypass_roles),
+                    "read_scope": entity_rls.read_scope,
                 }
             model["rls"] = rls
             owner_rel["is_rls_link"] = True
@@ -479,11 +500,13 @@ def _resolve_modules(erd: ERDConfig, crud_entities: List[Dict[str, Any]]) -> Lis
     for svc in erd.services:
         if svc.entities == ["User"]:
             continue  # the auth service is resolved separately via auth_module_name
-        modules.append({
-            "name": svc.name,
-            "snake_name": _snake_case(svc.name),
-            "entities": [by_name[name] for name in svc.entities],
-        })
+        modules.append(
+            {
+                "name": svc.name,
+                "snake_name": _snake_case(svc.name),
+                "entities": [by_name[name] for name in svc.entities],
+            }
+        )
     return modules
 
 
@@ -565,27 +588,29 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
     crud_entities: List[Dict[str, Any]] = []
     for entity in entities:
         plural_snake = _pluralize(entity.name)
-        crud_entities.append({
-            "name": entity.name,
-            "snake_name": _snake_case(entity.name),
-            "plural_snake": plural_snake,
-            "base_path": (
-                entity.endpoints.base_path
-                or (
-                    f"{service_prefix_by_entity.get(entity.name)}/{plural_snake}"
-                    if service_prefix_by_entity.get(entity.name)
-                    else f"/{plural_snake}"
-                )
-            ),
-            "tags": entity.endpoints.tags or [plural_snake],
-            "enabled_actions": entity.endpoints.enabled,
-            "description": entity.description,
-            "rbac": _resolve_rbac(erd, entity),
-            "fields": [dict(f) for f in field_dicts[entity.name]],
-            "owned_relationships": data_models[entity.name]["owned_relationships"],
-            "many_to_many_relationships": data_models[entity.name]["many_to_many_relationships"],
-            "rls": data_models[entity.name]["rls"],
-        })
+        crud_entities.append(
+            {
+                "name": entity.name,
+                "snake_name": _snake_case(entity.name),
+                "plural_snake": plural_snake,
+                "base_path": (
+                    entity.endpoints.base_path
+                    or (
+                        f"{service_prefix_by_entity.get(entity.name)}/{plural_snake}"
+                        if service_prefix_by_entity.get(entity.name)
+                        else f"/{plural_snake}"
+                    )
+                ),
+                "tags": entity.endpoints.tags or [plural_snake],
+                "enabled_actions": entity.endpoints.enabled,
+                "description": entity.description,
+                "rbac": _resolve_rbac(erd, entity),
+                "fields": [dict(f) for f in field_dicts[entity.name]],
+                "owned_relationships": data_models[entity.name]["owned_relationships"],
+                "many_to_many_relationships": data_models[entity.name]["many_to_many_relationships"],
+                "rls": data_models[entity.name]["rls"],
+            }
+        )
 
     modules = _resolve_modules(erd, crud_entities)
     auth_module_name = _resolve_auth_module_name(erd)
@@ -610,14 +635,17 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
 
     external_auth_config = None
     if erd.auth.enabled and auth_mode == "external":
+        external = erd.auth.external
+        if external is None:
+            raise ERDValidationError("auth.mode: external requires an 'auth.external' block.")
         external_auth_config = {
-            "verification": erd.auth.external.verification,
-            "jwks_url_env_var": erd.auth.external.jwks_url_env_var,
-            "secret_env_var": erd.auth.external.secret_env_var,
-            "issuer": erd.auth.external.issuer,
-            "audience": erd.auth.external.audience,
-            "algorithms": list(erd.auth.external.algorithms),
-            "claims": {"subject": erd.auth.external.claims.subject, "roles": erd.auth.external.claims.roles},
+            "verification": external.verification,
+            "jwks_url_env_var": external.jwks_url_env_var,
+            "secret_env_var": external.secret_env_var,
+            "issuer": external.issuer,
+            "audience": external.audience,
+            "algorithms": list(external.algorithms),
+            "claims": {"subject": external.claims.subject, "roles": external.claims.roles},
         }
 
     state = {
@@ -631,7 +659,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
         "relationships": relationships,
         "middlewares": [],
         "dependencies": [],
-        "database_config": erd.database.model_dump(mode='json'),
+        "database_config": erd.database.model_dump(mode="json"),
         "security_config": security_config,
         "external_auth_config": external_auth_config,
         "modules": modules,

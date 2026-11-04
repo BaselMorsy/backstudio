@@ -35,32 +35,57 @@ def test_repo_and_service_only_contain_functions_for_enabled_actions(tmp_path):
 
     # get_*_by_id is ALWAYS generated: FK validation in other modules and update/delete use it.
     for present in (
-        "def get_archive_by_id(", "def get_all_archives(", "def get_sealed_by_id(",
-        "def create_note(", "def get_all_notes(", "def update_note(", "def delete_note(",
+        "def get_archive_by_id(",
+        "def get_all_archives(",
+        "def get_sealed_by_id(",
+        "def create_note(",
+        "def get_all_notes(",
+        "def update_note(",
+        "def delete_note(",
     ):
         assert present in repo_src, present
     for absent in (
-        "def create_archive(", "def update_archive(", "def delete_archive(",
-        "def create_sealed(", "def get_all_sealeds(", "def update_sealed(", "def delete_sealed(",
+        "def create_archive(",
+        "def update_archive(",
+        "def delete_archive(",
+        "def create_sealed(",
+        "def get_all_sealeds(",
+        "def update_sealed(",
+        "def delete_sealed(",
     ):
         assert absent not in repo_src, absent
 
     for present in (
-        "def list_archives(", "def get_archive(", "def create_note(", "def list_notes(",
-        "def get_note(", "def update_note(", "def delete_note(",
+        "def list_archives(",
+        "def get_archive(",
+        "def create_note(",
+        "def list_notes(",
+        "def get_note(",
+        "def update_note(",
+        "def delete_note(",
     ):
         assert present in service_src, present
     for absent in (
-        "def create_archive(", "def update_archive(", "def delete_archive(", "def create_sealed(",
-        "def list_sealeds(", "def get_sealed(", "def update_sealed(", "def delete_sealed(",
+        "def create_archive(",
+        "def update_archive(",
+        "def delete_archive(",
+        "def create_sealed(",
+        "def list_sealeds(",
+        "def get_sealed(",
+        "def update_sealed(",
+        "def delete_sealed(",
     ):
         assert absent not in service_src, absent
 
-    result = subprocess.run([sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "compileall", "-q", str(codebase_dir)], capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_disabled_entity_is_still_a_valid_fk_target_and_has_no_mutating_routes(tmp_path, monkeypatch, isolated_sys_path):
+def test_disabled_entity_is_still_a_valid_fk_target_and_has_no_mutating_routes(
+    tmp_path, monkeypatch, isolated_sys_path
+):
     """Review Focus: an entity with no HTTP create (Archive) must still be usable as the FK
     target of another module's create - get_archive_by_id has to survive the gating."""
     codebase_dir = _generate(tmp_path)

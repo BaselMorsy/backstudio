@@ -78,10 +78,12 @@ def test_root_owned_filtering_actually_works_against_a_real_db(tmp_path):
     db_path = tmp_path / "rls_root_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -131,7 +133,13 @@ def test_root_owned_filtering_actually_works_against_a_real_db(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -178,10 +186,12 @@ def test_cascade_owned_filtering_actually_works_against_a_real_db_at_two_hops(tm
     db_path = tmp_path / "rls_cascade_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -227,7 +237,13 @@ def test_cascade_owned_filtering_actually_works_against_a_real_db_at_two_hops(tm
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -263,10 +279,12 @@ def test_root_owned_create_service_actually_ignores_client_supplied_owner(tmp_pa
     db_path = tmp_path / "rls_service_create_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -293,7 +311,13 @@ def test_root_owned_create_service_actually_ignores_client_supplied_owner(tmp_pa
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -324,10 +348,12 @@ def test_cascade_owned_create_actually_rejects_an_unowned_parent(tmp_path):
     db_path = tmp_path / "rls_cascade_create_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -364,7 +390,13 @@ def test_cascade_owned_create_actually_rejects_an_unowned_parent(tmp_path):
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -383,10 +415,12 @@ def test_update_reassigning_cascade_linking_fk_validates_new_parent_ownership(tm
     db_path = tmp_path / "rls_cascade_update_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -416,7 +450,13 @@ def test_update_reassigning_cascade_linking_fk_validates_new_parent_ownership(tm
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -455,10 +495,12 @@ def test_cascade_owner_id_composes_with_an_existing_owned_relationship_filter(tm
     db_path = tmp_path / "rls_composability_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -490,7 +532,13 @@ def test_cascade_owner_id_composes_with_an_existing_owned_relationship_filter(tm
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -520,7 +568,7 @@ def test_rbac_gated_rls_entity_uses_current_user_as_named_param(tmp_path):
     # intersection call is asserted here on the list route instead, which is where
     # owner_id=None ("don't filter") is the correct meaning of a bypass role.
     list_start = routes_src.index("def list_order_route(")
-    list_src = routes_src[list_start:routes_src.index("\n@router.get(", list_start)]
+    list_src = routes_src[list_start : routes_src.index("\n@router.get(", list_start)]
     assert "owner_id = None if set(current_user.roles or []).intersection(" in list_src
     assert '["admin"]' in list_src  # bypass_roles rendered into the intersection call
 
@@ -680,8 +728,19 @@ def test_entity_with_only_rls_owner_field_gets_pass_not_empty_create(tmp_path):
     empty class body, which ast.parse below would catch) or wrongly including a
     `user_id` field that should have been dropped.
     """
-    from app.erd.schema import ERDConfig, ProjectMeta, DatabaseSpec, EntitySpec, RelationshipDecl, RLSSpec, RLSIdentitySource, ServiceDecl, AuthSpec
-    from app.erd.schema import ModelField, FieldType
+    from app.erd.schema import (
+        AuthSpec,
+        DatabaseSpec,
+        EntitySpec,
+        ERDConfig,
+        FieldType,
+        ModelField,
+        ProjectMeta,
+        RelationshipDecl,
+        RLSIdentitySource,
+        RLSSpec,
+        ServiceDecl,
+    )
 
     erd = ERDConfig(
         project=ProjectMeta(name="RlsPassCheck", version="1.0.0"),
@@ -846,7 +905,7 @@ def test_cascade_join_is_emitted_inside_the_owner_id_guard(tmp_path):
         ("def get_order_line_discount_by_id(", "\ndef get_all_order_line_discounts("),
         ("def get_all_order_line_discounts(", "\ndef update_order_line_discount("),
     ):
-        src = repo_src[repo_src.index(start_marker):repo_src.index(end_marker)]
+        src = repo_src[repo_src.index(start_marker) : repo_src.index(end_marker)]
         guard_idx = src.index("    if owner_id is not None:\n")
         join_lines = [ln for ln in src.splitlines() if ".join(" in ln]
         assert join_lines, f"{start_marker}: expected at least one join line"
@@ -871,7 +930,7 @@ def test_async_cascade_join_is_emitted_inside_the_owner_id_guard(tmp_path):
         ("async def get_order_item_by_id(", "\nasync def get_all_order_items("),
         ("async def get_all_order_items(", "\nasync def update_order_item("),
     ):
-        src = repo_src[repo_src.index(start_marker):repo_src.index(end_marker)]
+        src = repo_src[repo_src.index(start_marker) : repo_src.index(end_marker)]
         guard_idx = src.index("    if owner_id is not None:\n")
         join_lines = [ln for ln in src.splitlines() if ".join(" in ln]
         assert join_lines, f"{start_marker}: expected at least one join line"
@@ -896,10 +955,12 @@ def test_bypass_caller_can_reach_a_cascade_row_whose_linking_fk_is_null(tmp_path
     db_path = tmp_path / "rls_cascade_orphan_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -937,7 +998,13 @@ def test_bypass_caller_can_reach_a_cascade_row_whose_linking_fk_is_null(tmp_path
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -965,10 +1032,12 @@ def test_rls_lines_pascal_case_entity_names_like_every_other_model_reference(tmp
         assert "purchase_order." not in line, f"raw entity name leaked into: {line!r}"
         assert "order_item." not in line, f"raw entity name leaked into: {line!r}"
 
-    root_src = repo_src[repo_src.index("def get_purchase_order_by_id("):repo_src.index("\ndef get_all_purchase_orders(")]
+    root_src = repo_src[
+        repo_src.index("def get_purchase_order_by_id(") : repo_src.index("\ndef get_all_purchase_orders(")
+    ]
     assert "query = query.filter(PurchaseOrder.user_id == owner_id)" in root_src
 
-    cascade_src = repo_src[repo_src.index("def get_order_item_by_id("):repo_src.index("\ndef get_all_order_items(")]
+    cascade_src = repo_src[repo_src.index("def get_order_item_by_id(") : repo_src.index("\ndef get_all_order_items(")]
     assert "query = query.join(PurchaseOrder, OrderItem.purchase_order_id == PurchaseOrder.id)" in cascade_src
     assert "query = query.filter(PurchaseOrder.user_id == owner_id)" in cascade_src
 
@@ -987,10 +1056,12 @@ def test_non_pascal_case_rls_functions_actually_execute_against_a_real_db(tmp_pa
     db_path = tmp_path / "rls_non_pascal_test.db"
 
     import sys
+
     sys.path.insert(0, str(codebase_dir))
     try:
         import importlib
         import os
+
         os.environ["DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
         os.environ["JWT_SECRET"] = "test-only-secret-do-not-use-in-production"
         os.environ["DEBUG"] = "True"
@@ -1026,7 +1097,13 @@ def test_non_pascal_case_rls_functions_actually_execute_against_a_real_db(tmp_pa
         os.environ.pop("JWT_SECRET", None)
         os.environ.pop("DEBUG", None)
         for mod_name in list(sys.modules):
-            if mod_name == "database" or mod_name.startswith("database.") or mod_name == "modules" or mod_name.startswith("modules.") or mod_name == "config":
+            if (
+                mod_name == "database"
+                or mod_name.startswith("database.")
+                or mod_name == "modules"
+                or mod_name.startswith("modules.")
+                or mod_name == "config"
+            ):
                 sys.modules.pop(mod_name, None)
 
 
@@ -1046,7 +1123,7 @@ def test_header_sourced_root_create_validates_that_the_owner_row_exists(tmp_path
     service_src = (codebase_dir / "modules" / "orders" / "service.py").read_text(encoding="utf-8")
     ast.parse(service_src)
 
-    create_src = service_src[service_src.index("def create_order("):service_src.index("\n    def list_orders(")]
+    create_src = service_src[service_src.index("def create_order(") : service_src.index("\n    def list_orders(")]
     assert "if repo.get_tenant_by_id(db, owner_id) is None:" in create_src
     assert 'raise ValueError(f"Tenant {owner_id} not found")' in create_src
     # the check runs BEFORE the owner column is stamped
@@ -1056,7 +1133,9 @@ def test_header_sourced_root_create_validates_that_the_owner_row_exists(tmp_path
     erd_auth = load_erd(f"{FIXTURES}/rls_root_owned.yml")
     auth_dir = CodeGenerator(output_dir=str(tmp_path / "auth_user")).generate_project(translate(erd_auth), force=True)
     auth_service_src = (auth_dir / "modules" / "orders" / "service.py").read_text(encoding="utf-8")
-    auth_create_src = auth_service_src[auth_service_src.index("def create_order("):auth_service_src.index("\n    def list_orders(")]
+    auth_create_src = auth_service_src[
+        auth_service_src.index("def create_order(") : auth_service_src.index("\n    def list_orders(")
+    ]
     assert "get_user_by_id" not in auth_create_src
 
 
@@ -1075,12 +1154,12 @@ def test_list_service_method_excludes_the_rls_link_filter_kwarg(tmp_path):
     service_src = (codebase_dir / "modules" / "ordering" / "service.py").read_text(encoding="utf-8")
     ast.parse(service_src)
 
-    list_src = service_src[service_src.index("def list_order_items("):service_src.index("\n    def get_order_item(")]
+    list_src = service_src[service_src.index("def list_order_items(") : service_src.index("\n    def get_order_item(")]
     assert "product_id: Optional[int] = None," in list_src  # ordinary FK filter kept
     assert "order_id" not in list_src  # the rls link is gone from the service signature too
     assert "repo.get_all_order_items(db, skip=skip, limit=limit, product_id=product_id, owner_id=owner_id)" in list_src
 
     # the repo layer still exposes the FK filter - only the service/route layers hide it
     repo_src = (codebase_dir / "database" / "repo.py").read_text(encoding="utf-8")
-    repo_list_src = repo_src[repo_src.index("def get_all_order_items("):repo_src.index("\ndef update_order_item(")]
+    repo_list_src = repo_src[repo_src.index("def get_all_order_items(") : repo_src.index("\ndef update_order_item(")]
     assert "order_id: Optional[int] = None," in repo_list_src

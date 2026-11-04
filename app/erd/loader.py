@@ -7,7 +7,18 @@ import yaml
 from pydantic import ValidationError
 
 from app.erd.field_types import enum_class_name, pascal_case
-from app.erd.schema import ERDConfig, EntitySpec, FieldType, InviteSpec, JWTSpec, RegistrationSpec, WebhookSpec
+from app.erd.schema import (
+    EntitySpec,
+    ERDConfig,
+    FieldType,
+    InviteSpec,
+    JWTSpec,
+    RegistrationSpec,
+    RelationshipDecl,
+    RLSSpec,
+    WebhookSpec,
+)
+from app.utils.file_ops import safe_dir_name
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
 MODE_GATED_RESERVED_USER_FIELDS = {
@@ -77,8 +88,8 @@ def _validate_external_auth(erd: ERDConfig) -> None:
                 )
 
 
-def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec) -> None:
-    source = entity.rls.identity_source
+def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec, rls: RLSSpec, owner_rel: RelationshipDecl) -> None:
+    source = rls.identity_source
     if source.type == "jwt_claim":
         if not (erd.auth.enabled and erd.auth.mode == "external"):
             raise ERDValidationError(
@@ -86,26 +97,24 @@ def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec) -> None:
                 "auth.enabled: true and auth.mode: external (there is no verified-claims "
                 "source to read from otherwise)."
             )
-    elif entity.rls.owner_match_field is not None:
+    elif rls.owner_match_field is not None:
         raise ERDValidationError(
-            f"Entity '{entity.name}': rls.owner_match_field is only valid when "
-            "rls.identity_source.type: jwt_claim."
+            f"Entity '{entity.name}': rls.owner_match_field is only valid when rls.identity_source.type: jwt_claim."
         )
 
-    if entity.rls.owner_match_field is not None:
-        owner_rel = next((r for r in entity.relationships if r.owner), None)
+    if rls.owner_match_field is not None:
         owner_entity = next((e for e in erd.entities if e.name == owner_rel.target), None)
         if owner_entity is None:
             return  # a different pre-existing validator reports the unknown-target error
-        match_field = next((f for f in owner_entity.fields if f.name == entity.rls.owner_match_field), None)
+        match_field = next((f for f in owner_entity.fields if f.name == rls.owner_match_field), None)
         if match_field is None:
             raise ERDValidationError(
-                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"Entity '{entity.name}': rls.owner_match_field '{rls.owner_match_field}' "
                 f"does not name a field on owner entity '{owner_entity.name}'."
             )
         if not match_field.unique:
             raise ERDValidationError(
-                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"Entity '{entity.name}': rls.owner_match_field '{rls.owner_match_field}' "
                 f"on entity '{owner_entity.name}' must be declared 'unique: true' - a non-unique "
                 "match field makes 'the owner row' ambiguous, which is exactly the shape of bug "
                 "that turns into a cross-tenant data leak."
@@ -113,7 +122,7 @@ def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec) -> None:
         allowed_types = {"string", "uuid", "integer", "bigint"}
         if match_field.type.value not in allowed_types:
             raise ERDValidationError(
-                f"Entity '{entity.name}': rls.owner_match_field '{entity.rls.owner_match_field}' "
+                f"Entity '{entity.name}': rls.owner_match_field '{rls.owner_match_field}' "
                 f"on entity '{owner_entity.name}' has type '{match_field.type.value}', not one of "
                 f"{sorted(allowed_types)} - not a sensible identity-matching value."
             )
@@ -181,7 +190,7 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
                     f"{', '.join(erd.rbac.roles) or 'none declared'}."
                 )
 
-        _validate_jwt_claim_rls(erd, entity)
+        _validate_jwt_claim_rls(erd, entity, entity.rls, owner_rel)
 
     for entity in erd.entities:
         cascade_rel = next((r for r in entity.relationships if r.cascades_ownership), None)
@@ -226,9 +235,29 @@ def _validate_rls(erd: ERDConfig, known_entities: set) -> None:
 
 
 _RESERVED_IMPORT_NAMES = {
-    "Column", "Integer", "String", "Boolean", "DateTime", "Date", "Float", "Text", "JSON",
-    "ForeignKey", "Table", "BigInteger", "Enum", "Numeric", "Uuid", "Decimal", "UUID",
-    "BaseModel", "Field", "Optional", "Any", "List", "Base",
+    "Column",
+    "Integer",
+    "String",
+    "Boolean",
+    "DateTime",
+    "Date",
+    "Float",
+    "Text",
+    "JSON",
+    "ForeignKey",
+    "Table",
+    "BigInteger",
+    "Enum",
+    "Numeric",
+    "Uuid",
+    "Decimal",
+    "UUID",
+    "BaseModel",
+    "Field",
+    "Optional",
+    "Any",
+    "List",
+    "Base",
 }
 
 
@@ -270,6 +299,14 @@ def _validate_semantics(erd: ERDConfig) -> None:
     if not erd.entities:
         raise ERDValidationError("ERD must declare at least one entity")
 
+    try:
+        safe_dir_name(erd.project.name)
+    except ValueError:
+        raise ERDValidationError(
+            f"project.name '{erd.project.name}' cannot be used as a directory name - "
+            "use letters, digits or spaces (for example 'MyService')."
+        ) from None
+
     if erd.rbac.enabled and not erd.auth.enabled:
         raise ERDValidationError(
             "rbac.enabled requires auth.enabled: true (RBAC needs a way to identify the current user)"
@@ -309,9 +346,7 @@ def _validate_semantics(erd: ERDConfig) -> None:
             "are then merged into the auto-injected auth fields)."
         )
 
-    known_entities = set(entity_names) | (
-        {"User"} if erd.auth.enabled and erd.auth.mode == "builtin" else set()
-    )
+    known_entities = set(entity_names) | ({"User"} if erd.auth.enabled and erd.auth.mode == "builtin" else set())
 
     _validate_rls(erd, known_entities)
 
@@ -319,9 +354,7 @@ def _validate_semantics(erd: ERDConfig) -> None:
         field_names = [f.name for f in entity.fields]
         dup_fields = sorted({n for n in field_names if field_names.count(n) > 1})
         if dup_fields:
-            raise ERDValidationError(
-                f"Entity '{entity.name}': duplicate field name(s): {', '.join(dup_fields)}"
-            )
+            raise ERDValidationError(f"Entity '{entity.name}': duplicate field name(s): {', '.join(dup_fields)}")
 
         if entity.name != "User":
             pk_fields = [f.name for f in entity.fields if f.primary_key]
@@ -441,15 +474,11 @@ def _validate_services(erd: ERDConfig) -> None:
 
         for ent_name in svc.entities:
             if ent_name not in entity_names:
-                raise ERDValidationError(
-                    f"Service '{svc.name}': references unknown entity '{ent_name}'"
-                )
+                raise ERDValidationError(f"Service '{svc.name}': references unknown entity '{ent_name}'")
             assigned.setdefault(ent_name, []).append(svc.name)
 
     if len(auth_services) > 1:
-        raise ERDValidationError(
-            f"Entity 'User' is assigned to multiple services: {', '.join(sorted(auth_services))}"
-        )
+        raise ERDValidationError(f"Entity 'User' is assigned to multiple services: {', '.join(sorted(auth_services))}")
 
     unassigned = sorted(entity_names - set(assigned.keys()))
     if unassigned:
@@ -462,9 +491,7 @@ def _validate_services(erd: ERDConfig) -> None:
 
     multiply_assigned = {name: svcs for name, svcs in assigned.items() if len(svcs) > 1}
     if multiply_assigned:
-        details = "; ".join(
-            f"'{name}' in ({', '.join(svcs)})" for name, svcs in sorted(multiply_assigned.items())
-        )
+        details = "; ".join(f"'{name}' in ({', '.join(svcs)})" for name, svcs in sorted(multiply_assigned.items()))
         raise ERDValidationError(
             f"Entity(ies) assigned to multiple services: {details} — each entity must belong to "
             "exactly one service. Remove it from all but one service's 'entities:' list."

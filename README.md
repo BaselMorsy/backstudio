@@ -206,10 +206,9 @@ backstudio/
 │   ├── utils/                    # checksum and file-ops helpers
 │   └── tests/                      # the test suite
 ├── examples/                  # example ERD files, incl. blog.yml used throughout this README
-├── docs/superpowers/            # design specs and implementation plans
 ├── docs-site/                      # mkdocs-material documentation site source (see below)
 ├── assets/                            # logo and other README images
-├── .github/workflows/                   # CI (runs the test suite on push/PR)
+├── .github/workflows/                   # CI: lint, format, mypy, tests on Python 3.11-3.13, docs, build
 ├── install.sh / install.bat               # one-shot installers — see "Install" above
 ├── mkdocs.yml                               # docs-site config — see "Documentation site" below
 └── pyproject.toml

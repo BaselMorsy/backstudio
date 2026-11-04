@@ -25,7 +25,7 @@ def prune_unused_imports(source: str) -> str:
     Templates emit a fixed import header that each project only partly needs. Names inside annotation-like
     string constants are kept, so forward references and ``__all__`` entries survive; prose in
     docstrings does not count as a use.
-    Source that does not parse is returned unchanged.
+    Imports marked ``noqa`` are left alone. Source that does not parse is returned unchanged.
     """
     try:
         tree = ast.parse(source)
@@ -48,6 +48,8 @@ def prune_unused_imports(source: str) -> str:
             continue
         if any(a.name == "*" for a in node.names):
             continue
+        if "noqa" in "".join(lines[node.lineno - 1 : node.end_lineno]):
+            continue  # kept on purpose, e.g. imported only for its side effects
         kept = [a for a in node.names if _bound_name(a) in used]
         if len(kept) == len(node.names):
             continue

@@ -37,3 +37,8 @@ def test_unparseable_source_is_returned_unchanged():
 def test_a_name_mentioned_only_in_a_docstring_is_not_a_use():
     src = 'from m import notify\n\n\ndef f():\n    """Reports what notify() returns."""\n'
     assert "import" not in prune_unused_imports(src)
+
+
+def test_noqa_marked_imports_are_kept_for_their_side_effects():
+    src = "import database.models  # noqa: F401  registers models\n"
+    assert prune_unused_imports(src) == src

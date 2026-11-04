@@ -2,7 +2,7 @@
 
 {% set is_async = project.database_config.async_mode %}
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -42,6 +42,16 @@ class AuthService:
 
     def verify_password(self, plain_password: str, password_hash: str) -> bool:
         return pwd_context.verify(plain_password, password_hash)
+
+    def token_expiry(self, token: str) -> datetime:
+        """The token's own exp claim as a naive UTC datetime - what notify() reports as expires_at."""
+        return datetime.fromtimestamp(jwt.get_unverified_claims(token)["exp"], tz=timezone.utc).replace(tzinfo=None)
+
+    def _check_roles(self, roles: List[str]) -> None:
+        allowed = {{ project.rbac_roles|tojson }}
+        unknown = [r for r in roles if r not in allowed]
+        if unknown:
+            raise ValueError(f"Unknown role(s): {', '.join(unknown)} — declared roles are: {', '.join(allowed)}")
 
     def _create_token(self, subject: str, expires_delta: timedelta, token_type: str, extra_claims: Optional[dict] = None) -> str:
         expire = datetime.utcnow() + expires_delta
@@ -138,7 +148,7 @@ class AuthService:
 {% endif %}
 {% if project.registration_mode == 'email_verification' %}
         token = self.create_email_verification_token(user.id)
-        expires_at = datetime.utcnow() + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES)
+        expires_at = self.token_expiry(token)
         {{ 'await ' if is_async }}notify(event="email_verification", email=user.email, token=token, expires_at=expires_at)
 {% endif %}
         return user
@@ -237,14 +247,11 @@ class AuthService:
         return user_id
 
 {% if project.invite_enabled %}
-    {{ 'async ' if is_async }}def create_invite_token(self, user_id: int) -> str:
+    def create_invite_token(self, user_id: int) -> str:
         return self._create_token(str(user_id), timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES), "invite")
 
     {{ 'async ' if is_async }}def invite_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, roles: List[str]) -> "tuple[User, bool]":
-        allowed = {{ project.rbac_roles|tojson }}
-        unknown = [r for r in roles if r not in allowed]
-        if unknown:
-            raise ValueError(f"Unknown role(s): {', '.join(unknown)} — declared roles are: {', '.join(allowed)}")
+        self._check_roles(roles)
 {% if is_async %}
         existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 {% else %}
@@ -275,8 +282,8 @@ class AuthService:
         db.commit()
         db.refresh(user)
 {% endif %}
-        token = {{ 'await ' if is_async }}self.create_invite_token(user.id)
-        expires_at = datetime.utcnow() + timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES)
+        token = self.create_invite_token(user.id)
+        expires_at = self.token_expiry(token)
         delivered = {{ 'await ' if is_async }}notify(event="invite", email=user.email, token=token, expires_at=expires_at)
         return user, delivered
 
@@ -312,8 +319,8 @@ class AuthService:
             return None
         if user.password_hash is not None:
             raise ValueError("Invite already accepted")
-        token = {{ 'await ' if is_async }}self.create_invite_token(user.id)
-        expires_at = datetime.utcnow() + timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES)
+        token = self.create_invite_token(user.id)
+        expires_at = self.token_expiry(token)
         return {{ 'await ' if is_async }}notify(event="invite", email=user.email, token=token, expires_at=expires_at)
 {% endif %}
 
@@ -347,10 +354,7 @@ class AuthService:
 {% endif %}
 
     {{ 'async ' if is_async }}def set_user_roles(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, user_id: int, roles: List[str]) -> Optional[User]:
-        allowed = {{ project.rbac_roles|tojson }}
-        unknown = [r for r in roles if r not in allowed]
-        if unknown:
-            raise ValueError(f"Unknown role(s): {', '.join(unknown)} — declared roles are: {', '.join(allowed)}")
+        self._check_roles(roles)
         user = {{ 'await ' if is_async }}self.get_user(db, user_id)
         if user is None:
             return None

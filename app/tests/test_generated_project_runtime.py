@@ -1847,6 +1847,73 @@ def test_forgot_password_prints_structured_notify_payload_not_free_text(tmp_path
             assert "token=" in captured.out
 
 
+def _assert_printed_expiry_matches_token_exp(printed: str, event: str) -> None:
+    """The expires_at handed to notify() must be the token's own exp, not a second clock read."""
+    import re
+    from datetime import datetime, timezone
+
+    from jose import jwt as jose_jwt
+
+    line = next(ln for ln in printed.splitlines() if f"event={event}" in ln)
+    token = re.search(r"token=(\S+)", line).group(1)
+    expires_at = datetime.fromisoformat(re.search(r"expires_at=(\S+)", line).group(1))
+    token_exp = datetime.fromtimestamp(jose_jwt.get_unverified_claims(token)["exp"], tz=timezone.utc).replace(tzinfo=None)
+    assert expires_at == token_exp
+
+
+def test_notify_expires_at_equals_the_tokens_own_exp_for_invite_and_password_reset(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    codebase_dir = _generate_invite_app(tmp_path, monkeypatch, "expiry_exact_test.db")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            client.post("/auth/register", json={"email": "admin@example.com", "password": "supersecret123"})
+            admin_headers = {"Authorization": f"Bearer {client.post('/auth/login', json={'email': 'admin@example.com', 'password': 'supersecret123'}).json()['access_token']}"}
+            capfd.readouterr()
+
+            client.post("/auth/invite", json={"email": "new@example.com", "roles": ["member"]}, headers=admin_headers)
+            _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "invite")
+
+            client.post("/auth/resend-invite", json={"email": "new@example.com"}, headers=admin_headers)
+            _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "invite")
+
+            client.post("/auth/forgot-password", json={"email": "admin@example.com"})
+            _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "password_reset")
+
+
+def test_notify_expires_at_equals_the_tokens_own_exp_for_email_verification(tmp_path, monkeypatch, isolated_sys_path, capfd):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_email_verification.yml")
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(translate(erd), force=True)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'expiry_verify_test.db').as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-only-secret-do-not-use-in-production")
+    monkeypatch.setenv("DEBUG", "True")
+    with _GeneratedProjectImporter(codebase_dir):
+        import importlib
+
+        server_module = importlib.import_module("server")
+        from fastapi.testclient import TestClient
+
+        with TestClient(server_module.app) as client:
+            capfd.readouterr()
+            client.post("/auth/register", json={"email": "someone@example.com", "password": "supersecret123"})
+            _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "email_verification")
+            client.post("/auth/resend-verification", json={"email": "someone@example.com"})
+            _assert_printed_expiry_matches_token_exp(capfd.readouterr().out, "email_verification")
+
+
+def test_generated_auth_service_has_one_role_check_and_a_sync_invite_token_helper(tmp_path):
+    erd = load_erd(f"{FIXTURES}/builtin_invite_async.yml")
+    codebase_dir = CodeGenerator(output_dir=str(tmp_path / "workspace")).generate_project(translate(erd), force=True)
+    service_src = (codebase_dir / "modules" / "auth" / "service.py").read_text(encoding="utf-8")
+
+    assert service_src.count("Unknown role(s)") == 1
+    assert "async def create_invite_token" not in service_src
+    assert "def create_invite_token" in service_src
+
+
 def _generate_invite_app(tmp_path, monkeypatch, db_name):
     erd = load_erd(f"{FIXTURES}/builtin_invite.yml")
     state = translate(erd)

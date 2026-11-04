@@ -6,7 +6,7 @@
   **Generate a production-ready FastAPI backend from a YAML file describing your data model.**
 
   [![Tests](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml/badge.svg)](https://github.com/BaselMorsy/backstudio/actions/workflows/tests.yml)
-  [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+  [![Python 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
   [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 </div>

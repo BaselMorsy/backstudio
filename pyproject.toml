@@ -2,16 +2,16 @@
 name = "backstudio"
 version = "2.0.0"
 description = "BackStudio - The Ultimate Backend Code Generator"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11"
 dependencies = [
-    "fastapi==0.104.1",
-    "uvicorn[standard]==0.24.0",
-    "pydantic==2.5.0",
-    "pydantic-settings==2.1.0",
-    "jinja2==3.1.2",
-    "typer==0.9.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "jinja2>=3.1.4",
+    "typer>=0.12",
     "click>=8.1,<8.2",
-    "pyyaml==6.0.1",
+    "pyyaml>=6.0.2",
     "passlib[bcrypt]==1.7.4",
     # Pinned explicitly: passlib 1.7.4 misdetects bcrypt>=4.1 (removed
     # bcrypt.__about__), which breaks hash_password() at runtime. Generated
@@ -21,8 +21,8 @@ dependencies = [
     # a password through the generated auth service).
     "bcrypt==4.0.1",
     "python-jose[cryptography]==3.3.0",
-    "alembic==1.13.0",
-    "sqlalchemy==2.0.23",
+    "alembic>=1.14",
+    "sqlalchemy>=2.0.36",
     # Pinned explicitly rather than left to SQLAlchemy's own platform-gated dependency
     # marker: verified that marker (platform_machine == 'AMD64'/'aarch64'/'x86_64'/...)
     # doesn't match on Windows-on-ARM64 hosts running an x64-emulated Python 3.12

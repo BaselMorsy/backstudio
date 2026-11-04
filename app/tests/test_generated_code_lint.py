@@ -11,7 +11,7 @@ from app.services.code_generator import CodeGenerator
 FIXTURES = Path("app/tests/fixtures/erd")
 
 
-def test_no_generated_project_has_undefined_names_or_syntax_errors(tmp_path):
+def test_no_generated_project_has_unused_imports_undefined_names_or_syntax_errors(tmp_path):
     generated = 0
     for fixture in sorted(FIXTURES.glob("*.yml")):
         try:
@@ -32,7 +32,7 @@ def test_no_generated_project_has_undefined_names_or_syntax_errors(tmp_path):
             "--isolated",
             "--no-cache",
             "--select",
-            "F821,F822,F823,E9",
+            "F401,F821,F822,F823,E9",
             "--output-format",
             "concise",
         ],

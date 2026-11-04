@@ -8,6 +8,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.erd import field_types
 from app.utils.file_ops import ensure_directory, safe_dir_name
+from app.utils.imports import prune_unused_imports
 
 _DEFAULT_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -118,6 +119,8 @@ class CodeGenerator:
     def _write_file(self, path: Path, content: str) -> None:
         """Write content to file, ensuring directory exists"""
         ensure_directory(path.parent)
+        if path.suffix == ".py" and path.name != "__init__.py":
+            content = prune_unused_imports(content)
         path.write_text(content, encoding="utf-8")
 
     def generate_project(self, project_state: Dict[str, Any], force: bool = False) -> Path:

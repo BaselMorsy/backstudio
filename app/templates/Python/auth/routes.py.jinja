@@ -1,6 +1,7 @@
 """{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} routes"""
 
 {% set is_async = project.database_config.async_mode %}
+{% set self_service_fields = project.security_config.user_fields|selectattr('self_service')|list %}
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,9 @@ from database.models import User
 from .schemas import (
     ForgotPasswordRequest, MessageResponse, RefreshRequest, ResetPasswordRequest,
     SetUserRolesRequest, TokenResponse, UserLogin, UserRegister, UserResponse,
+{% if self_service_fields %}
+    UpdateProfileRequest,
+{% endif %}
 {% if project.registration_mode == 'email_verification' %}
     ResendVerificationRequest, VerifyEmailRequest,
 {% endif %}
@@ -46,7 +50,7 @@ _service = get_{{ project.auth_module_name }}_service()
     service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
 ) -> UserResponse:
     try:
-        user = {{ 'await ' if is_async }}service.register_user(db, payload.email, payload.password)
+        user = {{ 'await ' if is_async }}service.register_user(db, payload.email, payload.password{% if self_service_fields %}, profile=payload.model_dump(exclude={"email", "password"}){% endif %})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return user
@@ -94,6 +98,21 @@ _service = get_{{ project.auth_module_name }}_service()
 {{ 'async ' if is_async }}def me(current_user: User = Depends(_service.get_current_user)) -> UserResponse:
     return current_user
 
+
+{% if self_service_fields %}
+@router.patch("/me", response_model=UserResponse)
+{{ 'async ' if is_async }}def update_me(
+    payload: UpdateProfileRequest,
+    current_user: User = Depends(_service.get_current_user),
+    db: {{ 'AsyncSession' if is_async else 'Session' }} = Depends(get_db),
+    service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
+) -> UserResponse:
+    try:
+        return {{ 'await ' if is_async }}service.update_profile(db, current_user, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+{% endif %}
 
 @router.post("/forgot-password", response_model=MessageResponse)
 {{ 'async ' if is_async }}def forgot_password(
@@ -259,7 +278,7 @@ _service = get_{{ project.auth_module_name }}_service()
     service: AuthService = Depends(get_{{ project.auth_module_name }}_service),
 ) -> InviteResponse:
     try:
-        user, webhook_delivered = {{ 'await ' if is_async }}service.invite_user(db, payload.email, payload.roles)
+        user, webhook_delivered = {{ 'await ' if is_async }}service.invite_user(db, payload.email, payload.roles{% if self_service_fields %}, profile=payload.model_dump(exclude={"email", "roles"}){% endif %})
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return InviteResponse(**UserResponse.model_validate(user).model_dump(), webhook_delivered=webhook_delivered)

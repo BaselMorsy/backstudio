@@ -1,12 +1,43 @@
 """{{ project.name|replace('"', '\\"') }} - Auth schemas"""
 
+{% set user_fields = project.security_config.user_fields %}
+{% set self_service_fields = user_fields|selectattr('self_service')|list %}
+{% macro user_field(f, mode) -%}
+{%- set base = py_type(f) -%}
+{%- set annotation = ('Optional[' ~ base ~ ']') if (f.nullable or mode == 'update') else base -%}
+{%- set has_default = f.default is not none -%}
+{%- if mode == 'update' -%}{%- set default = 'None' -%}
+{%- elif mode == 'response' -%}{%- set default = 'None' if f.nullable else none -%}
+{%- else -%}{%- set default = py_default(f) if has_default else ('None' if f.nullable else '...') -%}{%- endif -%}
+{%- set options = (['max_length=' ~ f.max_length] if (mode != 'response' and f.type == 'string' and f.max_length) else []) + (['description=' ~ (f.description|python_value)] if f.description else []) -%}
+{{ '    ' }}{{ f.name }}: {{ annotation }}{% if options %} = Field({{ default if default is not none else '...' }}, {{ options|join(', ') }}){% elif default is not none %} = {{ default }}{% endif %}
+{%- endmacro %}
+{% if user_fields %}
+{% set type_imports = schema_type_imports(user_fields) %}
+from typing import Any, List, Optional
+from datetime import date, datetime
+{% if type_imports.decimal %}
+from decimal import Decimal
+{% endif %}
+{% if type_imports.uuid %}
+from uuid import UUID
+{% endif %}
+from pydantic import BaseModel, EmailStr, Field
+{% if type_imports.enums %}
+from database.enums import {{ type_imports.enums|join(', ') }}
+{% endif %}
+{% else %}
 from typing import List
 from pydantic import BaseModel, EmailStr, Field
+{% endif %}
 
 
 class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
+{% for f in self_service_fields %}
+{{ user_field(f, 'create') }}
+{% endfor %}
 
 
 class UserLogin(BaseModel):
@@ -45,6 +76,9 @@ class ResetPasswordRequest(BaseModel):
 class InviteUserRequest(BaseModel):
     email: EmailStr
     roles: List[str] = Field(..., min_length=1)
+{% for f in self_service_fields %}
+{{ user_field(f, 'create') }}
+{% endfor %}
 
 
 class AcceptInviteRequest(BaseModel):
@@ -72,11 +106,23 @@ class ResendVerificationRequest(BaseModel):
 
 
 {% endif %}
+{% if self_service_fields %}
+class UpdateProfileRequest(BaseModel):
+    """Fields a user may change about themselves (PATCH /me); omitted fields are left alone."""
+{% for f in self_service_fields %}
+{{ user_field(f, 'update') }}
+{% endfor %}
+
+
+{% endif %}
 class UserResponse(BaseModel):
     id: int
     email: str
     roles: List[str] = []
     is_active: bool
+{% for f in user_fields %}
+{{ user_field(f, 'response') }}
+{% endfor %}
 {% if project.registration_mode == 'email_verification' %}
     is_verified: bool
 {% elif project.registration_mode == 'admin_approval' %}

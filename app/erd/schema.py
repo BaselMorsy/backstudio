@@ -61,6 +61,10 @@ class ModelField(BaseModel):
     values: Optional[List[str]] = Field(None, description="Allowed values (enum fields only)")
     timezone: Optional[bool] = Field(None, description="Timezone-aware (datetime fields only; unset means true)")
     description: Optional[str] = Field(None, description="Human-readable description (any type)")
+    self_service: bool = Field(
+        default=True,
+        description="User entity only: whether a user may set this field at registration and via PATCH /me",
+    )
 
     @model_validator(mode="after")
     def type_specific_attributes_are_valid(self) -> "ModelField":

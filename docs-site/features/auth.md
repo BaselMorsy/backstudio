@@ -236,6 +236,40 @@ A key that parses as *some* valid PEM but is the wrong family or curve for the c
 algorithm (an RSA key under `ES256`, a P-256 key under `ES384`) fails at startup with a clear
 message, not as an unhandled 500 the first time a route tries to sign with it.
 
+## Custom fields on `User`
+
+Fields you declare on the `User` entity are real parts of the signup flow, not just extra columns:
+
+```yaml
+entities:
+  - name: User
+    fields:
+      - {name: name, type: string, nullable: false, max_length: 200}
+      - {name: nickname, type: string, nullable: true, unique: true}
+      - {name: plan, type: string, nullable: false, default: free, self_service: false}
+```
+
+| Where | What happens |
+|---|---|
+| `POST /register` | `UserRegister` accepts every declared field with its type, `max_length` and nullability. A missing required field is a **422**, never a 500. |
+| `POST /invite` | `InviteUserRequest` carries them too, so an invited user's row is complete (and valid) from the start. `/accept-invite` still only sets the password. |
+| `PATCH /me` | An authenticated user changes their own declared fields. Only fields that are sent change; setting a required field to `null` is a 400. Reserved fields (`email`, `roles`, `is_active`, `is_approved`/`is_verified`, `password_hash`, timestamps) can never be changed here, even if sent. |
+| `UserResponse` | `/me`, `/users` and the register/invite responses include every declared field. |
+
+A value that violates a `unique` declared field is a **400** ("One of the supplied values is already in use").
+
+**Internal fields.** Every declared field is self-service by default, which means a user can set it
+about themselves. For data users must not control (a plan, a flag, a tenant), set
+`self_service: false`: the field is left out of register, invite and `PATCH /me`, and still appears in
+`UserResponse`. Because nothing at signup can supply it, `validate` requires it to be `nullable` or to
+have a `default`. Backstudio has no admin route that sets internal fields; set them from your own code,
+a migration, or another service.
+
+This is also what feeds [extra claims in access tokens](#extra-claims-in-access-tokens): a claim like
+`name: name` is only useful because the field is now populated at registration.
+
+Projects that declare no `User` fields get none of this: the generated auth code is unchanged.
+
 ## Extra claims in access tokens
 
 A verifying service often needs more about the person than `sub` and `roles` — an email to match

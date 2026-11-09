@@ -472,6 +472,13 @@ def _build_user_entity(erd: ERDConfig, enums: List[Dict[str, Any]]) -> Dict[str,
     }
 
 
+def _declared_user_fields(erd: ERDConfig, data_models: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The fields the ERD declares on `User` (beyond the auto-injected auth fields), as template dicts."""
+    declared = {f.name for e in erd.entities if e.name == "User" for f in e.fields}
+    user = data_models.get("User")
+    return [f for f in user["fields"] if f["name"] in declared] if user else []
+
+
 def _resolve_rbac(erd: ERDConfig, entity: EntitySpec) -> Dict[str, List[str]]:
     resolved: Dict[str, List[str]] = {}
     overrides = entity.endpoints.rbac.model_dump(exclude_none=True) if entity.endpoints.rbac else {}
@@ -632,6 +639,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "jwt_kid": erd.auth.jwt.kid,
             "jwt_is_asymmetric": erd.auth.jwt.algorithm in ASYMMETRIC_JWT_ALGORITHMS,
             "jwt_claims": [{"claim": claim, "field": field} for claim, field in erd.auth.jwt.claims.items()],
+            "user_fields": _declared_user_fields(erd, data_models),
         }
 
     external_auth_config = None

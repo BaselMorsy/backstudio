@@ -43,7 +43,8 @@ database:
   username: str
   use_env_vars: bool = true            # generated project reads connection settings from env vars
   pool_size: int = 10
-  echo: bool = false                   # log all executed SQL
+  echo: bool = false                   # log all executed SQL - the only switch; generated DEBUG
+                                       #   (default false) does not enable it (hashes would be logged)
   async_mode: bool = false             # async SQLAlchemy stack (asyncpg/aiomysql/aiosqlite)
 
 # postgresql/mysql: default DATABASE_URL is built from type/username/host/port/database_name
@@ -185,7 +186,11 @@ fields:                                                     # ModelField
     values: [str, ...]            # enum only; required, unique, e.g. [PENDING, POSTED]
     timezone: bool                # datetime only; default true (timezone-aware)
     description: str              # any type: SQL comment, OpenAPI description, diagram note
+    self_service: bool = true     # User entity only: may a user set this at registration, invite and
+                                   #   PATCH /me? false = internal; then nullable or a default is required
 
+# fields declared on the auth User entity appear in UserRegister, InviteUserRequest (admin invite),
+#   UpdateProfileRequest (PATCH /me) and UserResponse; reserved auth fields never do.
 # enum values: letters/digits/underscores, start with a letter, no Python keywords and no
 # names that shadow str/Enum attributes (class, None, name, value, count, ...). UPPER_SNAKE is safe.
 # decimal on SQLite is stored as REAL; exactness is guaranteed on PostgreSQL/MySQL.

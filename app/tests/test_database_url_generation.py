@@ -118,6 +118,6 @@ def test_readme_env_example_matches_the_drivers_in_requirements(tmp_path):
     assert "DATABASE_URL=mysql+pymysql://" in mysql_readme and "DATABASE_URL=mysql://" not in mysql_readme
     assert "DB_PASSWORD" in mysql_readme
     pg_readme = (_generate(tmp_path / "p", "db_url_postgres_sync") / "README.md").read_text(encoding="utf-8")
-    assert "DATABASE_URL=postgresql://user:password@db.internal:5433/dana finance" in pg_readme
+    assert "DATABASE_URL=postgresql+psycopg2://user:password@db.internal:5433/dana finance" in pg_readme
     sqlite_readme = (_generate(tmp_path / "s", "valid_minimal") / "README.md").read_text(encoding="utf-8")
     assert "DB_PASSWORD" not in sqlite_readme

@@ -645,7 +645,7 @@ def test_sync_readme_database_url_unchanged(tmp_path):
     codebase_dir = generator.generate_project(state, force=True)
 
     readme_src = (codebase_dir / "README.md").read_text(encoding="utf-8")
-    assert "DATABASE_URL=postgresql://user:password@localhost/shophub_db" in readme_src
+    assert "DATABASE_URL=postgresql+psycopg2://user:password@localhost/shophub_db" in readme_src
     assert "+asyncpg" not in readme_src
     assert "+aiomysql" not in readme_src
     assert "+aiosqlite" not in readme_src

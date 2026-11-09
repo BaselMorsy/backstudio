@@ -89,7 +89,8 @@ whether `bypass_roles` is set, and — for `list`/`read` only — `read_scope`:
   owner_id = None if set(current_user.roles or []).intersection(entity.rls.bypass_roles) else current_user.id
   ```
 
-- **`jwt_claim`** (requires `auth.mode: external` — see [Authentication → External JWT
+- **`jwt_claim`** (requires `auth.mode: external`; a backstudio-generated issuer can stamp the claim
+  with [`auth.jwt.claims`](auth.md#extra-claims-in-access-tokens) — see [Authentication → External JWT
   verification](auth.md#external-jwt-verification-authmode-external)): resolved from a claim on
   the verified token, mirroring `auth_user`'s bypass ternary exactly rather than `header`'s. A
   claim is read from `current_user.claims`, not a request header, so there's nothing for a client

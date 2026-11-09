@@ -17,3 +17,6 @@ docs/2026-09-28-limitations-found-by-dana-finance.md
 coverage.xml
 .coverage
 dist/
+
+# change requests from other services - local only.
+CR/

@@ -236,6 +236,63 @@ A key that parses as *some* valid PEM but is the wrong family or curve for the c
 algorithm (an RSA key under `ES256`, a P-256 key under `ES384`) fails at startup with a clear
 message, not as an unhandled 500 the first time a route tries to sign with it.
 
+## Extra claims in access tokens
+
+A verifying service often needs more about the person than `sub` and `roles` — an email to match
+an invitation, a name to show who changed something — without calling back to the issuer. Declare
+the extra claims on the issuer, each taken from a field of the `User` row:
+
+```yaml
+auth:
+  enabled: true
+  jwt:
+    claims:          # claim name -> User field
+      email: email
+      name: name     # a custom field you declared on the User entity
+```
+
+and read them on the verifying service:
+
+```yaml
+auth:
+  enabled: true
+  mode: external
+  external:
+    # ...
+    claims:
+      email: email                              # principal attribute -> token claim
+      name: {claim: name, required: true}       # 401 if the token has no "name"
+```
+
+```python
+principal.email   # "alice@acme.com", or None if the token carries no email claim
+```
+
+**The two mappings run in opposite directions.** On the issuer the key is the *claim* and the value
+is a `User` *field*. On the verifier the key is the `Principal` *attribute* and the value is the
+*claim* (like the existing `subject`/`roles` keys). Where the names are equal, as above, the
+direction is invisible; where they differ, it matters.
+
+Rules worth knowing:
+
+- Only **access tokens** carry them. Refresh, password-reset, email-verification and invite tokens
+  are unchanged.
+- Values are read from the database at login **and at refresh**, so a renamed user shows the new
+  name from the next refresh. An already-issued access token keeps the old value until it expires
+  (30 minutes by default).
+- A field that is `NULL` leaves its claim **out** of the token; a verifier then sees `None` (not a
+  401, unless that claim is `required`).
+- `validate` rejects a reserved claim name (`sub`, `exp`, `iat`, `nbf`, `type`, `roles`, `iss`,
+  `aud`, `jti`, `pwd_fp`), a field that doesn't exist on `User`, `password_hash`, and fields whose
+  type has no unambiguous token encoding. Only `string`, `text`, `integer`, `bigint`, `float` and
+  `boolean` fields can be mapped.
+- **Tokens are signed, not encrypted.** Anyone who holds a token can read every claim in it, so map
+  only data the holder is allowed to see. Backstudio can't tell which of your custom fields are
+  sensitive; keeping those out of `claims` is up to you.
+- An email in a token is only as trustworthy as your registration policy. With
+  `registration.mode: open` anyone can register any address; under `admin_approval` or
+  `email_verification`, no account receives a token until it has been approved or verified.
+
 ## External JWT verification (`auth.mode: external`)
 
 `auth.mode: external` is for the case where some *other* service already issues JWTs (an identity

@@ -1,9 +1,10 @@
 """Pydantic schema for the YAML ERD configuration consumed by the backstudio CLI."""
 
+import keyword
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.erd.field_types import is_safe_enum_member, to_decimal, to_uuid
 
@@ -158,6 +159,7 @@ class JWTSpec(BaseModel):
     private_key_path_env_var: Optional[str] = None
     public_key_path_env_var: Optional[str] = None
     kid: str = "default"
+    claims: Dict[str, str] = Field(default_factory=dict)  # access-token claim name -> User field
 
     @model_validator(mode="after")
     def key_paths_match_algorithm_family(self) -> "JWTSpec":
@@ -217,9 +219,50 @@ class RegistrationSpec(BaseModel):
     mode: Literal["open", "email_verification", "admin_approval"] = "open"
 
 
+class ExternalClaimRef(BaseModel):
+    claim: str
+    required: bool = False
+
+
+# Principal members an extra mapping must not shadow (`roles` and `subject` are the built-in keys).
+PRINCIPAL_RESERVED_ATTRIBUTES = frozenset({"id", "claims"})
+
+
 class ExternalAuthClaims(BaseModel):
+    """Maps Principal attributes to token claims; `subject` and `roles` are built in, any other key is extra."""
+
+    model_config = ConfigDict(extra="allow")
+
     subject: str = "sub"
     roles: str = "roles"
+
+    @model_validator(mode="after")
+    def extras_are_valid_attribute_mappings(self) -> "ExternalAuthClaims":
+        for name, value in (self.model_extra or {}).items():
+            if not name.isidentifier() or keyword.iskeyword(name):
+                raise ValueError(
+                    f"auth.external.claims.{name}: '{name}' cannot be used as a Principal attribute - "
+                    "use a valid Python identifier."
+                )
+            if name in PRINCIPAL_RESERVED_ATTRIBUTES:
+                raise ValueError(
+                    f"auth.external.claims.{name}: '{name}' is already a Principal member - "
+                    f"pick another attribute name (reserved: {sorted(PRINCIPAL_RESERVED_ATTRIBUTES)})."
+                )
+            if not isinstance(value, (str, dict)):
+                raise ValueError(
+                    f"auth.external.claims.{name}: expected a claim name or {{claim: <name>, required: <bool>}}."
+                )
+            if isinstance(value, dict):
+                ExternalClaimRef(**value)  # raises with a field-level message if malformed
+        return self
+
+    @property
+    def extras(self) -> Dict[str, ExternalClaimRef]:
+        refs: Dict[str, ExternalClaimRef] = {}
+        for name, value in (self.model_extra or {}).items():
+            refs[name] = ExternalClaimRef(claim=value) if isinstance(value, str) else ExternalClaimRef(**value)
+        return refs
 
 
 class ExternalAuthSpec(BaseModel):

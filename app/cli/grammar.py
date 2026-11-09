@@ -79,6 +79,14 @@ auth:
     refresh_token_expiration_minutes: int = 10080          # 7 days
     email_verification_expiration_minutes: int = 1440      # 24 hours
     password_reset_expiration_minutes: int = 30
+    claims:                         # optional; extra claims stamped on every ACCESS token
+      <claim>: <User field>         #   e.g. email: email, name: name (a field you declared
+                                     #   on User). Read from the DB at login and at refresh.
+                                     #   Field must be string|text|integer|bigint|float|boolean.
+                                     #   A NULL field leaves the claim out. Never password_hash;
+                                     #   reserved names: sub exp iat nbf type roles iss aud jti
+                                     #   pwd_fp. Tokens are signed, not encrypted - anyone
+                                     #   holding one can read these.
   registration:                     # mode: builtin only
     mode: open | email_verification | admin_approval        # default "open"
   invite:                           # mode: builtin only; requires rbac.enabled: true (an
@@ -106,7 +114,14 @@ auth:
     claims:
       subject: str = "sub"
       roles: str = "roles"
+      <attribute>: <claim>          # optional extras, e.g. email: email - becomes
+                                     #   principal.<attribute>; None when the token lacks it
+      <attribute>: {claim: <claim>, required: bool}   # required: true -> 401 when missing
+                                     # direction here is attribute -> claim (the opposite of
+                                     #   the issuer's auth.jwt.claims, which is claim -> field)
 
+# auth.jwt.claims (issuer) and auth.external.claims (verifier) are the two halves of passing
+#   extra identity data (email, name, ...) in the access token. They map in opposite directions.
 # invite.enabled requires rbac.enabled: true, same reason as admin_approval below - the
 #   invite/resend-invite endpoints are admin-only RBAC-gated, and inviting someone always
 #   assigns a role. An invited user exists (with a role) but has password_hash: NULL until
@@ -230,7 +245,8 @@ rls:                                                         # RLSSpec, required
 
 # auth_user: owner = the JWT-authenticated User (requires auth.enabled: true)
 # header: owner = the request header's value (no auth.enabled/User needed)
-# jwt_claim: owner = a claim on the verified external JWT (requires auth.mode: external)
+# jwt_claim: owner = a claim on the verified external JWT (requires auth.mode: external); a
+#   backstudio issuer can stamp that claim with auth.jwt.claims (see `backstudio grammar auth`)
 # bypass_roles: mirrors auth_user for jwt_claim (create always stamps the caller's own
 #   claim, bypass or not - a claim isn't client-suppliable per-request like a header is);
 #   for header identity, list/read/update/delete are bypassed, create still requires

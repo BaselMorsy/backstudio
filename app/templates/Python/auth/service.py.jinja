@@ -76,6 +76,30 @@ class AuthService:
             {% endif %}
         )
 
+{% if project.security_config.jwt_claims %}
+    def user_claims(self, user: User) -> dict:
+        """The extra access-token claims declared in auth.jwt.claims, read off the User row.
+
+        A claim whose field is None is left out of the token.
+        """
+        claims = {
+{% for c in project.security_config.jwt_claims %}
+            {{ c.claim|tojson }}: user.{{ c.field }},
+{% endfor %}
+        }
+        return {name: value for name, value in claims.items() if value is not None}
+
+    def create_access_token(self, user_id: int, roles: Optional[List[str]] = None, claims: Optional[dict] = None) -> str:
+        # roles is carried so an external verifier (which has no User table of its own to
+        # look up) can make RBAC decisions - this service's own RBAC never reads it back off
+        # the token, it always re-queries the User row via get_current_user above.
+        return self._create_token(
+            str(user_id),
+            timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+            "access",
+            extra_claims={**(claims or {}), "roles": roles or []},
+        )
+{% else %}
     def create_access_token(self, user_id: int, roles: Optional[List[str]] = None) -> str:
         # roles is carried so an external verifier (which has no User table of its own to
         # look up) can make RBAC decisions - this service's own RBAC never reads it back off
@@ -86,6 +110,7 @@ class AuthService:
             "access",
             extra_claims={"roles": roles or []},
         )
+{% endif %}
 
     def create_refresh_token(self, user_id: int) -> str:
         return self._create_token(str(user_id), timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES), "refresh")

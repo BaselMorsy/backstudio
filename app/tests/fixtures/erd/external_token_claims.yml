@@ -12,6 +12,7 @@ auth:
     verification: shared_secret
     secret_env_var: SHARED_SECRET
     issuer: authservice
+    audience: external-token-claims
     algorithms: [HS256]
     claims:
       email: email

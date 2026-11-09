@@ -47,7 +47,7 @@ Pydantic's own per-field validation.
 | `username` | `Optional[str]` | default `None` | Database username. |
 | `use_env_vars` | `bool` | default `True` | Whether the generated project reads connection settings from environment variables rather than hardcoding them. |
 | `pool_size` | `int` | default `10` | SQLAlchemy connection pool size. |
-| `echo` | `bool` | default `False` | Whether SQLAlchemy logs all executed SQL (`echo=True`). |
+| `echo` | `bool` | default `False` | Whether SQLAlchemy logs all executed SQL (`echo=True`). This is the only switch for SQL logging: the generated project's `DEBUG` setting (default `False`) does not turn it on, because the log would include credential material such as password hashes. |
 | `async_mode` | `bool` | default `False` | When `true`, generates an async SQLAlchemy engine/session stack (`asyncpg`/`aiomysql`/`aiosqlite` driver, async-aware Alembic `env.py` using `run_sync()`, async repository/service/route layers) instead of the default sync stack. See [Async database support](../features/async.md) for the full generated-code mechanics. |
 
 **Default `DATABASE_URL` for `postgresql`/`mysql`:** unlike `sqlite` (which always defaults to a
@@ -308,6 +308,7 @@ Each entry is an `EntitySpec`:
 | `values` | `Optional[List[str]]` | default `None` | `enum` only, required and non-empty: the allowed values, unique. Each must start with a letter, contain only letters/digits/underscores, not be a Python keyword, and not shadow a `str`/`Enum` attribute (`name`, `value`, `mro`, `count`, `upper`, ...). UPPER_SNAKE_CASE is always safe. |
 | `timezone` | `Optional[bool]` | default `None` | `datetime` only. Unset or `true` generates `DateTime(timezone=True)`; `false` opts a field out. The auth-injected `User` timestamps are always naive. |
 | `description` | `Optional[str]` | default `None` | Any type. Becomes the SQL column `comment`, the Pydantic `Field(description=...)` (so it appears in OpenAPI) and a note in `backstudio visualize`. |
+| `self_service` | `bool` | default `True` | `User` entity only. Whether a user may set this field at registration (`POST /register`), when invited (`POST /invite`), and afterwards via `PATCH /me`. `false` keeps it out of all three, so it must be `nullable` or have a `default` (otherwise no signup could ever succeed). Setting it on any other entity is rejected. See [Custom fields on `User`](../features/auth.md#custom-fields-on-user). |
 
 **Cross-field rules (schema-level, `ModelField.type_specific_attributes_are_valid`):**
 
@@ -318,6 +319,7 @@ Each entry is an `EntitySpec`:
 - `enum` requires a non-empty, unique `values` list, each value identifier-safe (see above); `values` is rejected on every other type.
 - An `enum` field's `default`, if set, must be one of its `values`.
 - `timezone` is only valid on `datetime` fields.
+- `self_service` is only valid on fields of the `User` entity, and `self_service: false` requires `nullable: true` or a `default`.
 
 **Type notes:** `bigint` maps to `BigInteger` (a primary key uses a SQLite-friendly variant so it
 autoincrements); FK columns and many-to-many association columns take their type from the

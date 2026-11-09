@@ -219,7 +219,7 @@ class Settings(BaseSettings):
     {% endif %}
 
     # Application
-    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     APP_NAME: str = {{ project.name|tojson }}
     APP_VERSION: str = "{{ project.version }}"
 

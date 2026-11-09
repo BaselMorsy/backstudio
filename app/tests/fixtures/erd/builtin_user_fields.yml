@@ -1,0 +1,37 @@
+project:
+  name: BuiltinUserFields
+  version: "1.0.0"
+  description: Builtin auth with declared User fields (self-service and internal), claims and invites
+
+database:
+  type: sqlite
+  database_name: builtin_user_fields.db
+
+auth:
+  enabled: true
+  jwt:
+    secret_env_var: JWT_SECRET
+    algorithm: HS256
+    claims:
+      name: name
+  invite:
+    enabled: true
+
+rbac:
+  enabled: true
+  roles: [admin, member]
+
+entities:
+  - name: User
+    fields:
+      - {name: name, type: string, nullable: false, max_length: 20}
+      - {name: nickname, type: string, nullable: true, unique: true}
+      - {name: plan, type: string, nullable: false, default: free, self_service: false}
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

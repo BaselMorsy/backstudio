@@ -1,6 +1,8 @@
 """{{ project.name|replace('"', '\\"') }} - {{ project.auth_module_name }} service"""
 
 {% set is_async = project.database_config.async_mode %}
+{% set user_fields = project.security_config.user_fields %}
+{% set self_service_fields = user_fields|selectattr('self_service')|list %}
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -9,6 +11,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+{% if user_fields %}
+from sqlalchemy.exc import IntegrityError
+{% endif %}
 {% if is_async %}
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +133,38 @@ class AuthService:
             extra_claims={"pwd_fp": pwd_fp},
         )
 
-    {{ 'async ' if is_async }}def register_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, password: str) -> User:
+{% if user_fields %}
+    {{ 'async ' if is_async }}def _commit_unique(self, db: {{ 'AsyncSession' if is_async else 'Session' }}) -> None:
+        """Commit; a unique-constraint violation on a declared User field becomes a ValueError the route returns as a 400."""
+        try:
+            {{ 'await ' if is_async }}db.commit()
+        except IntegrityError:
+            {{ 'await ' if is_async }}db.rollback()
+            raise ValueError("One of the supplied values is already in use")
+
+{% endif %}
+{% if self_service_fields %}
+    {{ 'async ' if is_async }}def update_profile(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, user: User, changes: dict) -> User:
+        """Apply a user's changes to their own declared fields. Reserved auth fields (email, roles, ...) are never touched."""
+        allowed = {{ self_service_fields|map(attribute='name')|list|tojson }}
+        required = {{ self_service_fields|selectattr('nullable', 'false')|map(attribute='name')|list|tojson }}
+        for name, value in changes.items():
+            if name not in allowed:
+                raise ValueError(f"{name} cannot be changed")
+            if value is None and name in required:
+                raise ValueError(f"{name} cannot be null")
+            setattr(user, name, value)
+        user.updated_at = datetime.utcnow()
+        {{ 'await ' if is_async }}self._commit_unique(db)
+{% if is_async %}
+        await db.refresh(user)
+{% else %}
+        db.refresh(user)
+{% endif %}
+        return user
+
+{% endif %}
+    {{ 'async ' if is_async }}def register_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, password: str{% if self_service_fields %}, profile: Optional[dict] = None{% endif %}) -> User:
 {% if is_async %}
         existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 {% else %}
@@ -153,6 +189,9 @@ class AuthService:
         {% endif %}
 
         user = User(
+{% if self_service_fields %}
+            **(profile or {}),
+{% endif %}
             email=email,
             password_hash=self.hash_password(password),
             roles=roles,
@@ -164,12 +203,21 @@ class AuthService:
             updated_at=datetime.utcnow(),
         )
         db.add(user)
+{% if user_fields %}
+        {{ 'await ' if is_async }}self._commit_unique(db)
+{% if is_async %}
+        await db.refresh(user)
+{% else %}
+        db.refresh(user)
+{% endif %}
+{% else %}
 {% if is_async %}
         await db.commit()
         await db.refresh(user)
 {% else %}
         db.commit()
         db.refresh(user)
+{% endif %}
 {% endif %}
 {% if project.registration_mode == 'email_verification' %}
         token = self.create_email_verification_token(user.id)
@@ -275,7 +323,7 @@ class AuthService:
     def create_invite_token(self, user_id: int) -> str:
         return self._create_token(str(user_id), timedelta(minutes=settings.INVITE_TOKEN_EXPIRE_MINUTES), "invite")
 
-    {{ 'async ' if is_async }}def invite_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, roles: List[str]) -> "tuple[User, bool]":
+    {{ 'async ' if is_async }}def invite_user(self, db: {{ 'AsyncSession' if is_async else 'Session' }}, email: str, roles: List[str]{% if self_service_fields %}, profile: Optional[dict] = None{% endif %}) -> "tuple[User, bool]":
         self._check_roles(roles)
 {% if is_async %}
         existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
@@ -287,6 +335,9 @@ class AuthService:
                 raise ValueError("Email already registered")
             raise ValueError("An invite is already pending for this email - use resend-invite")
         user = User(
+{% if self_service_fields %}
+            **(profile or {}),
+{% endif %}
             email=email,
             password_hash=None,
             roles=roles,
@@ -300,12 +351,21 @@ class AuthService:
             updated_at=datetime.utcnow(),
         )
         db.add(user)
+{% if user_fields %}
+        {{ 'await ' if is_async }}self._commit_unique(db)
+{% if is_async %}
+        await db.refresh(user)
+{% else %}
+        db.refresh(user)
+{% endif %}
+{% else %}
 {% if is_async %}
         await db.commit()
         await db.refresh(user)
 {% else %}
         db.commit()
         db.refresh(user)
+{% endif %}
 {% endif %}
         token = self.create_invite_token(user.id)
         expires_at = self.token_expiry(token)

@@ -9,7 +9,7 @@ from config import settings
 # Create async database engine
 engine = create_async_engine(settings.DATABASE_URL,
     pool_pre_ping=True,
-    echo=settings.DEBUG,
+    echo={{ project.database_config.echo|python_value }},
 )
 
 # Create async session factory
@@ -53,7 +53,7 @@ from config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    echo=settings.DEBUG,
+    echo={{ project.database_config.echo|python_value }},
 )
 
 # Create session factory

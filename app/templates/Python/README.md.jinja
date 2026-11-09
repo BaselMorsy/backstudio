@@ -31,7 +31,7 @@ This project was automatically generated from your specifications. The code is d
 │   ├── {{ project.auth_module_name }}/
 │   │   ├── schemas.py       # Auth request/response schemas
 │   │   ├── service.py       # Auth business logic (edit this)
-│   │   └── routes.py        # register/login/refresh/me endpoints
+│   │   └── routes.py        # register/login/refresh/me endpoints{% if project.security_config and project.security_config.user_fields|selectattr("self_service")|list %} (+ PATCH /me for your User fields){% endif %}
 {% endif %}
 {% endif %}
 {% if project.rbac_enabled %}
@@ -88,7 +88,7 @@ DATABASE_URL=mysql+aiomysql://user:password@{{ project.database_config.host or '
 DATABASE_URL=sqlite+aiosqlite:///./app.db
 {% endif %}
 {% else %}
-DATABASE_URL={{ 'mysql+pymysql' if project.database_config.type == 'mysql' else project.database_config.type }}://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
+DATABASE_URL={{ 'mysql+pymysql' if project.database_config.type == 'mysql' else ('postgresql+psycopg2' if project.database_config.type == 'postgresql' else project.database_config.type) }}://user:password@{{ project.database_config.host or 'localhost' }}{% if project.database_config.port %}:{{ project.database_config.port }}{% endif %}/{{ project.database_config.database_name }}
 {% endif %}
 {% else %}
 DATABASE_URL=sqlite:///./app.db
@@ -105,7 +105,8 @@ DATABASE_URL=sqlite:///./app.db
 {% endif %}
 
 # Application
-DEBUG=True
+# DEBUG is False unless you set it; set database.echo in the ERD to log SQL.
+DEBUG=False
 ```
 
 {% if project.security_config and project.security_config.auth_strategy == 'jwt' %}

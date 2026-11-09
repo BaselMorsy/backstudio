@@ -440,6 +440,19 @@ def _validate_semantics(erd: ERDConfig) -> None:
                     "field(s) on your declared 'User' entity."
                 )
 
+        for f in entity.fields:
+            if "self_service" in f.model_fields_set and entity.name != "User":
+                raise ERDValidationError(
+                    f"Entity '{entity.name}': field '{f.name}' sets self_service, which only applies to "
+                    "fields of the auth 'User' entity (it controls what a user may set about themselves)."
+                )
+            if entity.name == "User" and not f.self_service and not f.nullable and f.default is None:
+                raise ERDValidationError(
+                    f"Entity 'User': field '{f.name}' has self_service: false but is neither nullable nor given a "
+                    "default - nothing could ever supply a value at registration, so every signup would fail. "
+                    "Make it nullable or give it a default."
+                )
+
         for rel in entity.relationships:
             if rel.target == entity.name and rel.cardinality.value == "many-to-many":
                 raise ERDValidationError(

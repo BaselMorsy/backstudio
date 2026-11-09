@@ -156,7 +156,8 @@ route.
 
 - **Authentication** — optional JWT auth (`/auth/register`, `/auth/login`, `/auth/refresh`,
   `/auth/me`), bcrypt password hashing, email verification, password reset, and admin user
-  management (listing, deactivating, and role management for users). Admins can also invite a
+  management (listing, deactivating, and role management for users). Fields you declare on `User`
+  are accepted at registration and invite, editable via `PATCH /auth/me`, and returned in responses. Admins can also invite a
   user with a role (`/auth/invite`, `/auth/accept-invite`, `/auth/resend-invite`), and
   invite/verification/reset tokens are handed to your own email service through a webhook
   (`auth.webhook`) - backstudio never sends email itself. Services can also issue tokens for

@@ -45,10 +45,19 @@ _last_fetch_at: Optional[float] = None
 
 
 class Principal:
+{% if project.external_auth_config.extra_claims %}
+{% for c in project.external_auth_config.extra_claims %}
+    {{ c.name }}: Optional[Any]
+{% endfor %}
+
+{% endif %}
     def __init__(self, id: str, roles: List[str], claims: Dict[str, Any]) -> None:
         self.id = id
         self.roles = roles
         self.claims = claims
+{% for c in project.external_auth_config.extra_claims %}
+        self.{{ c.name }} = claims.get({{ c.claim|tojson }})
+{% endfor %}
 
 
 {% if project.external_auth_config.verification == 'jwks' %}
@@ -146,6 +155,13 @@ async def _verify_token(token: str) -> Principal:
     subject = claims.get(_SUBJECT_CLAIM)
     if subject is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token is missing the subject claim")
+{% for c in project.external_auth_config.extra_claims if c.required %}
+    if claims.get({{ c.claim|tojson }}) is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is missing the {{ c.claim }} claim",
+        )
+{% endfor %}
     return Principal(id=subject, roles=_normalize_roles(claims.get(_ROLES_CLAIM)), claims=claims)
 
 

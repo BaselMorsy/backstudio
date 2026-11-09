@@ -631,6 +631,7 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "jwt_public_key_path_env_var": erd.auth.jwt.public_key_path_env_var,
             "jwt_kid": erd.auth.jwt.kid,
             "jwt_is_asymmetric": erd.auth.jwt.algorithm in ASYMMETRIC_JWT_ALGORITHMS,
+            "jwt_claims": [{"claim": claim, "field": field} for claim, field in erd.auth.jwt.claims.items()],
         }
 
     external_auth_config = None
@@ -646,6 +647,10 @@ def translate(erd: ERDConfig) -> Dict[str, Any]:
             "audience": external.audience,
             "algorithms": list(external.algorithms),
             "claims": {"subject": external.claims.subject, "roles": external.claims.roles},
+            "extra_claims": [
+                {"name": name, "claim": ref.claim, "required": ref.required}
+                for name, ref in external.claims.extras.items()
+            ],
         }
 
     state = {

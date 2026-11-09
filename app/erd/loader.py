@@ -21,6 +21,22 @@ from app.erd.schema import (
 from app.utils.file_ops import safe_dir_name
 
 RESERVED_USER_FIELDS = {"id", "email", "password_hash", "roles", "is_active", "created_at", "updated_at"}
+# Token claims that already mean something to this service or to a verifying library (pwd_fp is the
+# password-reset token's own password fingerprint; nbf is enforced by python-jose).
+RESERVED_TOKEN_CLAIMS = {"sub", "exp", "iat", "nbf", "type", "roles", "iss", "aud", "jti", "pwd_fp"}
+# Field types with an unambiguous JSON encoding in a JWT.
+CLAIM_FIELD_TYPES = {"string", "text", "integer", "bigint", "float", "boolean"}
+BUILTIN_USER_FIELD_TYPES = {
+    "id": "integer",
+    "email": "string",
+    "password_hash": "string",
+    "roles": "json",
+    "is_active": "boolean",
+    "created_at": "datetime",
+    "updated_at": "datetime",
+    "is_verified": "boolean",
+    "is_approved": "boolean",
+}
 MODE_GATED_RESERVED_USER_FIELDS = {
     "email_verification": {"is_verified"},
     "admin_approval": {"is_approved"},
@@ -86,6 +102,44 @@ def _validate_external_auth(erd: ERDConfig) -> None:
                     "no builtin User table to merge it into (identity comes entirely from the "
                     "verified token)."
                 )
+
+
+def _validate_token_claims(erd: ERDConfig) -> None:
+    claims = erd.auth.jwt.claims
+    if not claims:
+        return
+    if not erd.auth.enabled:
+        raise ERDValidationError("auth.jwt.claims requires auth.enabled: true.")
+    if erd.auth.mode != "builtin":
+        raise ERDValidationError(
+            "auth.jwt.claims only applies to auth.mode: builtin - an external verifier issues no tokens. "
+            "Use auth.external.claims to read extra claims from the tokens it verifies."
+        )
+    declared = next((e for e in erd.entities if e.name == "User"), None)
+    mode_gated = MODE_GATED_RESERVED_USER_FIELDS.get(erd.auth.registration.mode, set())
+    field_types = {name: t for name, t in BUILTIN_USER_FIELD_TYPES.items() if name in RESERVED_USER_FIELDS | mode_gated}
+    for f in declared.fields if declared else []:
+        field_types[f.name] = f.type.value
+    for claim, field in claims.items():
+        if claim in RESERVED_TOKEN_CLAIMS:
+            raise ERDValidationError(
+                f"auth.jwt.claims.{claim}: '{claim}' is a reserved token claim "
+                f"({', '.join(sorted(RESERVED_TOKEN_CLAIMS))}) - choose another claim name."
+            )
+        if field == "password_hash":
+            raise ERDValidationError(
+                f"auth.jwt.claims.{claim}: 'password_hash' can never be put in a token (tokens are readable by "
+                "whoever holds them)."
+            )
+        if field not in field_types:
+            raise ERDValidationError(
+                f"auth.jwt.claims.{claim}: User has no field '{field}' (available: {', '.join(sorted(field_types))})."
+            )
+        if field_types[field] not in CLAIM_FIELD_TYPES:
+            raise ERDValidationError(
+                f"auth.jwt.claims.{claim}: User.{field} has type '{field_types[field]}', which has no unambiguous "
+                f"token encoding - map a field of type {', '.join(sorted(CLAIM_FIELD_TYPES))}."
+            )
 
 
 def _validate_jwt_claim_rls(erd: ERDConfig, entity: EntitySpec, rls: RLSSpec, owner_rel: RelationshipDecl) -> None:
@@ -345,6 +399,8 @@ def _validate_semantics(erd: ERDConfig) -> None:
             "Either rename this entity, or set auth.enabled: true (declared fields on 'User' "
             "are then merged into the auto-injected auth fields)."
         )
+
+    _validate_token_claims(erd)
 
     known_entities = set(entity_names) | ({"User"} if erd.auth.enabled and erd.auth.mode == "builtin" else set())
 

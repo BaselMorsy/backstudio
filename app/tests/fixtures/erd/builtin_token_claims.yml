@@ -1,0 +1,38 @@
+project:
+  name: BuiltinTokenClaims
+
+database:
+  type: sqlite
+  database_name: builtin_token_claims.db
+
+auth:
+  enabled: true
+  registration:
+    mode: admin_approval
+  jwt:
+    claims:
+      email: email
+      name: name
+
+rbac:
+  enabled: true
+  roles: [admin]
+  default_permissions:
+    create: [admin]
+    list: [admin]
+    read: [admin]
+    update: [admin]
+    delete: [admin]
+
+entities:
+  - name: User
+    fields:
+      - {name: name, type: string, nullable: true}
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

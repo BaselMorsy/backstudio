@@ -1,0 +1,29 @@
+project:
+  name: ExternalTokenClaims
+
+database:
+  type: sqlite
+  database_name: external_token_claims.db
+
+auth:
+  enabled: true
+  mode: external
+  external:
+    verification: shared_secret
+    secret_env_var: SHARED_SECRET
+    issuer: authservice
+    audience: external-token-claims
+    algorithms: [HS256]
+    claims:
+      email: email
+      name: {claim: name, required: true}
+
+entities:
+  - name: Widget
+    fields:
+      - {name: id, type: integer, primary_key: true}
+      - {name: label, type: string}
+
+services:
+  - name: widgets
+    entities: [Widget]

@@ -96,6 +96,7 @@ Verified directly against `app/erd/schema.py` (lines 79–85):
 | `refresh_token_expiration_minutes` | `int` | default `10080` | Refresh token lifetime, in minutes (10080 minutes = 7 days). |
 | `email_verification_expiration_minutes` | `int` | default `1440` | Email-verification token lifetime, in minutes (1440 minutes = 24 hours). |
 | `password_reset_expiration_minutes` | `int` | default `30` | Password-reset token lifetime, in minutes. |
+| `claims` | `Dict[str, str]` | default `{}` | Extra claims stamped on **access tokens only**, as `claim name: User field` (e.g. `email: email`, `name: name`). Values are read from the database at login and refresh; a `NULL` field leaves its claim out. Rejected at validate time: a reserved claim name (`sub`, `exp`, `iat`, `nbf`, `type`, `roles`, `iss`, `aud`, `jti`, `pwd_fp`), a field that isn't on `User`, `password_hash`, and any field that isn't `string`, `text`, `integer`, `bigint`, `float` or `boolean`. Tokens are signed, not encrypted. See [Extra claims in access tokens](../features/auth.md#extra-claims-in-access-tokens). |
 
 These are the 4 JWT lifetime fields the model declares: `expiration_minutes`,
 `refresh_token_expiration_minutes`, `email_verification_expiration_minutes`, and
@@ -203,7 +204,7 @@ reasoning).
 | `issuer` | `str` | required | Expected `iss` claim; tokens with any other issuer (or none at all) are rejected. |
 | `audience` | `Optional[str]` | default `None` | Expected `aud` claim. When unset, audience validation is skipped entirely (no `audience=` kwarg passed to `jwt.decode(...)`) — `backstudio validate` emits a warning in this case, since an unset audience is easy to omit by accident. |
 | `algorithms` | `List[str]` | default `["RS256"]` | Accepted signing algorithms. Must be non-empty; **asymmetric only** under `verification: "jwks"`, **HS256/HS384/HS512 only** under `verification: "shared_secret"` — see the validator below. |
-| `claims` | `ExternalAuthClaims` | default `ExternalAuthClaims()` | Which claim names carry the subject and roles — see below. |
+| `claims` | `ExternalAuthClaims` | default `ExternalAuthClaims()` | Which claim names carry the subject and roles, plus any extra claims to expose on `Principal` — see below. |
 
 **Schema-level validator (`ExternalAuthSpec.algorithms_and_fields_match_verification`):** a
 `model_validator` (not a single-field validator, since it branches on `verification` against
@@ -221,6 +222,7 @@ would open an alg-confusion forgery path. Under `verification: "shared_secret"`:
 |---|---|---|---|
 | `subject` | `str` | default `"sub"` | Claim name read as the verified `Principal.id`. |
 | `roles` | `str` | default `"roles"` | Claim name read as `Principal.roles` (normalized to a `List[str]`: a single string becomes a one-element list, absent becomes `[]`). |
+| *any other key* | `str` or `{claim: str, required: bool}` | optional | Maps a `Principal` attribute to a token claim (`email: email` gives `principal.email`). The value is `None` when the token lacks the claim; with `required: true` a missing claim is a 401. The key must be a valid Python identifier and must not be `id` or `claims`. Direction is attribute → claim, the opposite of the issuer's `auth.jwt.claims`. |
 
 ## `rbac` (`RBACSpec`)
 
